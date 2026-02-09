@@ -1,0 +1,42 @@
+# 源群组/频道列表（需要监控的）
+# 支持的格式：
+# - 群组 ID（负数）：-100123456789
+# - 频道用户名：@channel_name
+# - 私聊用户名：@username
+source_chats:
+  - -100123456789  # 示例群组 ID
+  # - "@example_channel"  # 示例频道
+
+# 目标群组/频道（转发到的位置）
+# 可以是群组 ID、频道用户名或私聊用户名
+target_chat: -100987654321
+
+# 消息过滤规则
+filters:
+  # 正则表达式列表（任意匹配即通过）
+  # 为空则不使用正则过滤
+  regex_patterns:
+    - "\\[重要\\].*"
+    - "紧急通知.*"
+  
+  # 关键词列表（任意匹配即通过）
+  # 为空则不使用关键词过滤
+  keywords:
+    - "关键词1"
+    - "关键词2"
+  
+  # 过滤模式：whitelist（白名单）或 blacklist（黑名单）
+  # whitelist: 只转发匹配规则的消息
+  # blacklist: 转发所有消息，除了匹配规则的
+  mode: whitelist
+
+# 转发选项
+forwarding:
+  # 是否保留原始格式（转发而非复制）
+  preserve_format: true
+  
+  # 是否添加来源信息
+  add_source_info: true
+  
+  # 转发延迟（秒），避免触发限制
+  delay: 0.5

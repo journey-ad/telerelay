@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  telegram-forwarder:
+    build: .
+    container_name: telegram-forwarder
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # 配置文件（需要先创建）
+      - ./config/.env:/app/.env:ro
+      - ./config/config.yaml:/app/config/config.yaml
+      # 会话文件持久化
+      - ./sessions:/app/sessions
+      # 日志持久化
+      - ./logs:/app/logs
+    environment:
+      - TZ=Asia/Shanghai
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/api/bot/status')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

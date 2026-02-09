@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# 配置文件（包含敏感信息）
+.env
+config/config.yaml
+
+# Telegram 会话文件
+sessions/*.session
+sessions/*.session-journal
+
+# 日志文件
+logs/*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Docker
+.dockerignore
