@@ -8,9 +8,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # 配置文件（需要先创建）
-      - ./config/.env:/app/.env:ro
-      - ./config/config.yaml:/app/config/config.yaml
+      # 配置目录（需要先创建 config.yaml）
+      - ./config:/app/config
       # 会话文件持久化
       - ./sessions:/app/sessions
       # 日志持久化

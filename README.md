@@ -33,9 +33,10 @@
 
 2. **配置环境变量**
    ```bash
-   cp config/.env.example .env
-   # 编辑 .env 文件，填入你的 API_ID 和 API_HASH
-   nano .env
+   # 在项目根目录的 config 目录创建 .env 文件
+   cp config/.env.example config/.env
+   # 编辑配置文件，填入你的 API_ID 和 API_HASH
+   nano config/.env
    ```
 
 3. **配置转发规则**
