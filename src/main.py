@@ -1,19 +1,18 @@
 """
-主程序入口
-同时启动 Telegram Bot 和 FastAPI Web 服务
+Telegram 消息转发工具 - 主入口
+使用 Gradio 提供 WebUI 界面
 """
 import sys
-import uvicorn
-from src.config import get_config, reload_config
+from src.webui import create_ui
+from src.config import get_config
 from src.logger import setup_logger, get_logger
-from src.api.app import create_app
 
 # 设置日志
 logger = setup_logger()
 
 
 def main():
-    """主函数"""
+    """启动应用"""
     try:
         # 加载配置
         config = get_config()
@@ -25,20 +24,20 @@ def main():
         # 重新设置日志级别
         setup_logger(level=config.log_level)
         
-        # 创建 FastAPI 应用
-        app = create_app()
+        # 创建 Gradio 界面
+        app = create_ui()
         
         # 显示访问信息
         logger.info(f"Web 界面地址: http://{config.web_host}:{config.web_port}")
-        logger.info(f"API 文档地址: http://{config.web_host}:{config.web_port}/docs")
         logger.info("=" * 60)
         
-        # 启动 Web 服务
-        uvicorn.run(
-            app,
-            host=config.web_host,
-            port=config.web_port,
-            log_level=config.log_level.lower()
+        # 启动 Gradio 服务
+        app.launch(
+            server_name=config.web_host,
+            server_port=config.web_port,
+            share=False,
+            show_error=True,
+            quiet=False
         )
         
     except KeyboardInterrupt:
