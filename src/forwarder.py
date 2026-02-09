@@ -65,13 +65,14 @@ class MessageForwarder:
         sender_name = getattr(sender, 'first_name', 'Unknown') if sender else 'Unknown'
         chat_title = getattr(chat, 'title', str(chat.id)) if chat else 'Unknown'
         
-        logger.debug(f"收到消息 - 来自: {chat_title} ({chat.id}), 发送者: {sender_name}")
-        
         # 过滤消息
         if not self.filter.should_forward(message_text):
             self.filtered_count += 1
+            logger.debug(f"收到消息 - 来自: {chat_title} ({chat.id}), 发送者: {sender_name}")
             logger.debug(f"消息被过滤 - 内容: {message_text[:50]}...")
             return
+        else:
+            logger.info(f"收到消息 - 来自: {chat_title} ({chat.id}), 发送者: {sender_name}, 内容: {message_text[:50]}...")
         
         # 转发消息
         try:
@@ -118,7 +119,7 @@ class MessageForwarder:
                         target,
                         message
                     )
-                    logger.info(f"✓ 已转发消息到 {target}")
+                    logger.info(f"✓ 转发消息到 {target}")
                 else:
                     # 复制消息（不保留转发标记）
                     message_text = message.text or message.caption or ""
@@ -142,7 +143,7 @@ class MessageForwarder:
                             message_text
                         )
                     
-                    logger.info(f"✓ 已复制消息到 {target}")
+                    logger.info(f"✓ 复制消息到 {target}")
                 
                 success_count += 1
                 
