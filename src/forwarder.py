@@ -5,6 +5,7 @@
 import asyncio
 from typing import Optional
 from telethon import TelegramClient
+from telethon import utils
 from telethon.tl.types import Message
 from telethon.errors import FloodWaitError
 from src.config import Config
@@ -52,27 +53,36 @@ class MessageForwarder:
         message: Message = event.message
         
         # 获取消息文本
-        message_text = message.text or ""
+        raw_text = (message.text or message.caption or "").replace('\n', ' ')
+        message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
         
-        # 如果没有文本，尝试获取 caption（图片、视频等）
-        if not message_text and hasattr(message, 'caption') and message.caption:
-            message_text = message.caption
-        
-        # 获取发送者信息
-        sender = await event.get_sender()
-        chat = await event.get_chat()
-        
-        sender_name = getattr(sender, 'first_name', 'Unknown') if sender else 'Unknown'
-        chat_title = getattr(chat, 'title', str(chat.id)) if chat else 'Unknown'
-        
-        # 过滤消息
-        if not self.filter.should_forward(message_text):
+        # 获取基础 ID
+        sender_id = event.sender_id
+        chat_id = event.chat_id
+
+        # 先过滤，通过后再去拿详细信息
+        if not self.filter.should_forward(raw_text, sender_id=sender_id):
             self.filtered_count += 1
-            logger.debug(f"收到消息 - 来自: {chat_title} ({chat.id}), 发送者: {sender_name}")
-            logger.debug(f"消息被过滤 - 内容: {message_text[:50]}...")
+            # 过滤时记录 ID 即可，节省 API 调用
+            logger.debug(f"消息被过滤 - ChatID: {chat_id}, SenderID: {sender_id}, 内容: {message_preview}")
             return
-        else:
-            logger.info(f"收到消息 - 来自: {chat_title} ({chat.id}), 发送者: {sender_name}, 内容: {message_text[:50]}...")
+
+        # 只有通过过滤的消息才去获取详细资料
+        try:
+            sender_task = event.get_sender()
+            chat_task = event.get_chat()
+            sender, chat = await asyncio.wait_for(asyncio.gather(sender_task, chat_task), timeout=5)
+
+            # 获取发送者和聊天的名称
+            sender_name = utils.get_display_name(sender) if sender else 'Unknown'
+            chat_title = utils.get_display_name(chat) if chat else 'Unknown'
+        except asyncio.TimeoutError:
+            sender_name, chat_title = "Timeout", "Timeout"
+        except Exception as e:
+            logger.error(f"获取实体信息失败: {e}")
+            sender_name, chat_title = "Error", "Error"
+        
+        logger.info(f"收到消息 - 来自: {chat_title} ({chat_id}), 发送者: {sender_name} ({sender_id}), 内容: {message_preview}")
         
         # 转发消息
         try:

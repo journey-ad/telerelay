@@ -153,40 +153,84 @@ def get_status() -> Tuple[str, str, str, str]:
 
 # ==================== 配置管理函数 ====================
 
-def load_config_to_ui() -> Tuple[str, str, str, str, str, bool, bool, float]:
+def load_config_to_ui() -> dict:
     """
     加载配置到 UI
     
     返回:
-        (源群组, 目标群组, 正则, 关键词, 过滤模式, 保留格式, 添加来源, 延迟)
+        包含所有配置字段的字典
     """
     try:
         config = get_config()
         
-        source_chats = '\n'.join(str(chat) for chat in config.source_chats)
-        target_chats = '\n'.join(str(chat) for chat in config.target_chats)
-        regex_patterns = '\n'.join(config.filter_regex_patterns)
-        keywords = '\n'.join(config.filter_keywords)
-        filter_mode = config.filter_mode
-        preserve_format = config.preserve_format
-        add_source_info = config.add_source_info
-        delay = config.forward_delay
-        
-        logger.info("配置已加载到 UI")
-        return (
-            source_chats,
-            target_chats,
-            regex_patterns,
-            keywords,
-            filter_mode,
-            preserve_format,
-            add_source_info,
-            delay
-        )
+        return {
+            "source_chats": '\n'.join(str(chat) for chat in config.source_chats),
+            "target_chats": '\n'.join(str(chat) for chat in config.target_chats),
+            "regex_patterns": '\n'.join(config.filter_regex_patterns),
+            "keywords": '\n'.join(config.filter_keywords),
+            "filter_mode": config.filter_mode,
+            "ignored_user_ids": '\n'.join(str(uid) for uid in config.ignored_user_ids),
+            "ignored_keywords": '\n'.join(config.ignored_keywords),
+            "preserve_format": config.preserve_format,
+            "add_source_info": config.add_source_info,
+            "delay": config.forward_delay
+        }
         
     except Exception as e:
         logger.error(f"加载配置失败: {e}", exc_info=True)
-        return ("", "", "", "", "whitelist", True, True, 0.5)
+        # 返回默认值
+        return {
+            "source_chats": "",
+            "target_chats": "",
+            "regex_patterns": "",
+            "keywords": "",
+            "filter_mode": "whitelist",
+            "ignored_user_ids": "",
+            "ignored_keywords": "",
+            "preserve_format": True,
+            "add_source_info": True,
+            "delay": 0.5
+        }
+
+
+# ==================== 配置-组件映射（解耦设计） ====================
+
+class ConfigComponentMapping:
+    """
+    配置字段和 UI 组件的映射关系
+    添加新配置时只需在这里声明一次即可
+    """
+    def __init__(self):
+        # 组件引用字典（在 create_ui 中填充）
+        self.components = {}
+    
+    def set_components(self, **components):
+        """设置组件引用"""
+        self.components = components
+    
+    def get_update_list(self, config_dict: dict) -> list:
+        """
+        根据配置字典生成 Gradio 更新列表
+        自动按照组件注册顺序生成
+        """
+        # 按照组件注册顺序返回值
+        return [config_dict.get(key, "") for key in self.components.keys()]
+    
+    def get_component_list(self) -> list:
+        """获取组件列表（用于 outputs）"""
+        return list(self.components.values())
+    
+    @property
+    def field_names(self) -> list:
+        """获取字段名列表"""
+        return list(self.components.keys())
+
+
+# 全局配置映射实例
+_config_mapping = ConfigComponentMapping()
+
+
+
 
 
 def save_config_from_ui(
@@ -195,6 +239,8 @@ def save_config_from_ui(
     regex_patterns: str,
     keywords: str,
     filter_mode: str,
+    ignored_user_ids: str,
+    ignored_keywords: str,
     preserve_format: bool,
     add_source_info: bool,
     delay: float
@@ -212,6 +258,15 @@ def save_config_from_ui(
         regex_list = [line.strip() for line in regex_patterns.split('\n') if line.strip()]
         keyword_list = [line.strip() for line in keywords.split('\n') if line.strip()]
         
+        # 解析忽略列表
+        ignored_user_id_list = []
+        for line in ignored_user_ids.split('\n'):
+            line = line.strip()
+            if line and line.lstrip('-').isdigit():
+                ignored_user_id_list.append(int(line))
+        
+        ignored_keyword_list = [line.strip() for line in ignored_keywords.split('\n') if line.strip()]
+        
         # 基本验证
         if not source_list:
             return format_error("请至少配置一个源群组/频道")
@@ -227,6 +282,10 @@ def save_config_from_ui(
                 "regex_patterns": regex_list,
                 "keywords": keyword_list,
                 "mode": filter_mode
+            },
+            "ignore": {
+                "user_ids": ignored_user_id_list,
+                "keywords": ignored_keyword_list
             },
             "forwarding": {
                 "preserve_format": preserve_format,
@@ -377,6 +436,24 @@ def create_ui() -> gr.Blocks:
                     )
                 
                 with gr.Group():
+                    gr.Markdown("### 🚫 忽略列表")
+                    gr.Markdown("⚠️ 优先级高于过滤规则，匹配则直接忽略")
+                    
+                    ignored_user_ids = gr.Textbox(
+                        label="忽略的用户 ID",
+                        placeholder="123456789\n987654321",
+                        lines=3,
+                        info="这些用户发送的所有消息将被忽略，每行一个数字 ID（可通过 @userinfobot 获取）"
+                    )
+                    
+                    ignored_keywords = gr.Textbox(
+                        label="忽略的关键词",
+                        placeholder="广告\n推广\nspam",
+                        lines=3,
+                        info="包含这些关键词的消息将被忽略，每行一个关键词（不区分大小写）"
+                    )
+                
+                with gr.Group():
                     gr.Markdown("### 📤 转发选项")
                     
                     preserve_format = gr.Checkbox(
@@ -399,6 +476,21 @@ def create_ui() -> gr.Blocks:
                         label="转发延迟（秒）",
                         info="避免触发 Telegram 限制"
                     )
+                
+                # ===== 注册配置-组件映射 =====
+                # 添加新配置时，只需在这里添加一行即可！
+                _config_mapping.set_components(
+                    source_chats=source_chats,
+                    target_chats=target_chats,
+                    regex_patterns=regex_patterns,
+                    keywords=keywords,
+                    filter_mode=filter_mode,
+                    ignored_user_ids=ignored_user_ids,
+                    ignored_keywords=ignored_keywords,
+                    preserve_format=preserve_format,
+                    add_source_info=add_source_info,
+                    delay=delay
+                )
                 
                 save_btn = gr.Button("💾 保存配置", variant="primary", size="lg")
                 save_message = gr.Textbox(label="保存结果", visible=False)
@@ -463,6 +555,8 @@ def create_ui() -> gr.Blocks:
                 regex_patterns,
                 keywords,
                 filter_mode,
+                ignored_user_ids,
+                ignored_keywords,
                 preserve_format,
                 add_source_info,
                 delay
@@ -516,17 +610,8 @@ def create_ui() -> gr.Blocks:
         
         # 加载时自动加载配置
         app.load(
-            fn=load_config_to_ui,
-            outputs=[
-                source_chats,
-                target_chats,
-                regex_patterns,
-                keywords,
-                filter_mode,
-                preserve_format,
-                add_source_info,
-                delay
-            ]
+            fn=lambda: _config_mapping.get_update_list(load_config_to_ui()),
+            outputs=_config_mapping.get_component_list()
         )
         
         # 加载时获取一次状态

@@ -154,6 +154,21 @@ class Config:
         filters = self.config_data.get("filters", {})
         return filters.get("mode", "whitelist")
     
+    # 忽略列表配置
+    @property
+    def ignored_user_ids(self) -> List[int]:
+        """忽略的用户 ID 列表"""
+        ignore = self.config_data.get("ignore", {})
+        user_ids = ignore.get("user_ids", [])
+        # 确保转换为整数列表，过滤掉 None 值
+        return [int(uid) for uid in user_ids if uid is not None]
+    
+    @property
+    def ignored_keywords(self) -> List[str]:
+        """忽略的关键词列表"""
+        ignore = self.config_data.get("ignore", {})
+        return ignore.get("keywords", [])
+    
     # 转发选项配置
     @property
     def preserve_format(self) -> bool:

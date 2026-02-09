@@ -94,7 +94,9 @@ class BotManager:
             message_filter = MessageFilter(
                 regex_patterns=config.filter_regex_patterns,
                 keywords=config.filter_keywords,
-                mode=config.filter_mode
+                mode=config.filter_mode,
+                ignored_user_ids=config.ignored_user_ids,
+                ignored_keywords=config.ignored_keywords
             )
             
             # 初始化转发器
