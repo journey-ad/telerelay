@@ -154,30 +154,48 @@ class BotManager:
                     except Exception as e:
                         logger.warning(f"获取用户信息失败: {e}")
 
-            # 初始化过滤器
-            message_filter = MessageFilter(
-                regex_patterns=self.config.filter_regex_patterns,
-                keywords=self.config.filter_keywords,
-                mode=self.config.filter_mode,
-                ignored_user_ids=self.config.ignored_user_ids,
-                ignored_keywords=self.config.ignored_keywords
-            )
+            # 为每个启用的规则创建过滤器和转发器
+            rules = self.config.get_enabled_rules()
+            self.forwarders = []  # 存储所有转发器
+            self.rule_forwarder_map = {}  # 规则名 -> (规则, 过滤器, 转发器)
+            all_source_chats = set()  # 收集所有源群组
+            
+            for rule in rules:
+                # 创建过滤器
+                message_filter = MessageFilter(
+                    regex_patterns=rule.filter_regex_patterns,
+                    keywords=rule.filter_keywords,
+                    mode=rule.filter_mode,
+                    ignored_user_ids=rule.ignored_user_ids,
+                    ignored_keywords=rule.ignored_keywords,
+                    media_types=rule.filter_media_types,
+                    max_file_size=rule.filter_max_file_size,
+                    min_file_size=rule.filter_min_file_size,
+                )
+                
+                # 创建转发器
+                forwarder = MessageForwarder(
+                    client=self.client_manager.get_client(),
+                    rule=rule,
+                    message_filter=message_filter,
+                    bot_manager=self,
+                )
+                self.forwarders.append(forwarder)
+                self.rule_forwarder_map[rule.name] = (rule, message_filter, forwarder)
+                all_source_chats.update(rule.source_chats)
+                logger.info(f"✓ 规则 '{rule.name}' 已注册，监听 {len(rule.source_chats)} 个源")
+            
+            # 注册单一中央消息处理器（处理所有源群组）
+            if all_source_chats:
+                self.client_manager.add_message_handler(
+                    callback=self._central_message_handler,
+                    chats=list(all_source_chats)
+                )
+            
+            # 兼容旧代码：self.forwarder 指向第一个转发器
+            self.forwarder = self.forwarders[0] if self.forwarders else None
 
-            # 初始化转发器
-            self.forwarder = MessageForwarder(
-                client=self.client_manager.get_client(),
-                config=self.config,
-                message_filter=message_filter,
-                bot_manager=self  # 传递 self 以便触发 UI 更新
-            )
-
-            # 注册消息处理器
-            self.client_manager.add_message_handler(
-                callback=self.forwarder.handle_message,
-                chats=self.config.source_chats
-            )
-
-            logger.info("✓ Bot 已启动并开始监听消息")
+            logger.info(f"✓ Bot 已启动，共 {len(rules)} 个规则")
             
             # 运行直到收到停止信号
             while not self._stop_event.is_set():
@@ -191,6 +209,43 @@ class BotManager:
             logger.error(f"Bot 主逻辑出错: {e}", exc_info=True)
         finally:
             self.is_running = False
+    
+    async def _central_message_handler(self, event) -> None:
+        """中央消息处理器：检查所有规则，只输出一次日志"""
+        from telethon.tl.types import Message
+        from src.utils import get_media_description
+        
+        message: Message = event.message
+        chat_id = event.chat_id
+        sender_id = event.sender_id
+        
+        # 获取消息预览
+        raw_text = message.text or get_media_description(message)
+        raw_text = raw_text.replace('\n', ' ')
+        message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
+        
+        # 找到所有匹配此消息的规则
+        matched_rules = []
+        filtered_by = []  # 记录被哪些规则过滤
+        for rule, msg_filter, forwarder in self.rule_forwarder_map.values():
+            if chat_id in rule.source_chats:
+                if msg_filter.should_forward(message, sender_id=sender_id):
+                    matched_rules.append((rule, forwarder))
+                else:
+                    filtered_by.append(rule.name)
+        
+        # 如果没有规则匹配，记录一次过滤日志
+        if not matched_rules:
+            rules_str = ', '.join(filtered_by) if filtered_by else '无匹配规则'
+            logger.debug(f"消息被过滤 [{rules_str}] - ChatID: {chat_id}, 内容: {message_preview}")
+            # 更新过滤计数（只更新第一个转发器）
+            if self.forwarders:
+                self.forwarders[0].filtered_count += 1
+            return
+        
+        # 转发到所有匹配的规则
+        for rule, forwarder in matched_rules:
+            await forwarder.handle_message(event)
     
     def trigger_ui_update(self):
         """触发 UI 更新（由 forwarder 在转发后调用）"""
@@ -269,19 +324,23 @@ class BotManager:
         return self.start()
     
     def get_status(self) -> dict:
-        """
-        获取 Bot 状态
-
-        返回:
-            状态信息字典
-        """
+        """获取 Bot 状态"""
         with self._lock:
-            stats = {}
-            if self.forwarder:
-                stats = self.forwarder.get_stats()
+            # 汇总所有转发器的统计
+            total_forwarded = 0
+            total_filtered = 0
+            if hasattr(self, 'forwarders'):
+                for forwarder in self.forwarders:
+                    stats = forwarder.get_stats()
+                    total_forwarded += stats.get("forwarded", 0)
+                    total_filtered += stats.get("filtered", 0)
 
             return {
                 "is_running": self._is_running,
                 "is_connected": self.client_manager.is_connected if self.client_manager else False,
-                "stats": stats
+                "stats": {
+                    "forwarded": total_forwarded,
+                    "filtered": total_filtered,
+                    "total": total_forwarded + total_filtered,
+                }
             }

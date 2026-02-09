@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 from src.logger import get_logger
+from src.rule import ForwardingRule, load_rules_from_config
 
 logger = get_logger()
 
@@ -154,6 +155,24 @@ class Config:
         filters = self.config_data.get("filters", {})
         return filters.get("mode", "whitelist")
     
+    @property
+    def filter_media_types(self) -> List[str]:
+        """允许的媒体类型列表（空=全部允许）"""
+        filters = self.config_data.get("filters", {})
+        return filters.get("media_types", [])
+    
+    @property
+    def filter_max_file_size(self) -> int:
+        """最大文件大小（字节），0=不限制"""
+        filters = self.config_data.get("filters", {})
+        return int(filters.get("max_file_size", 0))
+    
+    @property
+    def filter_min_file_size(self) -> int:
+        """最小文件大小（字节）"""
+        filters = self.config_data.get("filters", {})
+        return int(filters.get("min_file_size", 0))
+    
     # 忽略列表配置
     @property
     def ignored_user_ids(self) -> List[int]:
@@ -188,13 +207,16 @@ class Config:
         forwarding = self.config_data.get("forwarding", {})
         return float(forwarding.get("delay", 0.5))
     
+    def get_forwarding_rules(self) -> List[ForwardingRule]:
+        """获取转发规则列表"""
+        return load_rules_from_config(self.config_data)
+    
+    def get_enabled_rules(self) -> List[ForwardingRule]:
+        """获取启用的规则"""
+        return [r for r in self.get_forwarding_rules() if r.enabled]
+    
     def validate(self) -> tuple[bool, str]:
-        """
-        验证配置是否完整
-        
-        返回:
-            (是否有效, 错误信息)
-        """
+        """验证配置是否完整"""
         # 验证 API 凭据
         if not self.api_id or not self.api_hash:
             return False, "缺少 API_ID 或 API_HASH 配置"
@@ -203,13 +225,16 @@ class Config:
         if self.session_type == "bot" and not self.bot_token:
             return False, "Bot 模式需要配置 BOT_TOKEN"
         
-        # 验证源群组
-        if not self.source_chats:
-            return False, "未配置源群组/频道"
+        # 验证规则
+        rules = self.get_enabled_rules()
+        if not rules:
+            return False, "未配置任何启用的转发规则"
         
-        # 验证目标
-        if not self.target_chats:
-            return False, "未配置目标群组/频道"
+        for rule in rules:
+            if not rule.source_chats:
+                return False, f"规则 '{rule.name}' 未配置源群组"
+            if not rule.target_chats:
+                return False, f"规则 '{rule.name}' 未配置目标群组"
         
         return True, "配置验证通过"
     

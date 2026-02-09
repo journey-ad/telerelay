@@ -3,18 +3,16 @@
 处理消息转发逻辑
 """
 import asyncio
-from typing import Optional
 from telethon import TelegramClient
 from telethon import utils
 from telethon.tl.types import Message
 from telethon.errors import FloodWaitError
-from src.config import Config
+from src.rule import ForwardingRule
 from src.filters import MessageFilter
 from src.logger import get_logger
 from src.utils import get_media_description
 from src.constants import (
     ENTITY_FETCH_TIMEOUT,
-    MESSAGE_PREVIEW_LENGTH,
     FORWARD_PREVIEW_LENGTH
 )
 
@@ -22,26 +20,26 @@ logger = get_logger()
 
 
 class MessageForwarder:
-    """消息转发器类"""
+    """消息转发器"""
     
     def __init__(
         self,
         client: TelegramClient,
-        config: Config,
+        rule: ForwardingRule,
         message_filter: MessageFilter,
-        bot_manager=None  # 可选的 bot_manager 用于触发 UI 更新
+        bot_manager=None,
     ):
         """
         初始化转发器
         
         参数:
             client: Telegram 客户端
-            config: 配置对象
+            rule: 转发规则
             message_filter: 消息过滤器
-            bot_manager: Bot 管理器（可选）
+            bot_manager: Bot 管理器（可选，用于触发 UI 更新）
         """
         self.client = client
-        self.config = config
+        self.rule = rule
         self.filter = message_filter
         self.bot_manager = bot_manager
         
@@ -51,7 +49,7 @@ class MessageForwarder:
     
     async def handle_message(self, event) -> None:
         """
-        处理新消息事件
+        处理新消息事件（由 bot_manager 中央处理器调用，已通过过滤）
         
         参数:
             event: Telethon 消息事件
@@ -67,12 +65,6 @@ class MessageForwarder:
         sender_id = event.sender_id
         chat_id = event.chat_id
 
-        # 先过滤，通过后再去拿详细信息
-        if not self.filter.should_forward(raw_text, sender_id=sender_id):
-            self.filtered_count += 1
-            # 过滤时记录 ID 即可，节省 API 调用
-            logger.debug(f"消息被过滤 - ChatID: {chat_id}, SenderID: {sender_id}, 内容: {message_preview}")
-            return
 
         # 只有通过过滤的消息才去获取详细资料
         try:
@@ -96,8 +88,8 @@ class MessageForwarder:
             await self.forward_message(message, chat_title)
             
             # 延迟，避免触发限制
-            if self.config.forward_delay > 0:
-                await asyncio.sleep(self.config.forward_delay)
+            if self.rule.delay > 0:
+                await asyncio.sleep(self.rule.delay)
                 
         except FloodWaitError as e:
             logger.warning(f"触发速率限制，需要等待 {e.seconds} 秒")
@@ -115,7 +107,7 @@ class MessageForwarder:
             message: 要转发的消息
             source_chat: 源聊天名称
         """
-        targets = self.config.target_chats
+        targets = self.rule.target_chats
         
         if not targets:
             logger.error("未配置目标聊天")
@@ -130,19 +122,19 @@ class MessageForwarder:
         # 对每个目标进行转发
         for target in targets:
             try:
-                if self.config.preserve_format:
+                if self.rule.preserve_format:
                     # 保留原始格式（直接转发）
                     await self.client.forward_messages(
                         target,
                         message
                     )
-                    logger.info(f"✓ 转发消息到 {target}")
+                    logger.info(f"[{self.rule.name}] ✓ 转发消息到 {target}")
                 else:
                     # 复制消息（不保留转发标记）
                     message_text = message.text or ""
                     
                     # 添加来源信息
-                    if self.config.add_source_info:
+                    if self.rule.add_source_info:
                         message_text = f"📢 来源: {source_chat}\n\n{message_text}"
                     
                     # 发送消息
@@ -160,13 +152,13 @@ class MessageForwarder:
                             message_text
                         )
                     
-                    logger.info(f"✓ 复制消息到 {target}")
+                    logger.info(f"[{self.rule.name}] ✓ 复制消息到 {target}")
                 
                 success_count += 1
                 
                 # 添加延迟，避免触发限制
-                if self.config.forward_delay > 0 and target != targets[-1]:  # 最后一个目标不需要延迟
-                    await asyncio.sleep(self.config.forward_delay)
+                if self.rule.delay > 0 and target != targets[-1]:
+                    await asyncio.sleep(self.rule.delay)
                 
             except Exception as e:
                 logger.error(f"转发消息到 {target} 时出错: {e}")
@@ -175,7 +167,7 @@ class MessageForwarder:
         # 只要成功转发到至少一个目标就计数
         if success_count > 0:
             self.forwarded_count += 1
-            logger.info(f"✅ 转发成功: \"{message_preview}\" → {success_count}/{len(targets)} 目标 | 总计: {self.forwarded_count}")
+            logger.info(f"[{self.rule.name}] ✅ 转发成功: \"{message_preview}\" → {success_count}/{len(targets)} 目标 | 总计: {self.forwarded_count}")
         else:
             logger.error(f"❌ 转发失败: \"{message_preview}\" → 所有目标均失败")
     

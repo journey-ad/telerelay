@@ -72,6 +72,28 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
 
             # --- 配置标签 ---
             with gr.Tab("⚙️ 配置"):
+                # 规则选择器
+                with gr.Group():
+                    with gr.Row():
+                        rule_selector = gr.Dropdown(
+                            choices=config_handler.get_rule_names(),
+                            value=config_handler.get_rule_names()[0] if config_handler.get_rule_names() else "默认规则",
+                            label="📋 当前规则",
+                            scale=3,
+                            interactive=True,
+                        )
+                        add_rule_btn = gr.Button("➕", scale=0, min_width=50)
+                        delete_rule_btn = gr.Button("🗑️", scale=0, min_width=50)
+                        rename_rule_btn = gr.Button("✏️", scale=0, min_width=50)
+                        rule_enabled = gr.Checkbox(label="启用", value=True, scale=0, min_width=80)
+                    
+                    # 重命名输入框（默认隐藏）
+                    rename_input = gr.Textbox(
+                        label="新名称",
+                        placeholder="输入新的规则名称",
+                        visible=False,
+                    )
+
                 with gr.Accordion("📥 源和目标", open=True):
 
                     source_chats = gr.Textbox(
@@ -109,6 +131,19 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                         value="whitelist",
                         label="过滤模式",
                         info="whitelist: 仅转发匹配的消息 | blacklist: 转发不匹配的消息"
+                    )
+
+                    media_types = gr.CheckboxGroup(
+                        choices=["text", "photo", "video", "document", "audio", "voice", "sticker", "animation"],
+                        label="允许的消息类型",
+                        info="不选则允许所有类型"
+                    )
+
+                    max_file_size = gr.Number(
+                        label="最大文件大小 (MB)",
+                        value=0,
+                        minimum=0,
+                        info="0 表示不限制"
                     )
 
                 with gr.Accordion("🚫 忽略列表", open=True):
@@ -242,20 +277,35 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             'regex_patterns': regex_patterns,
             'keywords': keywords,
             'filter_mode': filter_mode,
+            'media_types': media_types,
+            'max_file_size': max_file_size,
             'ignored_user_ids': ignored_user_ids,
             'ignored_keywords': ignored_keywords,
             'preserve_format': preserve_format,
             'add_source_info': add_source_info,
-            'delay': delay
+            'delay': delay,
+            'enabled': rule_enabled,
         }
+        config_outputs = list(config_components.values())
 
         # ===== 辅助函数 =====
         def update_message_visibility(msg: str) -> dict:
             """根据消息内容更新可见性"""
             return gr.update(visible=bool(msg))
 
+        def get_rule_index(rule_name: str) -> int:
+            """根据规则名称获取索引"""
+            names = config_handler.get_rule_names()
+            return names.index(rule_name) if rule_name in names else 0
+
+        def load_rule_values(rule_name: str):
+            """加载指定规则的配置值"""
+            index = get_rule_index(rule_name)
+            config_dict = config_handler.load_rule(index)
+            return [config_dict.get(key, "") for key in config_components.keys()]
+
         def load_config_values():
-            """加载配置值"""
+            """加载配置值（兼容旧接口）"""
             config_dict = config_handler.load_config()
             return [config_dict.get(key, "") for key in config_components.keys()]
 
@@ -306,26 +356,99 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             outputs=control_message
         )
 
-        # 配置保存
+        # 配置保存（使用当前选中的规则索引）
+        def save_current_rule(rule_name, *args):
+            index = get_rule_index(rule_name)
+            return config_handler.save_rule(index, *args)
+
         save_btn.click(
-            fn=config_handler.save_config,
+            fn=save_current_rule,
             inputs=[
+                rule_selector,
                 source_chats,
                 target_chats,
                 regex_patterns,
                 keywords,
                 filter_mode,
+                media_types,
+                max_file_size,
                 ignored_user_ids,
                 ignored_keywords,
                 preserve_format,
                 add_source_info,
-                delay
+                delay,
+                rule_enabled,
             ],
             outputs=save_message
         ).then(
             fn=update_message_visibility,
             inputs=save_message,
             outputs=save_message
+        )
+
+        # ===== 规则选择器事件 =====
+        # 切换规则时加载对应配置
+        rule_selector.change(
+            fn=load_rule_values,
+            inputs=rule_selector,
+            outputs=config_outputs
+        )
+
+        # 添加规则
+        def handle_add_rule():
+            _, names, new_idx = config_handler.add_rule("")
+            return gr.update(choices=names, value=names[new_idx])
+
+        add_rule_btn.click(
+            fn=handle_add_rule,
+            outputs=rule_selector
+        ).then(
+            fn=load_rule_values,
+            inputs=rule_selector,
+            outputs=config_outputs
+        )
+
+        # 删除规则
+        def handle_delete_rule(rule_name):
+            index = get_rule_index(rule_name)
+            _, names, new_idx = config_handler.delete_rule(index)
+            return gr.update(choices=names, value=names[new_idx] if names else "默认规则")
+
+        delete_rule_btn.click(
+            fn=handle_delete_rule,
+            inputs=rule_selector,
+            outputs=rule_selector
+        ).then(
+            fn=load_rule_values,
+            inputs=rule_selector,
+            outputs=config_outputs
+        )
+
+        # 重命名规则（显示/隐藏输入框）
+        rename_rule_btn.click(
+            fn=lambda: gr.update(visible=True),
+            outputs=rename_input
+        )
+
+        def handle_rename_rule(rule_name, new_name):
+            index = get_rule_index(rule_name)
+            _, names = config_handler.rename_rule(index, new_name)
+            return gr.update(choices=names, value=new_name if new_name else rule_name), gr.update(visible=False)
+
+        rename_input.submit(
+            fn=handle_rename_rule,
+            inputs=[rule_selector, rename_input],
+            outputs=[rule_selector, rename_input]
+        )
+
+        # 启用/禁用规则
+        def handle_toggle_rule(rule_name, enabled):
+            index = get_rule_index(rule_name)
+            config_handler.toggle_rule(index, enabled)
+
+        rule_enabled.change(
+            fn=handle_toggle_rule,
+            inputs=[rule_selector, rule_enabled]
         )
 
         # 状态刷新（手动）
