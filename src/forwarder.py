@@ -86,56 +86,70 @@ class MessageForwarder:
     
     async def forward_message(self, message: Message, source_chat: str) -> None:
         """
-        转发消息到目标
+        转发消息到多个目标
         
         参数:
             message: 要转发的消息
             source_chat: 源聊天名称
         """
-        target = self.config.target_chat
+        targets = self.config.target_chats
         
-        if not target:
+        if not targets:
             logger.error("未配置目标聊天")
             return
         
-        try:
-            if self.config.preserve_format:
-                # 保留原始格式（直接转发）
-                await self.client.forward_messages(
-                    target,
-                    message
-                )
-                logger.info(f"✓ 已转发消息到 {target}")
-            else:
-                # 复制消息（不保留转发标记）
-                message_text = message.text or message.caption or ""
-                
-                # 添加来源信息
-                if self.config.add_source_info:
-                    message_text = f"📢 来源: {source_chat}\n\n{message_text}"
-                
-                # 发送消息
-                if message.media:
-                    # 如果有媒体文件，一起发送
-                    await self.client.send_message(
+        # 记录成功转发的目标数量
+        success_count = 0
+        
+        # 对每个目标进行转发
+        for target in targets:
+            try:
+                if self.config.preserve_format:
+                    # 保留原始格式（直接转发）
+                    await self.client.forward_messages(
                         target,
-                        message_text,
-                        file=message.media
+                        message
                     )
+                    logger.info(f"✓ 已转发消息到 {target}")
                 else:
-                    # 纯文本消息
-                    await self.client.send_message(
-                        target,
-                        message_text
-                    )
+                    # 复制消息（不保留转发标记）
+                    message_text = message.text or message.caption or ""
+                    
+                    # 添加来源信息
+                    if self.config.add_source_info:
+                        message_text = f"📢 来源: {source_chat}\n\n{message_text}"
+                    
+                    # 发送消息
+                    if message.media:
+                        # 如果有媒体文件，一起发送
+                        await self.client.send_message(
+                            target,
+                            message_text,
+                            file=message.media
+                        )
+                    else:
+                        # 纯文本消息
+                        await self.client.send_message(
+                            target,
+                            message_text
+                        )
+                    
+                    logger.info(f"✓ 已复制消息到 {target}")
                 
-                logger.info(f"✓ 已复制消息到 {target}")
-            
+                success_count += 1
+                
+                # 添加延迟，避免触发限制
+                if self.config.forward_delay > 0 and target != targets[-1]:  # 最后一个目标不需要延迟
+                    await asyncio.sleep(self.config.forward_delay)
+                
+            except Exception as e:
+                logger.error(f"转发消息到 {target} 时出错: {e}")
+                # 继续转发到其他目标，不抛出异常
+        
+        # 只要成功转发到至少一个目标就计数
+        if success_count > 0:
             self.forwarded_count += 1
-            
-        except Exception as e:
-            logger.error(f"转发消息到 {target} 时出错: {e}")
-            raise
+            logger.info(f"消息已成功转发到 {success_count}/{len(targets)} 个目标")
     
     def get_stats(self) -> dict:
         """

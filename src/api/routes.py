@@ -31,7 +31,7 @@ async def get_current_config():
         # 构建配置响应
         config_data = ConfigData(
             source_chats=config.source_chats,
-            target_chat=config.target_chat,
+            target_chats=config.target_chats,
             filters={
                 "regex_patterns": config.filter_regex_patterns,
                 "keywords": config.filter_keywords,
@@ -68,7 +68,7 @@ async def update_config(config_data: ConfigData):
         # 更新配置
         new_config = {
             "source_chats": config_data.source_chats,
-            "target_chat": config_data.target_chat,
+            "target_chats": config_data.target_chats,
             "filters": {
                 "regex_patterns": config_data.filters.regex_patterns,
                 "keywords": config_data.filters.keywords,

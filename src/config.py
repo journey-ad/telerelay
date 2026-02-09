@@ -122,9 +122,9 @@ class Config:
         return self.config_data.get("source_chats", [])
     
     @property
-    def target_chat(self) -> Optional[Any]:
-        """目标群组/频道"""
-        return self.config_data.get("target_chat")
+    def target_chats(self) -> List[Any]:
+        """目标群组/频道列表"""
+        return self.config_data.get("target_chats", [])
     
     # 过滤规则配置
     @property
@@ -184,7 +184,7 @@ class Config:
             return False, "未配置源群组/频道"
         
         # 验证目标
-        if not self.target_chat:
+        if not self.target_chats:
             return False, "未配置目标群组/频道"
         
         return True, "配置验证通过"

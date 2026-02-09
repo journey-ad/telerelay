@@ -23,7 +23,7 @@ class ForwardingConfig(BaseModel):
 class ConfigData(BaseModel):
     """配置数据模型"""
     source_chats: List[Any] = Field(default_factory=list, description="源群组/频道列表")
-    target_chat: Optional[Any] = Field(default=None, description="目标群组/频道")
+    target_chats: List[Any] = Field(default_factory=list, description="目标群组/频道列表")
     filters: FilterConfig = Field(default_factory=FilterConfig, description="过滤规则")
     forwarding: ForwardingConfig = Field(default_factory=ForwardingConfig, description="转发选项")
 
