@@ -240,7 +240,18 @@ def save_config_from_ui(
         config.update(new_config)
         
         logger.info("配置已通过 UI 保存")
-        return format_success("配置已成功保存！")
+        
+        # 智能重启：如果 Bot 正在运行，自动重启应用新配置
+        bot_manager = get_bot_manager()
+        if bot_manager.is_running:
+            logger.info("Bot 正在运行，将自动重启以应用新配置")
+            success = bot_manager.restart()
+            if success:
+                return format_success("配置已保存并已重启 Bot 应用新配置！")
+            else:
+                return format_success("配置已保存，但重启失败，请手动重启")
+        else:
+            return format_success("配置已成功保存！下次启动时生效")
         
     except Exception as e:
         logger.error(f"保存配置失败: {e}", exc_info=True)

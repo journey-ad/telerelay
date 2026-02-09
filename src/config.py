@@ -58,7 +58,7 @@ class Config:
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(self.config_data, f, allow_unicode=True, default_flow_style=False)
         
-        logger.info(f"已保存配置到: {config_path}")
+        logger.debug(f"已保存配置到: {config_path}")
     
     def update(self, new_config: Dict[str, Any]) -> None:
         """
@@ -69,7 +69,6 @@ class Config:
         """
         self.config_data.update(new_config)
         self.save()
-        logger.info("配置已更新并保存")
     
     # Telegram API 配置
     @property
