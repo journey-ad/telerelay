@@ -108,6 +108,16 @@ class Config:
         """Web 服务端口"""
         return int(os.getenv("WEB_PORT", "8080"))
     
+    @property
+    def web_auth_username(self) -> str:
+        """Web 认证用户名"""
+        return os.getenv("WEB_AUTH_USERNAME", "")
+    
+    @property
+    def web_auth_password(self) -> str:
+        """Web 认证密码"""
+        return os.getenv("WEB_AUTH_PASSWORD", "")
+    
     # 日志配置
     @property
     def log_level(self) -> str:

@@ -31,13 +31,22 @@ def main():
         logger.info(f"Web 界面地址: http://{config.web_host}:{config.web_port}")
         logger.info("=" * 60)
         
+        # 准备认证配置
+        auth = None
+        if config.web_auth_username and config.web_auth_password:
+            auth = (config.web_auth_username, config.web_auth_password)
+            logger.info("✓ HTTP Basic Auth 已启用")
+        else:
+            logger.warning("⚠ HTTP Basic Auth 未启用，建议在生产环境配置认证")
+        
         # 启动 Gradio 服务
         app.launch(
             server_name=config.web_host,
             server_port=config.web_port,
             share=False,
             show_error=True,
-            quiet=False
+            quiet=False,
+            auth=auth
         )
         
     except KeyboardInterrupt:
