@@ -146,6 +146,17 @@ class TelegramClientManager:
                     me: User = await self.client.get_me()
                     logger.info(f"已登录到 Telegram - 用户: {me.first_name} (@{me.username})")
 
+                    # 构建用户信息（包含姓和名）
+                    full_name = ' '.join(filter(None, [me.first_name, me.last_name]))
+                    user_info = full_name
+                    if me.username:
+                        user_info += f" (@{me.username})"
+                    if me.id:
+                        user_info += f" [ID: {me.id}]"
+
+                    # 保存用户信息到 AuthManager
+                    self.auth_manager.set_user_info(user_info)
+
                     # 设置认证成功状态
                     self.auth_manager.set_state("success")
 

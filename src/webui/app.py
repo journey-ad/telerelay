@@ -72,8 +72,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
 
             # --- 配置标签 ---
             with gr.Tab("⚙️ 配置"):
-                with gr.Group():
-                    gr.Markdown("### 📥 源和目标")
+                with gr.Accordion("📥 源和目标", open=True):
 
                     source_chats = gr.Textbox(
                         label="源群组/频道",
@@ -89,8 +88,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                         info="消息将转发到这些位置，每行一个"
                     )
 
-                with gr.Group():
-                    gr.Markdown("### 🔍 过滤规则")
+                with gr.Accordion("🔍 过滤规则", open=True):
 
                     regex_patterns = gr.Textbox(
                         label="正则表达式",
@@ -113,8 +111,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                         info="whitelist: 仅转发匹配的消息 | blacklist: 转发不匹配的消息"
                     )
 
-                with gr.Group():
-                    gr.Markdown("### 🚫 忽略列表")
+                with gr.Accordion("🚫 忽略列表", open=True):
                     gr.Markdown("⚠️ 优先级高于过滤规则，匹配则直接忽略")
 
                     ignored_user_ids = gr.Textbox(
@@ -131,8 +128,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                         info="包含这些关键词的消息将被忽略，每行一个关键词（不区分大小写）"
                     )
 
-                with gr.Group():
-                    gr.Markdown("### 📤 转发选项")
+                with gr.Accordion("📤 转发选项", open=True):
 
                     preserve_format = gr.Checkbox(
                         label="保留原始格式",

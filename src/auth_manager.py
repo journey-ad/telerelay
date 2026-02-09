@@ -27,6 +27,9 @@ class AuthManager:
         self._auth_state = "idle"
         self._error_message = ""
 
+        # 当前登录用户信息
+        self._user_info = ""
+
         # 用户输入队列（每个队列只能放一个值）
         self._phone_queue = queue.Queue(maxsize=1)
         self._code_queue = queue.Queue(maxsize=1)
@@ -46,7 +49,8 @@ class AuthManager:
         with self._lock:
             return {
                 "state": self._auth_state,
-                "error": self._error_message
+                "error": self._error_message,
+                "user_info": self._user_info
             }
 
     def set_state(self, state: str, error: str = "") -> None:
@@ -60,6 +64,16 @@ class AuthManager:
             self._auth_state = state
             self._error_message = error
             logger.debug(f"认证状态更新: {state} {f'({error})' if error else ''}")
+
+    def set_user_info(self, user_info: str) -> None:
+        """设置当前登录用户信息
+
+        参数:
+            user_info: 用户信息字符串
+        """
+        with self._lock:
+            self._user_info = user_info
+            logger.info(f"用户信息已保存: {user_info}")
 
     def _submit_to_queue(self, target_queue: queue.Queue, value: str, name: str) -> bool:
         """通用的提交到队列方法
@@ -165,6 +179,7 @@ class AuthManager:
         with self._lock:
             self._auth_state = "idle"
             self._error_message = ""
+            self._user_info = ""
 
             # 清空所有队列
             while not self._phone_queue.empty():

@@ -40,9 +40,14 @@ class AuthHandler:
             state_info = self.auth_manager.get_state()
             state = state_info["state"]
             error = state_info["error"]
+            user_info = state_info.get("user_info", "")
 
             # 状态文本
             status_text = STATE_DESCRIPTIONS.get(state, "未知状态")
+
+            # 如果认证成功且有用户信息，显示用户信息
+            if state == "success" and user_info:
+                status_text = f"✅ 已登录: {user_info}"
 
             # 控制各输入组件的可见性
             phone_visible = (state == "waiting_phone")
