@@ -4,7 +4,8 @@ Telegram 消息转发工具 - 主入口
 """
 import sys
 from src.webui import create_ui
-from src.config import get_config
+from src.config import create_config
+from src.bot_manager import BotManager
 from src.logger import setup_logger, get_logger
 
 # 设置日志
@@ -14,23 +15,26 @@ logger = setup_logger()
 def main():
     """启动应用"""
     try:
-        # 加载配置
-        config = get_config()
-        
+        # 创建配置
+        config = create_config()
+
         logger.info("=" * 60)
         logger.info("Telegram 消息转发工具启动中...")
         logger.info("=" * 60)
-        
+
         # 重新设置日志级别
         setup_logger(level=config.log_level)
-        
+
+        # 创建Bot管理器
+        bot_manager = BotManager(config)
+
         # 创建 Gradio 界面
-        app = create_ui()
-        
+        app = create_ui(config, bot_manager)
+
         # 显示访问信息
         logger.info(f"Web 界面地址: http://{config.web_host}:{config.web_port}")
         logger.info("=" * 60)
-        
+
         # 准备认证配置
         auth = None
         if config.web_auth_username and config.web_auth_password:
@@ -38,7 +42,7 @@ def main():
             logger.info("✓ HTTP Basic Auth 已启用")
         else:
             logger.warning("⚠ HTTP Basic Auth 未启用，建议在生产环境配置认证")
-        
+
         # 启动 Gradio 服务
         app.launch(
             server_name=config.web_host,
@@ -48,7 +52,7 @@ def main():
             quiet=False,
             auth=auth
         )
-        
+
     except KeyboardInterrupt:
         logger.info("\n收到终止信号，正在关闭...")
     except Exception as e:

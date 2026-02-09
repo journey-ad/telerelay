@@ -232,30 +232,18 @@ class Config:
         }
 
 
-# 全局配置实例
-_config: Optional[Config] = None
-
-
-def get_config() -> Config:
+# 工厂函数
+def create_config(env_file: str = ".env", config_file: str = "config/config.yaml") -> Config:
     """
-    获取全局配置实例
-    
+    创建配置实例
+
+    参数:
+        env_file: 环境变量文件路径
+        config_file: YAML配置文件路径
+
     返回:
-        Config 对象
+        Config对象
     """
-    global _config
-    if _config is None:
-        _config = Config()
-    return _config
-
-
-def reload_config() -> Config:
-    """
-    重新加载配置
-    
-    返回:
-        新的 Config 对象
-    """
-    global _config
-    _config = Config()
-    return _config
+    config = Config(env_file, config_file)
+    config.load()
+    return config

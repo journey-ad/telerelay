@@ -11,6 +11,12 @@ from telethon.errors import FloodWaitError
 from src.config import Config
 from src.filters import MessageFilter
 from src.logger import get_logger
+from src.utils import get_media_description
+from src.constants import (
+    ENTITY_FETCH_TIMEOUT,
+    MESSAGE_PREVIEW_LENGTH,
+    FORWARD_PREVIEW_LENGTH
+)
 
 logger = get_logger()
 
@@ -53,7 +59,8 @@ class MessageForwarder:
         message: Message = event.message
         
         # 获取消息文本
-        raw_text = (message.text or message.caption or "").replace('\n', ' ')
+        raw_text = message.text or get_media_description(message)
+        raw_text = raw_text.replace('\n', ' ')
         message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
         
         # 获取基础 ID
@@ -71,7 +78,7 @@ class MessageForwarder:
         try:
             sender_task = event.get_sender()
             chat_task = event.get_chat()
-            sender, chat = await asyncio.wait_for(asyncio.gather(sender_task, chat_task), timeout=5)
+            sender, chat = await asyncio.wait_for(asyncio.gather(sender_task, chat_task), timeout=ENTITY_FETCH_TIMEOUT)
 
             # 获取发送者和聊天的名称
             sender_name = utils.get_display_name(sender) if sender else 'Unknown'
@@ -115,7 +122,7 @@ class MessageForwarder:
             return
         
         # 获取消息预览
-        message_preview = (message.text or message.caption or "[媒体]")[:30]
+        message_preview = (message.text or get_media_description(message))[:FORWARD_PREVIEW_LENGTH]
         
         # 记录成功转发的目标数量
         success_count = 0
@@ -132,7 +139,7 @@ class MessageForwarder:
                     logger.info(f"✓ 转发消息到 {target}")
                 else:
                     # 复制消息（不保留转发标记）
-                    message_text = message.text or message.caption or ""
+                    message_text = message.text or ""
                     
                     # 添加来源信息
                     if self.config.add_source_info:
