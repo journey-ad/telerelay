@@ -11,29 +11,24 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 # 最终镜像
 FROM python:3.11-slim
 
-# 创建非 root 用户
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app /app/logs /app/sessions /app/config && \
-    chown -R appuser:appuser /app
-
 # 设置工作目录
 WORKDIR /app
 
-# 从 builder 复制依赖到 appuser 目录
-COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
+# 创建必要目录
+RUN mkdir -p /app/logs /app/sessions /app/config
 
-# 设置环境变量（PATH 指向 appuser 的 .local）
+# 从 builder 复制依赖
+COPY --from=builder /root/.local /root/.local
+
+# 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH=/home/appuser/.local/bin:$PATH
+    PATH=/root/.local/bin:$PATH
 
 # 复制应用代码
-COPY --chown=appuser:appuser src/ ./src/
-COPY --chown=appuser:appuser static/ ./static/
-COPY --chown=appuser:appuser config/*.example ./config/
-
-# 切换到非 root 用户
-USER appuser
+COPY src/ ./src/
+COPY static/ ./static/
+COPY config/*.example ./config/
 
 # 暴露端口
 EXPOSE 8080
