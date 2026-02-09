@@ -6,8 +6,9 @@
 
 - 🤖 **智能转发**: 自动监控指定 Telegram 群组/频道并转发消息
 - 🔍 **强大过滤**: 支持正则表达式和关键词匹配，黑白名单模式
-- 🌐 **Web 管理界面**: 现代化的配置管理和实时日志查看
-- 📡 **实时监控**: WebSocket 实时推送日志和状态更新
+- 🚫 **忽略列表**: 支持按用户 ID 和关键词忽略特定消息
+- 🌐 **Web 管理界面**: 基于 Gradio 的直观配置管理和实时日志查看
+- 📊 **实时监控**: 实时显示 Bot 状态、统计信息和日志
 - 🐳 **Docker 支持**: 一键部署，开箱即用
 - 🔒 **安全可靠**: 支持 User Session 和 Bot Token 两种认证方式
 - ⚡ **性能优化**: 异步处理，支持速率限制和错误重试
@@ -111,12 +112,12 @@ filters:
   regex_patterns:
     - "\\[重要\\].*"
     - "紧急通知.*"
-  
+
   # 关键词（任意匹配即通过）
   keywords:
     - "关键词1"
     - "关键词2"
-  
+
   # 过滤模式: whitelist（白名单）或 blacklist（黑名单）
   mode: whitelist
 
@@ -125,6 +126,16 @@ forwarding:
   preserve_format: true  # 保留原始格式
   add_source_info: true  # 添加来源信息
   delay: 0.5  # 转发延迟（秒）
+
+# 忽略列表（优先级高于过滤规则）
+ignore:
+  # 忽略的用户 ID 列表
+  user_ids:
+    # - 123456789
+
+  # 忽略的关键词列表
+  keywords:
+    # - "广告"
 ```
 
 ## 🎮 使用说明
@@ -142,22 +153,10 @@ forwarding:
 ### Web 界面功能
 
 - **Bot 控制**: 启动/停止/重启 Bot
-- **配置管理**: 在线修改源群组、目标群组和过滤规则
+- **配置管理**: 在线修改源群组、目标群组、过滤规则和忽略列表
 - **实时日志**: 查看 Bot 运行状态和转发记录
 - **统计信息**: 查看已转发、已过滤和总消息数
-
-### API 文档
-
-访问 `http://localhost:8080/docs` 查看完整的 API 文档。
-
-主要端点：
-- `GET /api/config` - 获取配置
-- `PUT /api/config` - 更新配置
-- `POST /api/bot/start` - 启动 Bot
-- `POST /api/bot/stop` - 停止 Bot
-- `POST /api/bot/restart` - 重启 Bot
-- `GET /api/bot/status` - 获取 Bot 状态
-- `WS /api/ws/logs` - 实时日志 WebSocket
+- **状态监控**: 实时显示 Bot 运行状态和连接状态
 
 ## 🔧 常见问题
 
@@ -192,25 +191,26 @@ Telegram 有速率限制，程序会自动处理并等待。如果频繁触发�
 
 ```
 tg-box/
-├── src/                  # 源代码
+├── config/              # 配置文件
+│   ├── config.yaml      # 转发规则配置
+│   └── config.yaml.example
+├── logs/                # 日志文件
+├── sessions/            # Telegram 会话文件
+├── src/                 # 源代码
+│   ├── webui/           # Gradio Web 界面
+│   │   ├── handlers/    # 业务处理器
+│   │   │   ├── bot_control.py  # Bot 控制
+│   │   │   ├── config.py       # 配置管理
+│   │   │   └── log.py          # 日志查看
+│   │   ├── app.py       # UI 构建
+│   │   └── utils.py     # 工具函数
 │   ├── main.py          # 主程序入口
 │   ├── config.py        # 配置管理
 │   ├── client.py        # Telegram 客户端
 │   ├── filters.py       # 消息过滤
 │   ├── forwarder.py     # 消息转发
 │   ├── bot_manager.py   # Bot 生命周期管理
-│   └── api/             # FastAPI 模块
-│       ├── app.py       # FastAPI 应用
-│       ├── routes.py    # API 路由
-│       ├── models.py    # 数据模型
-│       └── websocket.py # WebSocket 处理
-├── static/              # Web UI 静态文件
-│   ├── index.html       # 主页面
-│   ├── style.css        # 样式
-│   └── app.js           # 前端逻辑
-├── config/              # 配置文件
-├── sessions/            # Telegram 会话文件
-├── logs/                # 日志文件
+│   └── logger.py        # 日志配置
 ├── Dockerfile           # Docker 镜像
 ├── docker-compose.yml   # Docker Compose 配置
 └── requirements.txt     # Python 依赖
