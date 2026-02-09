@@ -61,14 +61,14 @@ def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
 
                     source_chats = gr.Textbox(
                         label="源群组/频道",
-                        placeholder="-100123456789\\n@example_channel",
+                        placeholder="-100123456789\n@example_channel",
                         lines=4,
                         info="输入要监控的群组 ID 或频道用户名，每行一个"
                     )
 
                     target_chats = gr.Textbox(
                         label="目标群组/频道",
-                        placeholder="-100987654321\\n@target_channel\\n-1001234567890",
+                        placeholder="-100987654321\n@target_channel\n-1001234567890",
                         lines=4,
                         info="消息将转发到这些位置，每行一个"
                     )
@@ -78,14 +78,14 @@ def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
 
                     regex_patterns = gr.Textbox(
                         label="正则表达式",
-                        placeholder="\\\\[重要\\\\].*\\n紧急通知.*",
+                        placeholder="\\[重要\\].*\n紧急通知.*",
                         lines=3,
                         info="每行一个正则表达式"
                     )
 
                     keywords = gr.Textbox(
                         label="关键词",
-                        placeholder="关键词1\\n关键词2",
+                        placeholder="关键词1\n关键词2",
                         lines=3,
                         info="每行一个关键词"
                     )
@@ -103,14 +103,14 @@ def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
 
                     ignored_user_ids = gr.Textbox(
                         label="忽略的用户 ID",
-                        placeholder="123456789\\n987654321",
+                        placeholder="123456789\n987654321",
                         lines=3,
                         info="这些用户发送的所有消息将被忽略，每行一个数字 ID（可通过 @userinfobot 获取）"
                     )
 
                     ignored_keywords = gr.Textbox(
                         label="忽略的关键词",
-                        placeholder="广告\\n推广\\nspam",
+                        placeholder="广告\n推广\nspam",
                         lines=3,
                         info="包含这些关键词的消息将被忽略，每行一个关键词（不区分大小写）"
                     )
@@ -155,7 +155,7 @@ def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
                 )
 
                 with gr.Row():
-                    refresh_log_btn = gr.Button("🔄 刷新日志", size="sm")
+                    refresh_log_btn = gr.Button("🔄 刷新日志", size="lg")
                     log_lines = gr.Slider(
                         minimum=MIN_LOG_LINES,
                         maximum=MAX_LOG_LINES,

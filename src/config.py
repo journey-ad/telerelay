@@ -244,6 +244,4 @@ def create_config(env_file: str = ".env", config_file: str = "config/config.yaml
     返回:
         Config对象
     """
-    config = Config(env_file, config_file)
-    config.load()
-    return config
+    return Config(env_file, config_file)
