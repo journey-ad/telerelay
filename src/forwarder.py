@@ -98,19 +98,25 @@ class MessageForwarder:
             logger.error("未配置目标聊天")
             return
         
+        # 记录转发开始
+        message_preview = (message.text or message.caption or "[媒体消息]")[:50]
+        logger.info(f"📨 开始转发消息: {message_preview}... → {len(targets)} 个目标")
+        
         # 记录成功转发的目标数量
         success_count = 0
         
         # 对每个目标进行转发
-        for target in targets:
+        for idx, target in enumerate(targets, 1):
             try:
+                logger.info(f"  [{idx}/{len(targets)}] 正在转发到: {target}")
+                
                 if self.config.preserve_format:
                     # 保留原始格式（直接转发）
                     await self.client.forward_messages(
                         target,
                         message
                     )
-                    logger.info(f"✓ 已转发消息到 {target}")
+                    logger.info(f"  ✅ [{idx}/{len(targets)}] 已转发到 {target}")
                 else:
                     # 复制消息（不保留转发标记）
                     message_text = message.text or message.caption or ""
@@ -134,7 +140,7 @@ class MessageForwarder:
                             message_text
                         )
                     
-                    logger.info(f"✓ 已复制消息到 {target}")
+                    logger.info(f"  ✅ [{idx}/{len(targets)}] 已复制到 {target}")
                 
                 success_count += 1
                 
@@ -143,13 +149,15 @@ class MessageForwarder:
                     await asyncio.sleep(self.config.forward_delay)
                 
             except Exception as e:
-                logger.error(f"转发消息到 {target} 时出错: {e}")
+                logger.error(f"  ❌ [{idx}/{len(targets)}] 转发到 {target} 失败: {e}")
                 # 继续转发到其他目标，不抛出异常
         
         # 只要成功转发到至少一个目标就计数
         if success_count > 0:
             self.forwarded_count += 1
-            logger.info(f"消息已成功转发到 {success_count}/{len(targets)} 个目标")
+            logger.info(f"✅ 转发完成: {success_count}/{len(targets)} 个目标成功 | 总计已转发 {self.forwarded_count} 条")
+        else:
+            logger.error(f"❌ 转发失败: 所有 {len(targets)} 个目标均失败")
     
     def get_stats(self) -> dict:
         """

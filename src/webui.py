@@ -306,6 +306,7 @@ def create_ui() -> gr.Blocks:
             start_btn = gr.Button("▶️ 启动", variant="primary", size="sm")
             stop_btn = gr.Button("⏸️ 停止", variant="stop", size="sm")
             restart_btn = gr.Button("🔄 重启", variant="secondary", size="sm")
+            refresh_status_btn = gr.Button("🔄 刷新状态", size="sm")
         
         with gr.Row():
             status_text = gr.Textbox(label="状态", value="⚫ 已停止", interactive=False, scale=2)
@@ -464,6 +465,12 @@ def create_ui() -> gr.Blocks:
             fn=get_recent_logs,
             inputs=log_lines,
             outputs=log_output
+        )
+        
+        # 状态刷新
+        refresh_status_btn.click(
+            fn=get_status,
+            outputs=[status_text, forwarded_count, filtered_count, total_count]
         )
         
         # ===== 页面加载时初始化 =====
