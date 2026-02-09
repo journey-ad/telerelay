@@ -46,6 +46,8 @@ class BotManager:
             self.thread = threading.Thread(target=self._run_bot, daemon=True)
             self.thread.start()
             logger.info("Bot 启动线程已创建")
+            # 触发 UI 更新显示启动状态
+            self.trigger_ui_update()
             return True
         except Exception as e:
             logger.error(f"启动 Bot 失败: {e}")
@@ -111,6 +113,7 @@ class BotManager:
             
             self.is_running = True
             logger.info("✓ Bot 已启动并开始监听消息")
+            self.trigger_ui_update()
             
             # 运行直到收到停止信号
             while not self._stop_event.is_set():
@@ -162,6 +165,8 @@ class BotManager:
             
             self.is_running = False
             logger.info("✓ Bot 已停止")
+            # 触发 UI 更新显示停止状态
+            self.trigger_ui_update()
             return True
             
         except Exception as e:
