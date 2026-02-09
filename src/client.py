@@ -5,6 +5,7 @@ Telegram 客户端管理模块
 import asyncio
 from pathlib import Path
 from typing import Optional, Callable
+from urllib.parse import urlparse
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError, FloodWaitError
 from telethon.tl.types import User
@@ -35,6 +36,50 @@ class TelegramClientManager:
         # 会话文件路径
         self.session_name = session_dir / "telegram_session"
     
+    def _parse_proxy(self) -> Optional[tuple]:
+        """
+        解析代理配置
+        
+        返回:
+            (proxy_type, proxy_host, proxy_port) 或 None
+        """
+        if not self.config.proxy_url:
+            return None
+        
+        try:
+            parsed = urlparse(self.config.proxy_url)
+            proxy_type = parsed.scheme.lower()
+            
+            if proxy_type not in ['socks5', 'http', 'socks4']:
+                logger.warning(f"不支持的代理类型: {proxy_type}")
+                return None
+            
+            # 转换为 Telethon 支持的代理类型
+            if proxy_type == 'socks5':
+                import python_socks
+                proxy_type = python_socks.ProxyType.SOCKS5
+            elif proxy_type == 'socks4':
+                import python_socks
+                proxy_type = python_socks.ProxyType.SOCKS4
+            elif proxy_type == 'http':
+                import python_socks
+                proxy_type = python_socks.ProxyType.HTTP
+            
+            proxy_host = parsed.hostname
+            proxy_port = parsed.port or 1080
+            
+            # 如果有用户名和密码
+            proxy_username = parsed.username
+            proxy_password = parsed.password
+            
+            logger.info(f"使用代理: {proxy_type} {proxy_host}:{proxy_port}")
+            
+            return (proxy_type, proxy_host, proxy_port, True, proxy_username, proxy_password)
+        
+        except Exception as e:
+            logger.error(f"解析代理配置失败: {e}")
+            return None
+    
     async def connect(self) -> bool:
         """
         连接到 Telegram
@@ -43,6 +88,9 @@ class TelegramClientManager:
             是否成功连接
         """
         try:
+            # 解析代理配置
+            proxy = self._parse_proxy()
+            
             # 创建客户端
             if self.config.session_type == "bot":
                 # Bot 模式
@@ -53,7 +101,8 @@ class TelegramClientManager:
                 self.client = TelegramClient(
                     str(self.session_name),
                     self.config.api_id,
-                    self.config.api_hash
+                    self.config.api_hash,
+                    proxy=proxy
                 )
                 
                 await self.client.start(bot_token=self.config.bot_token)
@@ -63,7 +112,8 @@ class TelegramClientManager:
                 self.client = TelegramClient(
                     str(self.session_name),
                     self.config.api_id,
-                    self.config.api_hash
+                    self.config.api_hash,
+                    proxy=proxy
                 )
                 
                 await self.client.start()

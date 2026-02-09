@@ -93,6 +93,11 @@ class Config:
         """会话类型: user 或 bot"""
         return os.getenv("SESSION_TYPE", "user")
     
+    @property
+    def proxy_url(self) -> Optional[str]:
+        """代理 URL（可选）"""
+        return os.getenv("PROXY_URL") or None
+    
     # Web 服务配置
     @property
     def web_host(self) -> str:
