@@ -11,7 +11,7 @@ from src.filters import MessageFilter
 from src.forwarder import MessageForwarder
 from src.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 class BotManager:
@@ -19,12 +19,16 @@ class BotManager:
     
     def __init__(self):
         """初始化 Bot 管理器"""
-        self.is_running = False
-        self.thread: Optional[threading.Thread] = None
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self.config: Optional[Config] = None
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
+        self.thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self.is_running = False
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+        # UI 更新标志
+        self._ui_update_flag = threading.Event()
+        self._last_update_time = 0
     
     def start(self) -> bool:
         """
@@ -95,7 +99,8 @@ class BotManager:
             self.forwarder = MessageForwarder(
                 client=self.client_manager.get_client(),
                 config=config,
-                message_filter=message_filter
+                message_filter=message_filter,
+                bot_manager=self  # 传递 self 以便触发 UI 更新
             )
             
             # 注册消息处理器
@@ -119,6 +124,22 @@ class BotManager:
             logger.error(f"Bot 主逻辑出错: {e}", exc_info=True)
         finally:
             self.is_running = False
+    
+    def trigger_ui_update(self):
+        """触发 UI 更新（由 forwarder 在转发后调用）"""
+        import time
+        current_time = time.time()
+        # 防抖：1秒内只触发一次
+        if current_time - self._last_update_time >= 1.0:
+            self._ui_update_flag.set()
+            self._last_update_time = current_time
+    
+    def check_and_clear_ui_update(self) -> bool:
+        """检查是否需要更新UI，并清除标志"""
+        if self._ui_update_flag.is_set():
+            self._ui_update_flag.clear()
+            return True
+        return False
     
     def stop(self) -> bool:
         """

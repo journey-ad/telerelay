@@ -9,7 +9,7 @@ from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 from src.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 class Config:

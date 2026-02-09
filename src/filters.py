@@ -6,7 +6,7 @@ import re
 from typing import List
 from src.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 class MessageFilter:

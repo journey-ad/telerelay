@@ -12,7 +12,7 @@ from telethon.tl.types import User
 from src.config import Config
 from src.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 class TelegramClientManager:

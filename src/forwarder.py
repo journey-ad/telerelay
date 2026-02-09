@@ -11,7 +11,7 @@ from src.config import Config
 from src.filters import MessageFilter
 from src.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 class MessageForwarder:
@@ -21,7 +21,8 @@ class MessageForwarder:
         self,
         client: TelegramClient,
         config: Config,
-        message_filter: MessageFilter
+        message_filter: MessageFilter,
+        bot_manager=None  # 可选的 bot_manager 用于触发 UI 更新
     ):
         """
         初始化转发器
@@ -30,10 +31,14 @@ class MessageForwarder:
             client: Telegram 客户端
             config: 配置对象
             message_filter: 消息过滤器
+            bot_manager: Bot 管理器（可选）
         """
         self.client = client
         self.config = config
         self.filter = message_filter
+        self.bot_manager = bot_manager
+        
+        # 统计信息
         self.forwarded_count = 0
         self.filtered_count = 0
     
@@ -98,25 +103,22 @@ class MessageForwarder:
             logger.error("未配置目标聊天")
             return
         
-        # 记录转发开始
-        message_preview = (message.text or message.caption or "[媒体消息]")[:50]
-        logger.info(f"📨 开始转发消息: {message_preview}... → {len(targets)} 个目标")
+        # 获取消息预览
+        message_preview = (message.text or message.caption or "[媒体]")[:30]
         
         # 记录成功转发的目标数量
         success_count = 0
         
         # 对每个目标进行转发
-        for idx, target in enumerate(targets, 1):
+        for target in targets:
             try:
-                logger.info(f"  [{idx}/{len(targets)}] 正在转发到: {target}")
-                
                 if self.config.preserve_format:
                     # 保留原始格式（直接转发）
                     await self.client.forward_messages(
                         target,
                         message
                     )
-                    logger.info(f"  ✅ [{idx}/{len(targets)}] 已转发到 {target}")
+                    logger.info(f"✓ 已转发消息到 {target}")
                 else:
                     # 复制消息（不保留转发标记）
                     message_text = message.text or message.caption or ""
@@ -140,7 +142,7 @@ class MessageForwarder:
                             message_text
                         )
                     
-                    logger.info(f"  ✅ [{idx}/{len(targets)}] 已复制到 {target}")
+                    logger.info(f"✓ 已复制消息到 {target}")
                 
                 success_count += 1
                 
@@ -149,15 +151,18 @@ class MessageForwarder:
                     await asyncio.sleep(self.config.forward_delay)
                 
             except Exception as e:
-                logger.error(f"  ❌ [{idx}/{len(targets)}] 转发到 {target} 失败: {e}")
+                logger.error(f"转发消息到 {target} 时出错: {e}")
                 # 继续转发到其他目标，不抛出异常
         
         # 只要成功转发到至少一个目标就计数
         if success_count > 0:
             self.forwarded_count += 1
-            logger.info(f"✅ 转发完成: {success_count}/{len(targets)} 个目标成功 | 总计已转发 {self.forwarded_count} 条")
+            logger.info(f"✅ 转发成功: \"{message_preview}\" → {success_count}/{len(targets)} 目标 | 总计: {self.forwarded_count}")
+            # 触发 UI 更新
+            if self.bot_manager:
+                self.bot_manager.trigger_ui_update()
         else:
-            logger.error(f"❌ 转发失败: 所有 {len(targets)} 个目标均失败")
+            logger.error(f"❌ 转发失败: \"{message_preview}\" → 所有目标均失败")
     
     def get_stats(self) -> dict:
         """

@@ -9,7 +9,7 @@ from src.bot_manager import get_bot_manager
 from src.config import get_config, reload_config
 from src.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger()
 
 
 # ==================== 工具函数 ====================
@@ -301,6 +301,9 @@ def create_ui() -> gr.Blocks:
         gr.Markdown("# 📡 Telegram 消息转发工具")
         gr.Markdown("自动监控 Telegram 群组并转发消息到多个目标")
         
+        # 事件驱动刷新定时器（快速轮询检查更新标志）
+        timer = gr.Timer(value=0.5)  # 0.5秒检查一次
+        
         # ===== 控制面板 =====
         with gr.Row():
             start_btn = gr.Button("▶️ 启动", variant="primary", size="sm")
@@ -467,10 +470,35 @@ def create_ui() -> gr.Blocks:
             outputs=log_output
         )
         
-        # 状态刷新
+        # 状态刷新（手动）
         refresh_status_btn.click(
             fn=get_status,
             outputs=[status_text, forwarded_count, filtered_count, total_count]
+        )
+        
+        # 日志刷新（手动）
+        refresh_log_btn.click(
+            fn=get_recent_logs,
+            inputs=log_lines,
+            outputs=log_output
+        )
+        
+        # 事件驱动自动刷新 - 只在转发时更新
+        def auto_refresh_all(lines):
+            """检查是否有更新事件，有则刷新状态和日志"""
+            # 检查是否需要更新
+            manager = get_bot_manager()
+            if manager and manager.check_and_clear_ui_update():
+                status = get_status()
+                logs = get_recent_logs(lines)
+                return status + (logs,)
+            # 无更新则返回 gr.update() 保持不变
+            return [gr.update()] * 5
+        
+        timer.tick(
+            fn=auto_refresh_all,
+            inputs=log_lines,
+            outputs=[status_text, forwarded_count, filtered_count, total_count, log_output]
         )
         
         # ===== 页面加载时初始化 =====
