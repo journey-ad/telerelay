@@ -176,9 +176,6 @@ class MessageForwarder:
         if success_count > 0:
             self.forwarded_count += 1
             logger.info(f"✅ 转发成功: \"{message_preview}\" → {success_count}/{len(targets)} 目标 | 总计: {self.forwarded_count}")
-            # 触发 UI 更新
-            if self.bot_manager:
-                self.bot_manager.trigger_ui_update()
         else:
             logger.error(f"❌ 转发失败: \"{message_preview}\" → 所有目标均失败")
     

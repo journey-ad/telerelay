@@ -2,24 +2,40 @@
 Gradio UI构建
 """
 import gradio as gr
+from typing import Optional
 from src.bot_manager import BotManager
 from src.config import Config
+from src.auth_manager import AuthManager
+from src.logger import get_logger
 from src.constants import (
     UI_REFRESH_INTERVAL,
     DEFAULT_LOG_LINES,
     MIN_LOG_LINES,
     MAX_LOG_LINES
 )
-from .handlers import BotControlHandler, ConfigHandler, LogHandler
+from .handlers import BotControlHandler, ConfigHandler, LogHandler, AuthHandler
+
+logger = get_logger()
 
 
-def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
-    """创建Gradio界面"""
+def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[AuthManager] = None) -> gr.Blocks:
+    """创建Gradio界面
+
+    参数:
+        config: 配置对象
+        bot_manager: Bot 管理器
+        auth_manager: 认证管理器（可选，用于 User 模式）
+    """
 
     # 创建处理器
     bot_handler = BotControlHandler(bot_manager, config)
     config_handler = ConfigHandler(config, bot_manager)
     log_handler = LogHandler()
+
+    # 创建认证处理器（如果提供了 auth_manager）
+    auth_handler = None
+    if auth_manager:
+        auth_handler = AuthHandler(auth_manager, bot_manager)
 
     # 使用柔和主题
     theme = gr.themes.Soft(
@@ -165,6 +181,64 @@ def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
                         scale=2
                     )
 
+            # --- 认证标签（仅在 User 模式下显示）---
+            if auth_handler:
+                with gr.Tab("🔐 认证"):
+                    gr.Markdown("""
+                    ### Telegram User 模式认证
+
+                    **首次使用或会话过期时，请按以下步骤操作：**
+
+                    1. 点击下方「🚀 开始认证」按钮）
+                    2. 页面将会显示手机号输入框
+                    3. 输入手机号（国际格式，如 +8613800138000）并点击「发送验证码」
+                    4. 输入 Telegram 发送的验证码并点击「提交验证码」
+                    5. 如果启用了两步验证，输入密码并点击「提交密码」
+                    """)
+
+                    # 状态显示
+                    auth_status = gr.Textbox(
+                        label="认证状态",
+                        value="未开始认证",
+                        interactive=False
+                    )
+
+                    # 控制按钮
+                    with gr.Row():
+                        start_auth_btn = gr.Button("🚀 开始认证", variant="primary")
+                        cancel_auth_btn = gr.Button("❌ 取消认证", variant="stop")
+
+                    # 手机号输入（初始隐藏）
+                    phone_input = gr.Textbox(
+                        label="手机号",
+                        placeholder="+8613800138000",
+                        info="请输入国际格式的手机号",
+                        visible=False
+                    )
+                    submit_phone_btn = gr.Button("发送验证码", variant="primary", visible=False)
+
+                    # 验证码输入（初始隐藏）
+                    code_input = gr.Textbox(
+                        label="验证码",
+                        placeholder="12345",
+                        info="请输入 Telegram 发送的验证码",
+                        visible=False
+                    )
+                    submit_code_btn = gr.Button("提交验证码", variant="primary", visible=False)
+
+                    # 密码输入（初始隐藏）
+                    password_input = gr.Textbox(
+                        label="两步验证密码",
+                        type="password",
+                        placeholder="请输入密码",
+                        info="您启用了两步验证，请输入密码",
+                        visible=False
+                    )
+                    submit_password_btn = gr.Button("提交密码", variant="primary", visible=False)
+
+                    # 错误消息
+                    auth_error = gr.Textbox(label="错误信息", visible=False)
+
         # ===== 配置组件映射（简单字典） =====
         config_components = {
             'source_chats': source_chats,
@@ -195,9 +269,16 @@ def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
             if bot_manager and bot_manager.check_and_clear_ui_update():
                 status = bot_handler.get_status()
                 logs = log_handler.get_recent_logs(lines)
-                return status + (logs,)
+                # 检查是否有认证成功消息
+                auth_msg = bot_handler.get_auth_success_message()
+                if auth_msg:
+                    # 有认证成功消息，显示出来
+                    return status + (logs, gr.update(value=auth_msg, visible=True))
+                else:
+                    # 没有认证成功消息，保持不变
+                    return status + (logs, gr.update())
             # 无更新则返回 gr.update() 保持不变
-            return [gr.update()] * 5
+            return [gr.update()] * 6
 
         # ===== 事件绑定 =====
 
@@ -268,8 +349,65 @@ def create_ui(config: Config, bot_manager: BotManager) -> gr.Blocks:
         timer.tick(
             fn=auto_refresh_all,
             inputs=log_lines,
-            outputs=[status_text, forwarded_count, filtered_count, total_count, log_output]
+            outputs=[status_text, forwarded_count, filtered_count, total_count, log_output, control_message]
         )
+
+        # 认证事件绑定（仅在 User 模式下）
+        if auth_handler:
+            # 开始认证
+            start_auth_btn.click(
+                fn=auth_handler.start_auth,
+                outputs=auth_status
+            )
+
+            # 取消认证
+            cancel_auth_btn.click(
+                fn=auth_handler.cancel_auth,
+                outputs=auth_status
+            )
+
+            # 提交手机号
+            submit_phone_btn.click(
+                fn=auth_handler.submit_phone,
+                inputs=phone_input,
+                outputs=auth_status
+            ).then(
+                fn=lambda: "",  # 清空输入框
+                outputs=phone_input
+            )
+
+            # 提交验证码
+            submit_code_btn.click(
+                fn=auth_handler.submit_code,
+                inputs=code_input,
+                outputs=auth_status
+            ).then(
+                fn=lambda: "",  # 清空输入框
+                outputs=code_input
+            )
+
+            # 提交密码
+            submit_password_btn.click(
+                fn=auth_handler.submit_password,
+                inputs=password_input,
+                outputs=auth_status
+            ).then(
+                fn=lambda: "",  # 清空输入框
+                outputs=password_input
+            )
+
+            # 定时器轮询认证状态
+            auth_timer = gr.Timer(value=0.5)
+            auth_timer.tick(
+                fn=auth_handler.get_auth_state,
+                outputs=[
+                    auth_status,
+                    phone_input, submit_phone_btn,
+                    code_input, submit_code_btn,
+                    password_input, submit_password_btn,
+                    auth_error
+                ]
+            )
 
         # ===== 页面加载时初始化 =====
 

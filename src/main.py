@@ -6,7 +6,8 @@ import sys
 from src.webui import create_ui
 from src.config import create_config
 from src.bot_manager import BotManager
-from src.logger import setup_logger, get_logger
+from src.auth_manager import AuthManager
+from src.logger import setup_logger, get_logger, add_ui_update_handler
 
 # 设置日志
 logger = setup_logger()
@@ -25,11 +26,20 @@ def main():
         # 重新设置日志级别
         setup_logger(level=config.log_level)
 
+        # 创建 AuthManager（仅在 User 模式下需要）
+        auth_manager = None
+        if config.session_type == "user":
+            auth_manager = AuthManager(input_timeout=300)
+            logger.info("✓ AuthManager 已创建（User 模式）")
+
         # 创建Bot管理器
-        bot_manager = BotManager(config)
+        bot_manager = BotManager(config, auth_manager)
+
+        # 日志记录时自动触发 UI 更新
+        add_ui_update_handler(bot_manager)
 
         # 创建 Gradio 界面
-        app = create_ui(config, bot_manager)
+        app = create_ui(config, bot_manager, auth_manager)
 
         # 显示访问信息
         logger.info(f"Web 界面地址: http://{config.web_host}:{config.web_port}")

@@ -6,6 +6,7 @@ from src.bot_manager import BotManager
 from src.config import Config
 from src.logger import get_logger
 from ..utils import format_message
+from .auth import STATE_DESCRIPTIONS
 
 logger = get_logger()
 
@@ -21,6 +22,19 @@ class BotControlHandler:
         """启动Bot"""
         try:
             if self.bot_manager.is_running:
+                # 如果是 User 模式，检查认证状态
+                if self.config.session_type == "user" and self.bot_manager.auth_manager:
+                    state_info = self.bot_manager.auth_manager.get_state()
+                    state = state_info["state"]
+
+                    # 如果正在认证过程中，提示用户
+                    if state in ["waiting_phone", "waiting_code", "waiting_password"]:
+                        return format_message(f"认证正在进行中，{STATE_DESCRIPTIONS.get(state, '请按提示操作')}", "info")
+
+                    # 如果认证已成功
+                    if state == "success":
+                        return format_message("Bot 正在运行中", "success")
+
                 return format_message("Bot 已在运行中", "info")
 
             # 验证配置
@@ -28,10 +42,20 @@ class BotControlHandler:
             if not is_valid:
                 return format_message(f"配置验证失败: {error_msg}", "error")
 
+            # 启动 Bot（User 模式会自动触发认证流程）
             success = self.bot_manager.start()
             if success:
                 logger.info("Bot 已通过 WebUI 启动")
-                return format_message("Bot 已成功启动", "success")
+                if self.config.session_type == "user":
+                    # 检查是否有 session 文件
+                    from pathlib import Path
+                    session_file = Path("sessions/telegram_session.session")
+                    if session_file.exists():
+                        return format_message("检测到认证缓存，正在自动登录…", "success")
+                    else:
+                        return format_message("认证流程已启动，请在「🔐 认证」标签页输入认证信息", "success")
+                else:
+                    return format_message("Bot 已成功启动", "success")
             else:
                 return format_message("Bot 启动失败", "error")
 
@@ -99,3 +123,11 @@ class BotControlHandler:
         except Exception as e:
             logger.error(f"获取状态失败: {e}", exc_info=True)
             return "❌ 状态异常", "0", "0", "0"
+
+    def get_auth_success_message(self) -> str:
+        """获取认证成功消息（如果有）"""
+        if self.config.session_type == "user" and self.bot_manager.auth_manager:
+            user_info = self.bot_manager.get_and_clear_auth_success_user_info()
+            if user_info:
+                return user_info
+        return ""

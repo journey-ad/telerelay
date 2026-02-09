@@ -63,11 +63,63 @@ def setup_logger(name: str = "telegram_forwarder", level: str = "INFO") -> loggi
 def get_logger(name: str = "telegram_forwarder") -> logging.Logger:
     """
     获取已配置的日志记录器
-    
+
     参数:
         name: 日志记录器名称
-    
+
     返回:
         Logger 对象
     """
     return logging.getLogger(name)
+
+
+class UIUpdateHandler(logging.Handler):
+    """
+    自定义日志处理器，在日志记录时触发 UI 更新
+    """
+
+    def __init__(self, bot_manager):
+        """
+        初始化处理器
+
+        参数:
+            bot_manager: BotManager 实例
+        """
+        super().__init__()
+        self.bot_manager = bot_manager
+
+    def emit(self, record):
+        """
+        处理日志记录，触发 UI 更新
+
+        参数:
+            record: 日志记录对象
+        """
+        try:
+            # 触发 UI 更新（已有防抖机制，不会过于频繁）
+            if self.bot_manager:
+                self.bot_manager.trigger_ui_update()
+        except Exception:
+            # 避免日志处理器本身出错影响程序运行
+            pass
+
+
+def add_ui_update_handler(bot_manager, logger_name: str = "telegram_forwarder") -> None:
+    """
+    为 logger 添加 UI 更新处理器
+
+    参数:
+        bot_manager: BotManager 实例
+        logger_name: 日志记录器名称
+    """
+    logger = get_logger(logger_name)
+
+    # 检查是否已经添加过 UIUpdateHandler
+    for handler in logger.handlers:
+        if isinstance(handler, UIUpdateHandler):
+            return
+
+    # 添加 UI 更新处理器
+    ui_handler = UIUpdateHandler(bot_manager)
+    ui_handler.setLevel(logging.DEBUG)  # 所有级别的日志都触发更新
+    logger.addHandler(ui_handler)

@@ -7,7 +7,13 @@ from pathlib import Path
 from typing import Optional, Callable
 from urllib.parse import urlparse
 from telethon import TelegramClient, events
-from telethon.errors import SessionPasswordNeededError, FloodWaitError
+from telethon.errors import (
+    SessionPasswordNeededError,
+    FloodWaitError,
+    PhoneNumberInvalidError,
+    PhoneCodeInvalidError,
+    PasswordHashInvalidError
+)
 from telethon.tl.types import User
 from src.config import Config
 from src.logger import get_logger
@@ -17,22 +23,24 @@ logger = get_logger()
 
 class TelegramClientManager:
     """Telegram 客户端管理器"""
-    
-    def __init__(self, config: Config):
+
+    def __init__(self, config: Config, auth_manager: Optional['AuthManager'] = None):
         """
         初始化客户端管理器
-        
+
         参数:
             config: 配置对象
+            auth_manager: 认证管理器（用于 User 模式认证）
         """
         self.config = config
+        self.auth_manager = auth_manager
         self.client: Optional[TelegramClient] = None
         self.is_connected = False
-        
+
         # 确保会话目录存在
         session_dir = Path("sessions")
         session_dir.mkdir(exist_ok=True)
-        
+
         # 会话文件路径
         self.session_name = session_dir / "telegram_session"
     
@@ -115,19 +123,51 @@ class TelegramClientManager:
                     self.config.api_hash,
                     proxy=proxy
                 )
-                
-                await self.client.start()
-                
-                # 检查是否需要登录
-                if not await self.client.is_user_authorized():
-                    logger.warning("需要登录到 Telegram")
-                    # 这里在生产环境中需要通过 Web UI 处理登录
-                    # 暂时只记录警告
+
+                # 检查是否已有 session 文件
+                from pathlib import Path
+                session_file = Path(f"{self.session_name}.session")
+                has_session = session_file.exists()
+
+                try:
+                    # 如果有 session，设置"正在连接"状态；否则会在回调中设置状态
+                    if has_session:
+                        self.auth_manager.set_state("connecting", "")
+                        logger.info("检测到已有 session，尝试自动登录...")
+
+                    # 使用回调方式进行认证
+                    await self.client.start(
+                        phone=self.auth_manager.phone_callback,
+                        code_callback=self.auth_manager.code_callback,
+                        password=self.auth_manager.password_callback
+                    )
+
+                    # 获取用户信息
+                    me: User = await self.client.get_me()
+                    logger.info(f"已登录到 Telegram - 用户: {me.first_name} (@{me.username})")
+
+                    # 设置认证成功状态
+                    self.auth_manager.set_state("success")
+
+                except PhoneNumberInvalidError:
+                    logger.error("手机号格式无效")
+                    self.auth_manager.set_state("error", "手机号格式无效，请检查格式（如 +8613800138000）")
                     return False
-                
-                # 获取用户信息
-                me: User = await self.client.get_me()
-                logger.info(f"已登录到 Telegram - 用户: {me.first_name} (@{me.username})")
+
+                except PhoneCodeInvalidError:
+                    logger.error("验证码错误")
+                    self.auth_manager.set_state("error", "验证码错误，请重新开始认证")
+                    return False
+
+                except PasswordHashInvalidError:
+                    logger.error("两步验证密码错误")
+                    self.auth_manager.set_state("error", "两步验证密码错误，请重新开始认证")
+                    return False
+
+                except TimeoutError as e:
+                    logger.error(f"认证超时: {e}")
+                    self.auth_manager.set_state("error", str(e))
+                    return False
             
             self.is_connected = True
             return True
@@ -181,8 +221,26 @@ class TelegramClientManager:
     def get_client(self) -> Optional[TelegramClient]:
         """
         获取 Telethon 客户端实例
-        
+
         返回:
             TelegramClient 对象或 None
         """
         return self.client
+
+    def clear_session(self) -> None:
+        """清除 session 文件"""
+        try:
+            import os
+            session_files = [
+                f"{self.session_name}.session",
+                f"{self.session_name}.session-journal"
+            ]
+
+            for session_file in session_files:
+                if os.path.exists(session_file):
+                    os.remove(session_file)
+                    logger.info(f"已删除 session 文件: {session_file}")
+
+            logger.info("Session 文件已清除")
+        except Exception as e:
+            logger.error(f"清除 session 文件失败: {e}", exc_info=True)

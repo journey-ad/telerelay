@@ -23,9 +23,15 @@ logger = get_logger()
 class BotManager:
     """Bot 生命周期管理器"""
 
-    def __init__(self, config: Config):
-        """初始化 Bot 管理器"""
+    def __init__(self, config: Config, auth_manager: Optional['AuthManager'] = None):
+        """初始化 Bot 管理器
+
+        参数:
+            config: 配置对象
+            auth_manager: 认证管理器（用于 User 模式认证）
+        """
         self.config = config
+        self.auth_manager = auth_manager
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
         self.thread: Optional[threading.Thread] = None
@@ -38,6 +44,8 @@ class BotManager:
         # UI 更新标志
         self._ui_update_flag = threading.Event()
         self._last_update_time = 0.0
+        # 认证成功的用户信息
+        self._auth_success_user_info: Optional[str] = None
 
     @property
     def is_running(self) -> bool:
@@ -79,8 +87,6 @@ class BotManager:
             self.thread = threading.Thread(target=self._run_bot, daemon=True)
             self.thread.start()
             logger.info("Bot 启动线程已创建")
-            # 触发 UI 更新显示启动状态
-            self.trigger_ui_update()
             return True
         except Exception as e:
             logger.error(f"启动 Bot 失败: {e}")
@@ -106,6 +112,9 @@ class BotManager:
     async def _bot_main(self) -> None:
         """Bot 主逻辑"""
         try:
+            # 标记为运行中（即使还在连接/认证阶段）
+            self.is_running = True
+
             # 验证配置
             is_valid, error_msg = self.config.validate()
             if not is_valid:
@@ -113,12 +122,37 @@ class BotManager:
                 return
 
             # 初始化客户端
-            self.client_manager = TelegramClientManager(self.config)
+            self.client_manager = TelegramClientManager(self.config, self.auth_manager)
 
             # 连接
             if not await self.client_manager.connect():
                 logger.error("无法连接到 Telegram")
                 return
+
+            # 标记为已连接
+            self.is_connected = True
+
+            # 如果是 User 模式，保存认证成功的用户信息
+            if self.config.session_type == "user" and self.auth_manager:
+                state_info = self.auth_manager.get_state()
+                if state_info["state"] == "success":
+                    try:
+                        from telethon.tl.types import User
+                        client = self.client_manager.get_client()
+                        if client:
+                            me: User = await client.get_me()
+                            # 构建用户名（包含姓和名）
+                            full_name = ' '.join(filter(None, [me.first_name, me.last_name]))
+                            user_info = f"登录成功 - {full_name}"
+                            if me.username:
+                                user_info += f" (@{me.username})"
+                            if me.id:
+                                user_info += f" ID: {me.id}"
+                            self.set_auth_success_user_info(user_info)
+                            self.trigger_ui_update()  # 触发 UI 更新
+                            logger.info(f"已保存用户信息: {user_info}")
+                    except Exception as e:
+                        logger.warning(f"获取用户信息失败: {e}")
 
             # 初始化过滤器
             message_filter = MessageFilter(
@@ -143,9 +177,7 @@ class BotManager:
                 chats=self.config.source_chats
             )
 
-            self.is_running = True
             logger.info("✓ Bot 已启动并开始监听消息")
-            self.trigger_ui_update()
             
             # 运行直到收到停止信号
             while not self._stop_event.is_set():
@@ -176,6 +208,18 @@ class BotManager:
             self._ui_update_flag.clear()
             return True
         return False
+
+    def set_auth_success_user_info(self, user_info: str) -> None:
+        """设置认证成功的用户信息"""
+        with self._lock:
+            self._auth_success_user_info = user_info
+
+    def get_and_clear_auth_success_user_info(self) -> Optional[str]:
+        """获取并清除认证成功的用户信息"""
+        with self._lock:
+            user_info = self._auth_success_user_info
+            self._auth_success_user_info = None
+            return user_info
     
     def stop(self) -> bool:
         """
@@ -198,8 +242,6 @@ class BotManager:
             
             self.is_running = False
             logger.info("✓ Bot 已停止")
-            # 触发 UI 更新显示停止状态
-            self.trigger_ui_update()
             return True
             
         except Exception as e:
