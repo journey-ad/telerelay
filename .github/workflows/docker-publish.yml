@@ -2,7 +2,7 @@ name: 构建并推送 Docker 镜像
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
     # 可选：当 Dockerfile 或相关文件改变时才触发
     # paths:
     #   - 'Dockerfile'
