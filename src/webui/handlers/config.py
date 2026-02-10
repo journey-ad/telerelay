@@ -48,6 +48,7 @@ class ConfigHandler:
                 "ignored_keywords": '\n'.join(rule.ignored_keywords),
                 "preserve_format": rule.preserve_format,
                 "add_source_info": rule.add_source_info,
+                "force_forward": rule.force_forward,
                 "delay": rule.delay,
                 "enabled": rule.enabled,
             }
@@ -69,6 +70,7 @@ class ConfigHandler:
             "ignored_keywords": "",
             "preserve_format": True,
             "add_source_info": True,
+            "force_forward": False,
             "delay": 0.5,
             "enabled": True,
         }
@@ -87,6 +89,7 @@ class ConfigHandler:
         ignored_keywords: str,
         preserve_format: bool,
         add_source_info: bool,
+        force_forward: bool,
         delay: float,
         enabled: bool = True,
     ) -> str:
@@ -142,6 +145,7 @@ class ConfigHandler:
                 "forwarding": {
                     "preserve_format": preserve_format,
                     "add_source_info": add_source_info,
+                    "force_forward": force_forward,
                     "delay": float(delay)
                 }
             })

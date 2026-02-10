@@ -177,6 +177,12 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                         info="在消息前添加来源群组信息"
                     )
 
+                    force_forward = gr.Checkbox(
+                        label="开启强制转发",
+                        value=False,
+                        info="先下载后上传，可绕过频道/群组的禁止转发限制，可能会产生额外流量"
+                    )
+
                     delay = gr.Slider(
                         minimum=0,
                         maximum=5,
@@ -283,6 +289,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             'ignored_keywords': ignored_keywords,
             'preserve_format': preserve_format,
             'add_source_info': add_source_info,
+            'force_forward': force_forward,
             'delay': delay,
             'enabled': rule_enabled,
         }
@@ -376,6 +383,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                 ignored_keywords,
                 preserve_format,
                 add_source_info,
+                force_forward,
                 delay,
                 rule_enabled,
             ],
