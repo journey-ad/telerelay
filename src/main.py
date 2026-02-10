@@ -3,6 +3,7 @@ Telegram 消息转发工具 - 主入口
 使用 Gradio 提供 WebUI 界面
 """
 import sys
+from pathlib import Path
 from src.webui import create_ui
 from src.config import create_config
 from src.bot_manager import BotManager
@@ -37,6 +38,12 @@ def main():
 
         # 日志记录时自动触发 UI 更新
         add_ui_update_handler(bot_manager)
+
+        # 如果存在 session 缓存，自动尝试登录
+        session_file = Path("sessions/telegram_session.session")
+        if session_file.exists():
+            logger.info("检测到 session 缓存，自动启动 Bot...")
+            bot_manager.start()
 
         # 创建 Gradio 界面
         app = create_ui(config, bot_manager, auth_manager)

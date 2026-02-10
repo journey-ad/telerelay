@@ -3,6 +3,7 @@ Bot 生命周期管理模块
 管理 Telegram Bot 的启动、停止和重启
 """
 import asyncio
+import time
 import threading
 from typing import Optional
 from src.config import Config
@@ -150,7 +151,6 @@ class BotManager:
                                 user_info += f" ID: {me.id}"
                             self.set_auth_success_user_info(user_info)
                             self.trigger_ui_update()  # 触发 UI 更新
-                            logger.info(f"已保存用户信息: {user_info}")
                     except Exception as e:
                         logger.warning(f"获取用户信息失败: {e}")
 
@@ -163,6 +163,7 @@ class BotManager:
             for rule in rules:
                 # 创建过滤器
                 message_filter = MessageFilter(
+                    rule_name=rule.name,
                     regex_patterns=rule.filter_regex_patterns,
                     keywords=rule.filter_keywords,
                     mode=rule.filter_mode,
@@ -212,39 +213,55 @@ class BotManager:
     
     async def _central_message_handler(self, event) -> None:
         """中央消息处理器：检查所有规则，只输出一次日志"""
-        from telethon.tl.types import Message
         from src.utils import get_media_description
 
-        message: Message = event.message
+        message = event.message
         chat_id = event.chat_id
         sender_id = event.sender_id
+
+        # 构建来源标签（优先使用 Telethon 实体缓存，通常不会发额外请求）
+        chat = await event.get_chat()
+        chat_title = getattr(chat, 'title', None) or str(chat_id)
+        sender = await event.get_sender()
+        if sender:
+            sender_name = ' '.join(filter(None, [
+                getattr(sender, 'first_name', None),
+                getattr(sender, 'last_name', None),
+            ])) or str(sender_id)
+        else:
+            sender_name = str(sender_id)
 
         # 获取消息预览
         raw_text = message.text or get_media_description(message)
         raw_text = raw_text.replace('\n', ' ')
         message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
 
+        # 输出“收到消息”日志
+        logger.info(
+            f"收到消息 - 来自: {chat_title} ({chat_id}), "
+            f"发送者: {sender_name} ({sender_id}), 内容: {message_preview}"
+        )
+
         # 找到所有匹配此消息的规则
         matched_rules = []
         filtered_by = []  # 记录被哪些规则过滤
         for rule, msg_filter, forwarder in self.rule_forwarder_map.values():
             if chat_id in rule.source_chats:
-                # 对于媒体组消息，跳过过滤判断，直接传递给 forwarder
-                # 因为媒体组的文本可能在任何一条消息上，需要收集完整组后再判断
+                # 媒体组消息跳过过滤（文本可能在任何一条上，需收集完整组后判断）
                 if message.grouped_id:
                     matched_rules.append((rule, forwarder))
                 elif msg_filter.should_forward(message, sender_id=sender_id):
                     matched_rules.append((rule, forwarder))
                 else:
-                    filtered_by.append(rule.name)
-        
-        # 如果没有规则匹配，记录一次过滤日志
+                    filtered_by.append((rule.name, forwarder))
+
         if not matched_rules:
-            rules_str = ', '.join(filtered_by) if filtered_by else '无匹配规则'
-            logger.debug(f"消息被过滤 [{rules_str}] - ChatID: {chat_id}, 内容: {message_preview}")
-            # 更新过滤计数（只更新第一个转发器）
-            if self.forwarders:
-                self.forwarders[0].filtered_count += 1
+            rules_str = ', '.join(name for name, _ in filtered_by) if filtered_by else '无匹配规则'
+            group_tag = f" gid={message.grouped_id}" if message.grouped_id else ""
+            logger.debug(f"消息被过滤 [{rules_str}]{group_tag}")
+            # 更新各规则对应的过滤计数
+            for _, forwarder in filtered_by:
+                forwarder.filtered_count += 1
             return
 
         # 转发到所有匹配的规则
@@ -253,13 +270,11 @@ class BotManager:
     
     def trigger_ui_update(self):
         """触发 UI 更新（由 forwarder 在转发后调用）"""
-        import time
         with self._lock:
-            current_time = time.time()
-            # 防抖：1秒内只触发一次
-            if current_time - self._last_update_time >= UI_UPDATE_DEBOUNCE:
+            now = time.time()
+            if now - self._last_update_time >= UI_UPDATE_DEBOUNCE:
                 self._ui_update_flag.set()
-                self._last_update_time = current_time
+                self._last_update_time = now
     
     def check_and_clear_ui_update(self) -> bool:
         """检查是否需要更新UI，并清除标志"""
@@ -322,7 +337,6 @@ class BotManager:
                 return False
             
             # 等待完全停止
-            import time
             time.sleep(BOT_RESTART_DELAY)
         
         return self.start()

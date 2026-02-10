@@ -73,7 +73,7 @@ class AuthManager:
         """
         with self._lock:
             self._user_info = user_info
-            logger.info(f"用户信息已保存: {user_info}")
+            logger.debug(f"用户信息已保存: {user_info}")
 
     def _submit_to_queue(self, target_queue: queue.Queue, value: str, name: str) -> bool:
         """通用的提交到队列方法

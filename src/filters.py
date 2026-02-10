@@ -78,6 +78,7 @@ class MessageFilter:
     
     def __init__(
         self,
+        rule_name: str = "",
         regex_patterns: List[str] = None,
         keywords: List[str] = None,
         mode: str = "whitelist",
@@ -101,6 +102,8 @@ class MessageFilter:
             max_file_size: 最大文件大小（字节），0=不限制
             min_file_size: 最小文件大小（字节）
         """
+        self.rule_name = rule_name
+        self._log_prefix = f"[{rule_name}] " if rule_name else ""
         self.regex_patterns = regex_patterns or []
         self.keywords = keywords or []
         self.mode = mode.lower()
@@ -133,7 +136,7 @@ class MessageFilter:
         media_type = get_media_type(message)
         allowed = media_type in self.media_types
         if not allowed:
-            logger.debug(f"媒体类型被过滤: {media_type} 不在允许列表 {self.media_types}")
+            logger.debug(f"{self._log_prefix}媒体类型被过滤: {media_type} 不在允许列表 {self.media_types}")
         return allowed
     
     def check_file_size(self, message: Message) -> bool:
@@ -146,12 +149,12 @@ class MessageFilter:
         
         # 检查最小大小
         if self.min_file_size > 0 and file_size < self.min_file_size:
-            logger.debug(f"文件太小被过滤: {file_size} < {self.min_file_size}")
+            logger.debug(f"{self._log_prefix}文件太小被过滤: {file_size} < {self.min_file_size}")
             return False
         
         # 检查最大大小
         if self.max_file_size > 0 and file_size > self.max_file_size:
-            logger.debug(f"文件太大被过滤: {file_size} > {self.max_file_size}")
+            logger.debug(f"{self._log_prefix}文件太大被过滤: {file_size} > {self.max_file_size}")
             return False
         
         return True
@@ -164,14 +167,14 @@ class MessageFilter:
         # 检查正则
         for pattern in self.compiled_patterns:
             if pattern.search(text):
-                logger.debug(f"匹配正则: {pattern.pattern}")
+                logger.debug(f"{self._log_prefix}匹配正则: {pattern.pattern}")
                 return True
         
         # 检查关键词
         text_lower = text.lower()
         for keyword in self.keywords:
             if keyword.lower() in text_lower:
-                logger.debug(f"匹配关键词: {keyword}")
+                logger.debug(f"{self._log_prefix}匹配关键词: {keyword}")
                 return True
         
         return False
@@ -180,7 +183,7 @@ class MessageFilter:
         """检查是否应该被忽略（优先级最高）"""
         # 检查用户黑名单
         if sender_id and sender_id in self.ignored_user_ids:
-            logger.debug(f"忽略用户: {sender_id}")
+            logger.debug(f"{self._log_prefix}忽略用户: {sender_id}")
             return True
         
         # 检查忽略关键词
@@ -188,7 +191,7 @@ class MessageFilter:
             text_lower = text.lower()
             for keyword in self.ignored_keywords:
                 if keyword.lower() in text_lower:
-                    logger.debug(f"忽略关键词: {keyword}")
+                    logger.debug(f"{self._log_prefix}忽略关键词: {keyword}")
                     return True
         
         return False
