@@ -46,7 +46,7 @@ def main():
         # Auto-login if session cache exists
         session_file = Path("sessions/telegram_session.session")
         if session_file.exists():
-            logger.info(t("log.main.session_auto_start"))
+            logger.info(t("log.main.session_detected"))
             bot_manager.start()
 
         # Create Gradio interface
@@ -60,9 +60,9 @@ def main():
         auth = None
         if config.web_auth_username and config.web_auth_password:
             auth = (config.web_auth_username, config.web_auth_password)
-            logger.info(t("log.main.http_auth_enabled"))
+            logger.info(t("log.main.auth_enabled"))
         else:
-            logger.warning(t("log.main.http_auth_disabled"))
+            logger.warning(t("log.main.auth_warning"))
 
         # Start Gradio service
         app.launch(

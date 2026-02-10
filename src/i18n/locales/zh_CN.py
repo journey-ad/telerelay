@@ -9,7 +9,7 @@ TRANSLATIONS = {
     # log.main.* - main.py 的日志
     "log": {
         "main": {
-            "startup_banner": "TeleRelay 启动中...",
+            "startup": "TeleRelay 启动中...",
             "auth_manager_created": "✓ AuthManager 已创建（User 模式）",
             "session_detected": "检测到 session 缓存，自动启动 Bot...",
             "web_address": "Web 界面地址: http://{host}:{port}",
@@ -159,7 +159,7 @@ TRANSLATIONS = {
         # ui.title.* - 标题和标签
         "title": {
             "main": "📡 TeleRelay",
-            "subtitle": "智能 Telegram 消息中继，支持灵活过滤",
+            "subtitle": "Telegram 消息智能转发工具",
             "tab_config": "⚙️ 配置",
             "tab_log": "📋 日志",
             "tab_auth": "🔐 认证",

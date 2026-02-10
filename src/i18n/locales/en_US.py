@@ -9,7 +9,7 @@ TRANSLATIONS = {
     # log.main.* - main.py logs
     "log": {
         "main": {
-            "startup_banner": "TeleRelay starting...",
+            "startup": "TeleRelay starting...",
             "auth_manager_created": "✓ AuthManager created (User mode)",
             "session_detected": "Session cache detected, starting Bot automatically...",
             "web_address": "Web interface address: http://{host}:{port}",
@@ -159,7 +159,7 @@ TRANSLATIONS = {
         # ui.title.* - titles and labels
         "title": {
             "main": "📡 TeleRelay",
-            "subtitle": "Intelligent Telegram message relay with smart filtering",
+            "subtitle": "Telegram message relay tool",
             "tab_config": "⚙️ Configuration",
             "tab_log": "📋 Logs",
             "tab_auth": "🔐 Authentication",
