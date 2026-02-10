@@ -50,22 +50,6 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
         gr.Markdown(f"# {t('ui.title.main')}")
         gr.Markdown(t("ui.title.subtitle"))
 
-        # Language selector
-        with gr.Row():
-            language_selector = gr.Dropdown(
-                choices=[("中文", "zh_CN"), ("English", "en_US")],
-                value=get_language(),
-                label="🌐 Language / 语言",
-                scale=1,
-                interactive=True,
-            )
-            language_message = gr.Textbox(
-                label="",
-                value="",
-                visible=False,
-                scale=3
-            )
-
         # Event-driven refresh timer (fast polling to check update flag)
         timer = gr.Timer(value=UI_REFRESH_INTERVAL)
 
@@ -348,22 +332,6 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             return tuple(results)
 
         # ===== Event bindings =====
-
-        # Language switching
-        def change_language(lang):
-            """Switch language and save to configuration"""
-            set_language(lang)
-            config.set_language(lang)
-            return gr.update(
-                value="✅ Language changed, please refresh the page to see the effect",
-                visible=True
-            )
-
-        language_selector.change(
-            fn=change_language,
-            inputs=[language_selector],
-            outputs=[language_message]
-        )
 
         # Bot control
         start_btn.click(

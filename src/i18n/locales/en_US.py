@@ -218,12 +218,12 @@ TRANSLATIONS = {
 
         # ui.placeholder.* - placeholders
         "placeholder": {
-            "source_chats": "-100123456789\\n@example_channel",
-            "target_chats": "-100987654321\\n@target_channel\\n-1001234567890",
-            "regex_patterns": "\\\\[Important\\\\].*\\nUrgent Notice.*",
-            "keywords": "keyword1\\nkeyword2",
-            "ignored_user_ids": "123456789\\n987654321",
-            "ignored_keywords": "ad\\npromotion\\nspam",
+            "source_chats": "-100123456789\n@example_channel",
+            "target_chats": "-100987654321\n@target_channel\n-1001234567890",
+            "regex_patterns": "\\[Important\\].*\nUrgent Notice.*",
+            "keywords": "keyword1\nkeyword2",
+            "ignored_user_ids": "123456789\n987654321",
+            "ignored_keywords": "ad\npromotion\nspam",
             "new_name": "Enter new rule name",
             "phone": "+1234567890",
             "code": "12345",
@@ -383,7 +383,7 @@ TRANSLATIONS = {
 
     # ===== Miscellaneous =====
     "misc": {
-        "login_success": "Login successful - {name}",
+        "login_success": "Logged in - {name}",
         "media_group_info": " (Media group {count} items)",
         "no_match_rules": "No matching rules",
         "all_media_types": "All",

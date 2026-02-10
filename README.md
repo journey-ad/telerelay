@@ -16,7 +16,7 @@ An intelligent Telegram message relay tool with smart filtering based on regex p
 - 🚫 **Ignore List**: Ignore specific messages by user ID and keywords
 - 💪 **Force Forward**: Bypass noforwards restrictions on channels/groups by downloading and re-uploading
 - 🌐 **Web Management Interface**: Gradio-based configuration panel with real-time Bot status, statistics, and logs
-- 🌍 **Internationalization**: Full i18n support with built-in Chinese and English interfaces, switchable in Web UI
+- 🌍 **Internationalization**: Full i18n support with built-in Chinese and English interfaces
 - 🔐 **Dual Authentication Modes**: Support both User Session (phone login) and Bot Token methods
 - 🐳 **Docker Support**: One-click deployment, ready to use
 - 🔒 **Secure**: Support HTTP Basic Auth for Web interface
@@ -164,7 +164,6 @@ LANGUAGE=zh_CN
 - **Start/Stop/Restart**: Control Bot running status
 - **Refresh Status**: Manually refresh current status
 - **Status Display**: Running status, forwarded, filtered, total messages
-- **Language Switcher**: Switch between Chinese and English interfaces
 
 #### Configuration Tab
 - **Rule Management**: View, add, edit, delete, enable/disable forwarding rules

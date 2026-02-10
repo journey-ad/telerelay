@@ -218,12 +218,12 @@ TRANSLATIONS = {
 
         # ui.placeholder.* - 占位符
         "placeholder": {
-            "source_chats": "-100123456789\\n@example_channel",
-            "target_chats": "-100987654321\\n@target_channel\\n-1001234567890",
-            "regex_patterns": "\\\\[重要\\\\].*\\n紧急通知.*",
-            "keywords": "关键词1\\n关键词2",
-            "ignored_user_ids": "123456789\\n987654321",
-            "ignored_keywords": "广告\\n推广\\nspam",
+            "source_chats": "-100123456789\n@example_channel",
+            "target_chats": "-100987654321\n@target_channel\n-1001234567890",
+            "regex_patterns": "\\[重要\\].*\n紧急通知.*",
+            "keywords": "关键词1\n关键词2",
+            "ignored_user_ids": "123456789\n987654321",
+            "ignored_keywords": "广告\n推广\nspam",
             "new_name": "输入新的规则名称",
             "phone": "+8613800138000",
             "code": "12345",

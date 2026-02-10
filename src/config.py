@@ -130,16 +130,7 @@ class Config:
     @property
     def language(self) -> str:
         """Interface language"""
-        # Priority: config.yaml > environment variable > default Chinese
-        config_lang = self.config_data.get("language")
-        if config_lang:
-            return config_lang
         return os.getenv("LANGUAGE", "zh_CN")
-
-    def set_language(self, lang: str):
-        """Set language and save to configuration file"""
-        self.config_data["language"] = lang
-        self.save()
 
     # Source and target configuration
     @property
