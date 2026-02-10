@@ -214,22 +214,26 @@ class BotManager:
         """中央消息处理器：检查所有规则，只输出一次日志"""
         from telethon.tl.types import Message
         from src.utils import get_media_description
-        
+
         message: Message = event.message
         chat_id = event.chat_id
         sender_id = event.sender_id
-        
+
         # 获取消息预览
         raw_text = message.text or get_media_description(message)
         raw_text = raw_text.replace('\n', ' ')
         message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
-        
+
         # 找到所有匹配此消息的规则
         matched_rules = []
         filtered_by = []  # 记录被哪些规则过滤
         for rule, msg_filter, forwarder in self.rule_forwarder_map.values():
             if chat_id in rule.source_chats:
-                if msg_filter.should_forward(message, sender_id=sender_id):
+                # 对于媒体组消息，跳过过滤判断，直接传递给 forwarder
+                # 因为媒体组的文本可能在任何一条消息上，需要收集完整组后再判断
+                if message.grouped_id:
+                    matched_rules.append((rule, forwarder))
+                elif msg_filter.should_forward(message, sender_id=sender_id):
                     matched_rules.append((rule, forwarder))
                 else:
                     filtered_by.append(rule.name)
@@ -242,7 +246,7 @@ class BotManager:
             if self.forwarders:
                 self.forwarders[0].filtered_count += 1
             return
-        
+
         # 转发到所有匹配的规则
         for rule, forwarder in matched_rules:
             await forwarder.handle_message(event)
