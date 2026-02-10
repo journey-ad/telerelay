@@ -8,6 +8,12 @@
   <img src="https://count.getloli.com/@telerelay.github?theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
 </p>
 
+## 预览
+
+<p align="center">
+  <img src="./docs/preview_zh.jpeg" width="600">
+</p>
+
 ## ✨ 功能特性
 
 - 🤖 **智能转发**: 自动监控指定 Telegram 群组/频道/账号的消息并转发到多个目标

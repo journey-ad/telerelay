@@ -8,6 +8,12 @@ An intelligent Telegram message relay tool with smart filtering based on regex p
   <img src="https://count.getloli.com/@telerelay.github?theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
 </p>
 
+## Preview
+
+<p align="center">
+  <img src="./docs/preview_en.jpeg" width="600">
+</p>
+
 ## ✨ Features
 
 - 🤖 **Smart Forwarding**: Automatically monitor specified Telegram groups/channels/accounts and forward messages to multiple targets
