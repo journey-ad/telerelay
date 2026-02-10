@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+sessions/
+*.session
+*.session-journal
+
+# Logs
+logs/
+*.log
+
+# Docker
+Dockerfile.alpine
+docker-compose.yml
+.dockerignore
+
+# Documents
+README.md
+*.md
+docs/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
