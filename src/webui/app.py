@@ -317,21 +317,28 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             return [config_dict.get(key, "") for key in config_components.keys()]
 
         def auto_refresh_all(lines):
-            """检查是否有更新事件，有则刷新状态和日志"""
-            # 检查是否需要更新
+            """合并刷新逻辑：定期检查 Bot 状态更新和认证状态"""
+            results = []
+
+            # 1. Bot 状态和日志 (基于事件标志)
             if bot_manager and bot_manager.check_and_clear_ui_update():
                 status = bot_handler.get_status()
                 logs = log_handler.get_recent_logs(lines)
-                # 检查是否有认证成功消息
+                
+                # 认证成功消息
                 auth_msg = bot_handler.get_auth_success_message()
-                if auth_msg:
-                    # 有认证成功消息，显示出来
-                    return status + (logs, gr.update(value=auth_msg, visible=True))
-                else:
-                    # 没有认证成功消息，保持不变
-                    return status + (logs, gr.update())
-            # 无更新则返回 gr.update() 保持不变
-            return [gr.update()] * 6
+                msg_update = gr.update(value=auth_msg, visible=True) if auth_msg else gr.update()
+
+                results.extend([*status, logs, msg_update])
+            else:
+                results.extend([gr.update()] * 6)
+
+            # 2. 认证状态 (总是检查，因为 AuthManager 没有 dirty flag，依靠轮询)
+            if auth_handler:
+                auth_updates = auth_handler.get_auth_state()
+                results.extend(auth_updates)
+
+            return tuple(results)
 
         # ===== 事件绑定 =====
 
@@ -472,12 +479,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             outputs=log_output
         )
 
-        # 事件驱动自动刷新 - 只在转发时更新
-        timer.tick(
-            fn=auto_refresh_all,
-            inputs=log_lines,
-            outputs=[status_text, forwarded_count, filtered_count, total_count, log_output, control_message]
-        )
+
 
         # 认证事件绑定（仅在 User 模式下）
         if auth_handler:
@@ -523,18 +525,24 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                 outputs=password_input
             )
 
-            # 定时器轮询认证状态
-            auth_timer = gr.Timer(value=0.5)
-            auth_timer.tick(
-                fn=auth_handler.get_auth_state,
-                outputs=[
-                    auth_status,
-                    phone_input, submit_phone_btn,
-                    code_input, submit_code_btn,
-                    password_input, submit_password_btn,
-                    auth_error
-                ]
-            )
+
+
+        # ===== 全局定时刷新 (合并了 Bot 状态和 Auth 状态) =====
+        refresh_outputs = [status_text, forwarded_count, filtered_count, total_count, log_output, control_message]
+        if auth_handler:
+            refresh_outputs.extend([
+                auth_status,
+                phone_input, submit_phone_btn,
+                code_input, submit_code_btn,
+                password_input, submit_password_btn,
+                auth_error
+            ])
+        
+        timer.tick(
+            fn=auto_refresh_all,
+            inputs=log_lines,
+            outputs=refresh_outputs
+        )
 
         # ===== 页面加载时初始化 =====
 

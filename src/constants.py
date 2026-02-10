@@ -11,7 +11,7 @@ MESSAGE_PREVIEW_LENGTH = 50    # 消息预览长度
 FORWARD_PREVIEW_LENGTH = 30    # 转发预览长度
 
 # WebUI常量
-UI_REFRESH_INTERVAL = 0.5      # UI刷新间隔（秒）
+UI_REFRESH_INTERVAL = 2.0      # UI刷新间隔（秒）
 UI_UPDATE_DEBOUNCE = 1.0       # UI更新防抖（秒）
 DEFAULT_LOG_LINES = 50         # 默认日志行数
 MIN_LOG_LINES = 20             # 最小日志行数
