@@ -1,6 +1,6 @@
-# Telegram Message Forwarder
+# TeleRelay
 
-A powerful Telegram message auto-forwarding tool with intelligent filtering based on regex patterns and keywords, featuring a modern Web management interface.
+An intelligent Telegram message relay tool with smart filtering based on regex patterns and keywords, featuring a modern Web management interface.
 
 ## ✨ Features
 
@@ -35,7 +35,7 @@ A powerful Telegram message auto-forwarding tool with intelligent filtering base
 
 1. **Clone the project**
    ```bash
-   cd tg-box
+   cd telerelay
    ```
 
 2. **Configure environment variables**
@@ -336,7 +336,7 @@ PROXY_URL=socks5://user:password@127.0.0.1:1080
 ## 📦 Project Structure
 
 ```
-tg-box/
+telerelay/
 ├── .env.example          # Environment variables example
 ├── config/               # Configuration directory
 │   └── config.yaml.example

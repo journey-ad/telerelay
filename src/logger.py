@@ -10,7 +10,7 @@ from logging.handlers import RotatingFileHandler
 from src.constants import LOG_FILE_MAX_BYTES, LOG_FILE_BACKUP_COUNT
 
 
-def setup_logger(name: str = "telegram_forwarder", level: str = "INFO") -> logging.Logger:
+def setup_logger(name: str = "telerelay", level: str = "INFO") -> logging.Logger:
     """
     Set up and return a configured logger
 
@@ -60,7 +60,7 @@ def setup_logger(name: str = "telegram_forwarder", level: str = "INFO") -> loggi
     return logger
 
 
-def get_logger(name: str = "telegram_forwarder") -> logging.Logger:
+def get_logger(name: str = "telerelay") -> logging.Logger:
     """
     Get configured logger
 
@@ -104,7 +104,7 @@ class UIUpdateHandler(logging.Handler):
             pass
 
 
-def add_ui_update_handler(bot_manager, logger_name: str = "telegram_forwarder") -> None:
+def add_ui_update_handler(bot_manager, logger_name: str = "telerelay") -> None:
     """
     Add UI update handler to logger
 

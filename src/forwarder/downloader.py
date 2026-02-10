@@ -12,7 +12,7 @@ from src.i18n import t
 logger = get_logger()
 
 # Temporary file directory
-TEMP_DIR = os.path.join(tempfile.gettempdir(), "tg-box-cache")
+TEMP_DIR = os.path.join(tempfile.gettempdir(), "telerelay-cache")
 
 
 class MediaDownloader:

@@ -9,7 +9,7 @@ TRANSLATIONS = {
     # log.main.* - main.py logs
     "log": {
         "main": {
-            "startup_banner": "Telegram Message Forwarder starting...",
+            "startup_banner": "TeleRelay starting...",
             "auth_manager_created": "✓ AuthManager created (User mode)",
             "session_detected": "Session cache detected, starting Bot automatically...",
             "web_address": "Web interface address: http://{host}:{port}",
@@ -158,8 +158,8 @@ TRANSLATIONS = {
     "ui": {
         # ui.title.* - titles and labels
         "title": {
-            "main": "📡 Telegram Message Forwarder",
-            "subtitle": "Automatically monitor Telegram groups and forward messages to multiple targets",
+            "main": "📡 TeleRelay",
+            "subtitle": "Intelligent Telegram message relay with smart filtering",
             "tab_config": "⚙️ Configuration",
             "tab_log": "📋 Logs",
             "tab_auth": "🔐 Authentication",

@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  telegram-forwarder:
-    container_name: telegram-forwarder
-    image: ghcr.io/journey-ad/telegram-forwarder:latest
+  telerelay:
+    container_name: telerelay
+    image: ghcr.io/journey-ad/telerelay:latest
     restart: unless-stopped
     ports:
       - "8080:8080"

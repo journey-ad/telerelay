@@ -1,6 +1,6 @@
-# Telegram 消息转发工具
+# TeleRelay
 
-一个功能强大的 Telegram 消息自动转发工具，支持基于正则表达式和关键词的智能过滤，提供现代化的 Web 管理界面。
+智能 Telegram 消息中继工具，支持基于正则表达式和关键词的灵活过滤，提供现代化的 Web 管理界面。
 
 ## ✨ 功能特性
 
@@ -35,7 +35,7 @@
 
 1. **克隆项目**
    ```bash
-   cd tg-box
+   cd telerelay
    ```
 
 2. **配置环境变量**
@@ -336,7 +336,7 @@ PROXY_URL=socks5://user:password@127.0.0.1:1080
 ## 📦 项目结构
 
 ```
-tg-box/
+telerelay/
 ├── .env.example          # 环境变量示例
 ├── config/               # 配置文件目录
 │   └── config.yaml.example
