@@ -13,15 +13,15 @@ build/
 
 .history/
 
-# 配置文件（包含敏感信息）
+# Configuration files
 .env
 config/config.yaml
 
-# Telegram 会话文件
+# Telegram session files
 sessions/*.session
 sessions/*.session-journal
 
-# 日志文件
+# Log files
 logs/*.log
 
 # IDE

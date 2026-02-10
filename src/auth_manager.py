@@ -1,50 +1,51 @@
-"""Telegram User 认证管理器"""
+"""Telegram User Authentication Manager"""
 import queue
 import threading
 import asyncio
 from typing import Optional
 from src.logger import get_logger
+from src.i18n import t
 
 logger = get_logger()
 
 
 class AuthManager:
-    """Telegram User 认证管理器
+    """Telegram User Authentication Manager
 
-    负责管理 Telegram User 模式的认证流程，通过队列机制在
-    WebUI 线程和 Bot 线程之间传递认证信息。
+    Manages the authentication flow for Telegram User mode, passing authentication
+    information between WebUI thread and Bot thread through queue mechanism.
     """
 
     def __init__(self, input_timeout: int = 300):
-        """初始化认证管理器
+        """Initialize authentication manager
 
-        参数:
-            input_timeout: 用户输入超时时间（秒），默认 5 分钟
+        Args:
+            input_timeout: User input timeout in seconds, default 5 minutes
         """
         self._lock = threading.RLock()
 
-        # 认证状态
+        # Authentication state
         self._auth_state = "idle"
         self._error_message = ""
 
-        # 当前登录用户信息
+        # Current logged-in user info
         self._user_info = ""
 
-        # 用户输入队列（每个队列只能放一个值）
+        # User input queues (each queue can only hold one value)
         self._phone_queue = queue.Queue(maxsize=1)
         self._code_queue = queue.Queue(maxsize=1)
         self._password_queue = queue.Queue(maxsize=1)
 
-        # 超时配置
+        # Timeout configuration
         self._input_timeout = input_timeout
 
-        logger.info("AuthManager 已初始化")
+        logger.info(t("log.auth.initialized"))
 
     def get_state(self) -> dict:
-        """获取当前认证状态
+        """Get current authentication state
 
-        返回:
-            包含状态信息的字典
+        Returns:
+            Dictionary containing state information
         """
         with self._lock:
             return {
@@ -54,93 +55,93 @@ class AuthManager:
             }
 
     def set_state(self, state: str, error: str = "") -> None:
-        """设置认证状态
+        """Set authentication state
 
-        参数:
-            state: 状态值
-            error: 错误消息（可选）
+        Args:
+            state: State value
+            error: Error message (optional)
         """
         with self._lock:
             self._auth_state = state
             self._error_message = error
-            logger.debug(f"认证状态更新: {state} {f'({error})' if error else ''}")
+            logger.debug(t("log.auth.state_updated", state=state, error=f"({error})" if error else ""))
 
     def set_user_info(self, user_info: str) -> None:
-        """设置当前登录用户信息
+        """Set current logged-in user info
 
-        参数:
-            user_info: 用户信息字符串
+        Args:
+            user_info: User info string
         """
         with self._lock:
             self._user_info = user_info
-            logger.debug(f"用户信息已保存: {user_info}")
+            logger.debug(t("log.auth.user_info_saved", info=user_info))
 
     def _submit_to_queue(self, target_queue: queue.Queue, value: str, name: str) -> bool:
-        """通用的提交到队列方法
+        """Generic method to submit to queue
 
-        参数:
-            target_queue: 目标队列
-            value: 要提交的值
-            name: 输入项名称（用于日志）
+        Args:
+            target_queue: Target queue
+            value: Value to submit
+            name: Input item name (for logging)
 
-        返回:
-            是否成功提交
+        Returns:
+            Whether submission was successful
         """
         try:
             target_queue.put_nowait(value)
-            logger.info(f"{name}已提交")
+            logger.info(t("log.auth.submitted", name=name))
             return True
         except queue.Full:
-            logger.warning(f"{name}队列已满，请勿重复提交")
+            logger.warning(t("log.auth.queue_full", name=name))
             return False
 
     def submit_phone(self, phone: str) -> bool:
-        """提交手机号（WebUI 调用）"""
+        """Submit phone number (called by WebUI)"""
         phone = phone.strip()
         if not phone:
-            self.set_state("error", "手机号不能为空")
+            self.set_state("error", t("message.auth.phone_empty"))
             return False
         if not phone.startswith('+'):
-            self.set_state("error", "手机号必须以 + 开头（如 +8613800138000）")
+            self.set_state("error", t("message.auth.phone_format"))
             return False
-        if self._submit_to_queue(self._phone_queue, phone, "手机号"):
-            logger.info(f"手机号: {phone[:5]}***")
+        if self._submit_to_queue(self._phone_queue, phone, "phone"):
+            logger.info(t("log.auth.phone_masked", phone=phone[:5]))
             return True
         return False
 
     def submit_code(self, code: str) -> bool:
-        """提交验证码（WebUI 调用）"""
+        """Submit verification code (called by WebUI)"""
         code = code.strip()
         if not code:
-            self.set_state("error", "验证码不能为空")
+            self.set_state("error", t("message.auth.code_empty"))
             return False
         if not code.isdigit():
-            self.set_state("error", "验证码应为纯数字")
+            self.set_state("error", t("message.auth.code_format"))
             return False
-        return self._submit_to_queue(self._code_queue, code, "验证码")
+        return self._submit_to_queue(self._code_queue, code, "code")
 
     def submit_password(self, password: str) -> bool:
-        """提交两步验证密码（WebUI 调用）"""
+        """Submit two-step verification password (called by WebUI)"""
         if not password:
-            self.set_state("error", "密码不能为空")
+            self.set_state("error", t("message.auth.password_empty"))
             return False
-        return self._submit_to_queue(self._password_queue, password, "密码")
+        return self._submit_to_queue(self._password_queue, password, "password")
 
     async def _wait_for_input(self, input_queue: queue.Queue, state: str, name: str) -> str:
-        """通用的等待用户输入方法
+        """Generic method to wait for user input
 
-        参数:
-            input_queue: 要读取的队列
-            state: 等待时的状态
-            name: 输入项名称（用于日志）
+        Args:
+            input_queue: Queue to read from
+            state: State while waiting
+            name: Input item name (for logging)
 
-        返回:
-            用户输入
+        Returns:
+            User input
 
-        异常:
-            TimeoutError: 输入超时
+        Raises:
+            TimeoutError: Input timeout
         """
-        logger.info(f"等待用户输入{name}...")
+        logger.info(t("log.auth.waiting", name=name))
         self.set_state(state)
 
         try:
@@ -148,40 +149,40 @@ class AuthManager:
             value = await loop.run_in_executor(
                 None, input_queue.get, True, self._input_timeout
             )
-            logger.info(f"收到{name}")
+            logger.info(t("log.auth.received", name=name))
             return value
         except queue.Empty:
-            error_msg = f"等待{name}输入超时（{self._input_timeout}秒）"
+            error_msg = t("log.auth.timeout", name=name, timeout=self._input_timeout)
             logger.error(error_msg)
             self.set_state("error", error_msg)
             raise TimeoutError(error_msg)
         except Exception as e:
-            logger.error(f"获取{name}失败: {e}")
+            logger.error(t("log.auth.get_failed", name=name, error=str(e)))
             self.set_state("error", str(e))
             raise
 
     async def phone_callback(self) -> str:
-        """手机号回调（Telethon 调用）"""
-        value = await self._wait_for_input(self._phone_queue, "waiting_phone", "手机号")
-        logger.info(f"手机号: {value[:5]}***")
+        """Phone number callback (called by Telethon)"""
+        value = await self._wait_for_input(self._phone_queue, "waiting_phone", "phone")
+        logger.info(t("log.auth.phone_masked", phone=value[:5]))
         return value
 
     async def code_callback(self) -> str:
-        """验证码回调（Telethon 调用）"""
-        return await self._wait_for_input(self._code_queue, "waiting_code", "验证码")
+        """Verification code callback (called by Telethon)"""
+        return await self._wait_for_input(self._code_queue, "waiting_code", "code")
 
     async def password_callback(self) -> str:
-        """密码回调（Telethon 调用）"""
-        return await self._wait_for_input(self._password_queue, "waiting_password", "密码")
+        """Password callback (called by Telethon)"""
+        return await self._wait_for_input(self._password_queue, "waiting_password", "password")
 
     def reset(self) -> None:
-        """重置认证状态和队列"""
+        """Reset authentication state and queues"""
         with self._lock:
             self._auth_state = "idle"
             self._error_message = ""
             self._user_info = ""
 
-            # 清空所有队列
+            # Clear all queues
             while not self._phone_queue.empty():
                 try:
                     self._phone_queue.get_nowait()
@@ -200,4 +201,4 @@ class AuthManager:
                 except queue.Empty:
                     break
 
-            logger.info("认证状态已重置")
+            logger.info(t("log.auth.reset"))

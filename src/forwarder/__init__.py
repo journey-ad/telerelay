@@ -1,5 +1,5 @@
 """
-消息转发模块
+Message forwarding module
 """
 from .forwarder import MessageForwarder
 

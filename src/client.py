@@ -1,6 +1,6 @@
 """
-Telegram 客户端管理模块
-封装 Telethon 客户端，处理连接和会话管理
+Telegram Client Management Module
+Encapsulates Telethon client, handles connection and session management
 """
 import asyncio
 from pathlib import Path
@@ -17,39 +17,40 @@ from telethon.errors import (
 from telethon.tl.types import User
 from src.config import Config
 from src.logger import get_logger
+from src.i18n import t
 
 logger = get_logger()
 
 
 class TelegramClientManager:
-    """Telegram 客户端管理器"""
+    """Telegram Client Manager"""
 
     def __init__(self, config: Config, auth_manager: Optional['AuthManager'] = None):
         """
-        初始化客户端管理器
+        Initialize client manager
 
-        参数:
-            config: 配置对象
-            auth_manager: 认证管理器（用于 User 模式认证）
+        Args:
+            config: Configuration object
+            auth_manager: Authentication manager (for User mode authentication)
         """
         self.config = config
         self.auth_manager = auth_manager
         self.client: Optional[TelegramClient] = None
         self.is_connected = False
 
-        # 确保会话目录存在
+        # Ensure session directory exists
         session_dir = Path("sessions")
         session_dir.mkdir(exist_ok=True)
 
-        # 会话文件路径
+        # Session file path
         self.session_name = session_dir / "telegram_session"
     
     def _parse_proxy(self) -> Optional[tuple]:
         """
-        解析代理配置
-        
-        返回:
-            (proxy_type, proxy_host, proxy_port) 或 None
+        Parse proxy configuration
+
+        Returns:
+            (proxy_type, proxy_host, proxy_port) or None
         """
         if not self.config.proxy_url:
             return None
@@ -59,10 +60,10 @@ class TelegramClientManager:
             proxy_type = parsed.scheme.lower()
             
             if proxy_type not in ['socks5', 'http', 'socks4']:
-                logger.warning(f"不支持的代理类型: {proxy_type}")
+                logger.warning(t("log.client.proxy_unsupported", type=proxy_type))
                 return None
             
-            # 转换为 Telethon 支持的代理类型
+            # Convert to Telethon-supported proxy type
             if proxy_type == 'socks5':
                 import python_socks
                 proxy_type = python_socks.ProxyType.SOCKS5
@@ -75,35 +76,35 @@ class TelegramClientManager:
             
             proxy_host = parsed.hostname
             proxy_port = parsed.port or 1080
-            
-            # 如果有用户名和密码
+
+            # If username and password exist
             proxy_username = parsed.username
             proxy_password = parsed.password
-            
-            logger.info(f"使用代理: {proxy_type} {proxy_host}:{proxy_port}")
-            
+
+            logger.info(t("log.client.proxy_using", type=proxy_type, host=proxy_host, port=proxy_port))
+
             return (proxy_type, proxy_host, proxy_port, True, proxy_username, proxy_password)
-        
+
         except Exception as e:
-            logger.error(f"解析代理配置失败: {e}")
+            logger.error(t("log.client.proxy_parse_failed", error=str(e)))
             return None
     
     async def connect(self) -> bool:
         """
-        连接到 Telegram
-        
-        返回:
-            是否成功连接
+        Connect to Telegram
+
+        Returns:
+            Whether successfully connected
         """
         try:
-            # 解析代理配置
+            # Parse proxy configuration
             proxy = self._parse_proxy()
-            
-            # 创建客户端
+
+            # Create client
             if self.config.session_type == "bot":
-                # Bot 模式
+                # Bot mode
                 if not self.config.bot_token:
-                    logger.error("Bot 模式需要 BOT_TOKEN")
+                    logger.error(t("log.client.bot_token_required"))
                     return False
                 
                 self.client = TelegramClient(
@@ -114,9 +115,9 @@ class TelegramClientManager:
                 )
                 
                 await self.client.start(bot_token=self.config.bot_token)
-                logger.info("已使用 Bot Token 连接到 Telegram")
+                logger.info(t("log.client.bot_connected"))
             else:
-                # 用户模式
+                # User mode
                 self.client = TelegramClient(
                     str(self.session_name),
                     self.config.api_id,
@@ -124,29 +125,29 @@ class TelegramClientManager:
                     proxy=proxy
                 )
 
-                # 检查是否已有 session 文件
+                # Check if session file exists
                 from pathlib import Path
                 session_file = Path(f"{self.session_name}.session")
                 has_session = session_file.exists()
 
                 try:
-                    # 如果有 session，设置"正在连接"状态；否则会在回调中设置状态
+                    # If session exists, set "connecting" state; otherwise state will be set in callback
                     if has_session:
                         self.auth_manager.set_state("connecting", "")
-                        logger.info("检测到已有 session，尝试自动登录...")
+                        logger.info(t("log.client.session_detected"))
 
-                    # 使用回调方式进行认证
+                    # Use callback for authentication
                     await self.client.start(
                         phone=self.auth_manager.phone_callback,
                         code_callback=self.auth_manager.code_callback,
                         password=self.auth_manager.password_callback
                     )
 
-                    # 获取用户信息
+                    # Get user info
                     me: User = await self.client.get_me()
-                    logger.info(f"已登录到 Telegram - 用户: {me.first_name} (@{me.username})")
+                    logger.info(t("log.client.user_logged_in", name=me.first_name, username=me.username))
 
-                    # 构建用户信息（包含姓和名）
+                    # Build user info (including first and last name)
                     full_name = ' '.join(filter(None, [me.first_name, me.last_name]))
                     user_info = full_name
                     if me.username:
@@ -154,45 +155,45 @@ class TelegramClientManager:
                     if me.id:
                         user_info += f" [ID: {me.id}]"
 
-                    # 保存用户信息到 AuthManager
+                    # Save user info to AuthManager
                     self.auth_manager.set_user_info(user_info)
 
-                    # 设置认证成功状态
+                    # Set authentication success state
                     self.auth_manager.set_state("success")
 
                 except PhoneNumberInvalidError:
-                    logger.error("手机号格式无效")
-                    self.auth_manager.set_state("error", "手机号格式无效，请检查格式（如 +8613800138000）")
+                    logger.error(t("log.client.phone_invalid"))
+                    self.auth_manager.set_state("error", t("message.auth.phone_invalid_error"))
                     return False
 
                 except PhoneCodeInvalidError:
-                    logger.error("验证码错误")
-                    self.auth_manager.set_state("error", "验证码错误，请重新开始认证")
+                    logger.error(t("log.client.code_invalid"))
+                    self.auth_manager.set_state("error", t("message.auth.code_invalid_error"))
                     return False
 
                 except PasswordHashInvalidError:
-                    logger.error("两步验证密码错误")
-                    self.auth_manager.set_state("error", "两步验证密码错误，请重新开始认证")
+                    logger.error(t("log.client.password_invalid"))
+                    self.auth_manager.set_state("error", t("message.auth.password_invalid_error"))
                     return False
 
                 except TimeoutError as e:
-                    logger.error(f"认证超时: {e}")
+                    logger.error(t("log.client.auth_timeout", error=str(e)))
                     self.auth_manager.set_state("error", str(e))
                     return False
             
             self.is_connected = True
             return True
-            
+
         except Exception as e:
-            logger.error(f"连接 Telegram 失败: {e}")
+            logger.error(t("log.client.connect_failed", error=str(e)))
             return False
     
     async def disconnect(self) -> None:
-        """断开连接"""
+        """Disconnect"""
         if self.client:
             await self.client.disconnect()
             self.is_connected = False
-            logger.info("已断开 Telegram 连接")
+            logger.info(t("log.client.disconnected"))
     
     def add_message_handler(
         self,
@@ -200,46 +201,46 @@ class TelegramClientManager:
         chats: list = None
     ) -> None:
         """
-        添加消息处理器
-        
-        参数:
-            callback: 消息处理回调函数
-            chats: 要监听的聊天 ID 列表
+        Add message handler
+
+        Args:
+            callback: Message handling callback function
+            chats: List of chat IDs to listen to
         """
         if not self.client:
-            logger.error("客户端未初始化")
+            logger.error(t("log.client.client_not_initialized"))
             return
         
-        # 注册新消息事件处理器
+        # Register new message event handler
         @self.client.on(events.NewMessage(chats=chats))
         async def handler(event):
             try:
                 await callback(event)
             except FloodWaitError as e:
-                logger.warning(f"触发速率限制，需要等待 {e.seconds} 秒")
+                logger.warning(t("log.client.flood_wait", seconds=e.seconds))
                 await asyncio.sleep(e.seconds)
             except Exception as e:
-                logger.error(f"处理消息时出错: {e}", exc_info=True)
-        
-        logger.info(f"已注册消息处理器 - 监听 {len(chats) if chats else '所有'} 个聊天")
+                logger.error(t("log.client.message_error", error=str(e)), exc_info=True)
+
+        logger.info(t("log.client.handler_registered", count=len(chats) if chats else t("misc.all_media_types")))
     
     async def run_until_disconnected(self) -> None:
-        """运行客户端直到断开连接"""
+        """Run client until disconnected"""
         if self.client:
-            logger.info("Telegram 客户端开始运行...")
+            logger.info(t("log.client.running"))
             await self.client.run_until_disconnected()
     
     def get_client(self) -> Optional[TelegramClient]:
         """
-        获取 Telethon 客户端实例
+        Get Telethon client instance
 
-        返回:
-            TelegramClient 对象或 None
+        Returns:
+            TelegramClient object or None
         """
         return self.client
 
     def clear_session(self) -> None:
-        """清除 session 文件"""
+        """Clear session file"""
         try:
             import os
             session_files = [
@@ -250,8 +251,8 @@ class TelegramClientManager:
             for session_file in session_files:
                 if os.path.exists(session_file):
                     os.remove(session_file)
-                    logger.info(f"已删除 session 文件: {session_file}")
+                    logger.info(t("log.client.session_deleted", file=session_file))
 
-            logger.info("Session 文件已清除")
+            logger.info(t("log.client.session_cleared"))
         except Exception as e:
-            logger.error(f"清除 session 文件失败: {e}", exc_info=True)
+            logger.error(t("log.client.session_clear_failed", error=str(e)), exc_info=True)

@@ -1,317 +1,407 @@
-# Telegram 消息转发工具
+# Telegram Message Forwarder
 
-一个功能强大的 Telegram 消息自动转发工具，支持基于正则表达式和关键词的智能过滤，提供现代化的 Web 管理界面。
+A powerful Telegram message auto-forwarding tool with intelligent filtering based on regex patterns and keywords, featuring a modern Web management interface.
 
-## ✨ 功能特性
+## ✨ Features
 
-- 🤖 **智能转发**: 自动监控指定 Telegram 群组/频道并转发消息到多个目标
-- 🔍 **强大过滤**: 支持正则表达式和关键词匹配，黑白名单模式
-- 🚫 **忽略列表**: 支持按用户 ID 和关键词忽略特定消息
-- 🌐 **Web 管理界面**: 基于 Gradio 的直观配置管理和实时日志查看
-- 🔐 **双重认证模式**: 支持 User Session（手机号登录）和 Bot Token 两种方式
-- 📊 **实时监控**: 实时显示 Bot 状态、统计信息和日志
-- 🐳 **Docker 支持**: 一键部署，开箱即用
-- 🔒 **安全可靠**: 支持 Web 界面 HTTP Basic Auth 认证
-- ⚡ **性能优化**: 异步处理，支持速率限制和错误重试
-- 🌍 **代理支持**: 支持 SOCKS5/HTTP 代理配置
+- 🤖 **Smart Forwarding**: Automatically monitor specified Telegram groups/channels and forward messages to multiple targets
+- 📋 **Multi-Rule Management**: Support multiple independent forwarding rules, each with its own sources, targets, and filters
+- 🔍 **Powerful Filtering**: Support regex and keyword matching, whitelist/blacklist modes, media type and file size filtering
+- 🚫 **Ignore List**: Ignore specific messages by user ID and keywords
+- 💪 **Force Forward**: Bypass noforwards restrictions on channels/groups by downloading and re-uploading
+- 📸 **Media Group Support**: Full support for media group (album) forwarding with automatic deduplication and smart filtering
+- 🌐 **Web Management Interface**: Intuitive configuration management and real-time log viewing based on Gradio
+- 🌍 **Internationalization**: Full i18n support with built-in Chinese and English interfaces, switchable in Web UI
+- 🔐 **Dual Authentication Modes**: Support both User Session (phone login) and Bot Token methods
+- 📊 **Real-time Monitoring**: Display Bot status, statistics, and logs in real-time
+- 🐳 **Docker Support**: One-click deployment, ready to use
+- 🔒 **Secure**: Support HTTP Basic Auth for Web interface
+- ⚡ **Performance Optimized**: Asynchronous processing with rate limiting and error retry
+- 🔌 **Proxy Support**: Support SOCKS5/HTTP proxy configuration
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 前置要求
+### Prerequisites
 
-1. **Telegram API 凭据**
-   - 访问 [https://my.telegram.org](https://my.telegram.org)
-   - 创建应用获取 `API_ID` 和 `API_HASH`
+1. **Telegram API Credentials**
+   - Visit [https://my.telegram.org](https://my.telegram.org)
+   - Create an app to get `API_ID` and `API_HASH`
 
-2. **Bot Token**（如果使用 Bot 模式）
-   - 与 [@BotFather](https://t.me/BotFather) 对话创建 Bot
-   - 获取 Bot Token
+2. **Bot Token** (if using Bot mode)
+   - Chat with [@BotFather](https://t.me/BotFather) to create a Bot
+   - Get the Bot Token
 
-### 方式一：Docker 部署（推荐）
+### Method 1: Docker Deployment (Recommended)
 
-1. **克隆项目**
+1. **Clone the project**
    ```bash
    cd tg-box
    ```
 
-2. **配置环境变量**
+2. **Configure environment variables**
    ```bash
-   # 复制示例配置
+   # Copy example configuration
    cp .env.example .env
-   # 编辑配置文件，填入你的 API_ID 和 API_HASH
+   # Edit the config file, fill in your API_ID and API_HASH
    nano .env
    ```
 
-3. **配置转发规则**
+3. **Configure forwarding rules**
    ```bash
    cp config/config.yaml.example config/config.yaml
-   # 编辑 config.yaml，配置源群组和目标群组
+   # Edit config.yaml to configure source and target groups
    nano config/config.yaml
    ```
 
-4. **启动容器**
+4. **Start the container**
    ```bash
    docker-compose up -d
    ```
 
-5. **访问 Web 界面**
-   - 打开浏览器访问: `http://localhost:8080`
-   - 如果配置了 HTTP Basic Auth，输入用户名和密码
+5. **Access Web interface**
+   - Open browser and visit: `http://localhost:8080`
+   - If HTTP Basic Auth is configured, enter username and password
 
-### 方式二：本地运行
+### Method 2: Local Run
 
-1. **安装依赖**
+1. **Install dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **配置文件**（同 Docker 部署步骤 2-3）
+2. **Configuration files** (same as Docker deployment steps 2-3)
 
-3. **运行程序**
+3. **Run the program**
    ```bash
    python -m src.main
    ```
 
-4. **访问 Web 界面**: `http://localhost:8080`
+4. **Access Web interface**: `http://localhost:8080`
 
-## 📖 配置说明
+## 📖 Configuration
 
-### 环境变量（.env）
+### Environment Variables (.env)
 
 ```env
-# Telegram API 凭据（必填）
+# Telegram API credentials (required)
 API_ID=your_api_id
 API_HASH=your_api_hash
 
-# Bot Token（Bot 模式必填）
+# Bot Token (required for Bot mode)
 BOT_TOKEN=your_bot_token
 
-# 会话类型: user 或 bot
-# user: 使用用户账号（可以监控所有群组）
-# bot: 使用 Bot Token（仅能监控 Bot 加入的群组）
+# Session type: user or bot
+# user: Use user account (can monitor all groups)
+# bot: Use Bot Token (can only monitor groups the bot has joined)
 SESSION_TYPE=user
 
-# 代理配置（可选）
-# 支持的协议：socks5, http
-# 示例：socks5://127.0.0.1:1080 或 http://127.0.0.1:1080
+# Proxy configuration (optional)
+# Supported protocols: socks5, http
+# Example: socks5://127.0.0.1:1080 or http://127.0.0.1:1080
 PROXY_URL=
 
-# Web 服务配置
+# Web service configuration
 WEB_HOST=0.0.0.0
 WEB_PORT=8080
 
-# Web 界面认证（推荐在生产环境启用）
+# Web interface authentication (recommended for production)
 WEB_AUTH_USERNAME=
 WEB_AUTH_PASSWORD=
 
-# 日志级别：DEBUG, INFO, WARNING, ERROR
+# Log level: DEBUG, INFO, WARNING, ERROR
 LOG_LEVEL=INFO
+
+# Interface language: zh_CN (Chinese) or en_US (English)
+LANGUAGE=zh_CN
 ```
 
-### 配置文件（config/config.yaml）
+### Configuration File (config/config.yaml)
+
+Two configuration methods are supported:
+
+#### Method 1: Single Rule Configuration (Simple Scenarios)
 
 ```yaml
-# 源群组/频道列表（要监控的）
+# Source groups/channels list (to monitor)
 source_chats:
-  - -100123456789  # 群组 ID
-  - "@channel_name"  # 频道用户名
+  - -100123456789  # Group ID
+  - "@channel_name"  # Channel username
 
-# 目标群组/频道列表（转发到的位置，支持多个目标）
+# Target groups/channels list (forward to, supports multiple targets)
 target_chats:
-  - -100987654321  # 目标群组 1
-  - "@target_channel"  # 目标频道 2
+  - -100987654321  # Target group 1
+  - "@target_channel"  # Target channel 2
 
-# 过滤规则
+# Filter rules
 filters:
-  # 正则表达式（任意匹配即通过）
+  # Regex patterns (any match passes)
   regex_patterns:
-    - "\\[重要\\].*"
-    - "紧急通知.*"
+    - "\\[Important\\].*"
+    - "Urgent notification.*"
 
-  # 关键词（任意匹配即通过）
+  # Keywords (any match passes)
   keywords:
-    - "关键词1"
-    - "关键词2"
+    - "keyword1"
+    - "keyword2"
 
-  # 过滤模式: whitelist（白名单）或 blacklist（黑名单）
+  # Filter mode: whitelist or blacklist
   mode: whitelist
 
-# 转发选项
-forwarding:
-  preserve_format: true  # 保留原始格式
-  add_source_info: true  # 添加来源信息
-  delay: 0.5  # 转发延迟（秒）
+  # Media type filtering (optional)
+  media_types:
+    - text      # Text messages
+    - photo     # Photos
+    - video     # Videos
+    - document  # Documents
+    - audio     # Audio
+    - voice     # Voice messages
+    - sticker   # Stickers
+    - animation # Animations/GIFs
 
-# 忽略列表（优先级高于过滤规则）
+  # File size limits (optional, in bytes)
+  max_file_size: 52428800  # 50MB
+  min_file_size: 0
+
+# Forwarding options
+forwarding:
+  preserve_format: true  # Preserve original format
+  add_source_info: true  # Add source information
+  delay: 0.5  # Forwarding delay (seconds)
+  force_forward: false  # Force forward (bypass noforwards restrictions)
+
+# Ignore list (higher priority than filter rules)
 ignore:
-  # 忽略的用户 ID 列表
+  # Ignored user ID list
   user_ids:
     # - 123456789
 
-  # 忽略的关键词列表（不区分大小写）
+  # Ignored keywords list (case insensitive)
   keywords:
-    # - "广告"
+    # - "spam"
 ```
 
-## 🎮 使用说明
+#### Method 2: Multi-Rule Configuration (Complex Scenarios)
 
-### 认证模式对比
+```yaml
+# Multi-rule configuration, each rule runs independently
+rules:
+  - name: "Rule 1"
+    enabled: true
+    source_chats:
+      - -100123456789
+    target_chats:
+      - -100987654321
+    filters:
+      regex_patterns:
+        - "\\[Important\\].*"
+      mode: whitelist
+    forwarding:
+      preserve_format: true
+      add_source_info: true
+      delay: 0.5
+      force_forward: false
+    ignore:
+      user_ids: []
+      keywords: []
 
-| 特性 | User 模式 | Bot 模式 |
-|------|----------|---------|
-| 认证方式 | 手机号 + 验证码 | Bot Token |
-| 监控范围 | 所有已加入的群组 | 仅 Bot 加入的群组 |
-| Web 界面 | 有认证标签页 | 无认证标签页 |
-| 首次使用 | 需要手机验证 | 无需验证 |
-| 会话持久化 | sessions/ 目录 | sessions/ 目录 |
+  - name: "Rule 2"
+    enabled: true
+    source_chats:
+      - "@source_channel"
+    target_chats:
+      - "@target_channel"
+    filters:
+      keywords:
+        - "keyword"
+      mode: whitelist
+      media_types:
+        - photo
+        - video
+    forwarding:
+      preserve_format: false
+      add_source_info: false
+      delay: 1.0
+      force_forward: true
+    ignore:
+      user_ids: []
+      keywords: []
+```
 
-### User 模式认证流程
+## 🎮 Usage Guide
 
-1. 设置 `SESSION_TYPE=user`
-2. 启动应用，访问 Web 界面
-3. 在「🔐 认证」标签页点击「开始认证」
-4. 输入手机号（国际格式，如 `+8613800138000`）
-5. 输入 Telegram 发送的验证码
-6. 如果启用了两步验证，输入密码
-7. 认证成功后显示当前登录账号信息
+### Authentication Mode Comparison
 
-### 获取群组 ID
+| Feature | User Mode | Bot Mode |
+|---------|-----------|----------|
+| Authentication | Phone + Code | Bot Token |
+| Monitoring Scope | All joined groups | Only groups bot joined |
+| Web Interface | Has auth tab | No auth tab |
+| First Use | Requires phone verification | No verification |
+| Session Persistence | sessions/ directory | sessions/ directory |
 
-1. **使用 @userinfobot**
-   - 将 [@userinfobot](https://t.me/userinfobot) 添加到群组
-   - 在群组中发送任意消息，Bot 会回复群组 ID
+### User Mode Authentication Flow
 
-2. **从消息中获取**
-   - 转发群组消息到 [@userinfobot](https://t.me/userinfobot)
-   - 获取消息来源的群组 ID
+1. Set `SESSION_TYPE=user`
+2. Start the app and access Web interface
+3. Click "Start Authentication" in the "🔐 Authentication" tab
+4. Enter phone number (international format, e.g., `+8613800138000`)
+5. Enter the verification code sent by Telegram
+6. If two-step verification is enabled, enter password
+7. After successful authentication, current account information is displayed
 
-### Web 界面功能
+### Getting Group ID
 
-#### 控制面板
-- **启动/停止/重启**: 控制 Bot 运行状态
-- **刷新状态**: 手动刷新当前状态
-- **状态显示**: 运行状态、已转发、已过滤、总消息数
+1. **Using @userinfobot**
+   - Add [@userinfobot](https://t.me/userinfobot) to the group
+   - Send any message in the group, bot will reply with group ID
 
-#### 配置标签页
-- **源群组配置**: 设置要监控的群组
-- **目标群组配置**: 设置转发目标（支持多个）
-- **过滤规则**: 正则表达式和关键词匹配
-- **忽略列表**: 用户 ID 和关键词屏蔽
-- **转发选项**: 格式保留、来源信息、延迟设置
+2. **From messages**
+   - Forward a group message to [@userinfobot](https://t.me/userinfobot)
+   - Get the group ID from the message source
 
-#### 日志标签页
-- **实时日志**: 查看运行日志
-- **日志行数**: 可调整显示行数
+### Web Interface Features
 
-#### 认证标签页（仅 User 模式）
-- **认证状态**: 显示当前登录状态和账号信息
-- **认证操作**: 开始认证、取消认证
-- **输入表单**: 手机号、验证码、密码
+#### Control Panel
+- **Start/Stop/Restart**: Control Bot running status
+- **Refresh Status**: Manually refresh current status
+- **Status Display**: Running status, forwarded, filtered, total messages
+- **Language Switcher**: Switch between Chinese and English interfaces
 
-## 🔧 常见问题
+#### Configuration Tab
+- **Rule Management**: View, add, edit, delete, enable/disable forwarding rules
+- **Source Groups**: Configure groups to monitor
+- **Target Groups**: Configure forwarding targets (supports multiple)
+- **Filter Rules**: Regex, keyword matching, media type and file size filtering
+- **Ignore List**: User ID and keyword blocking
+- **Forwarding Options**: Format preservation, source info, delay settings, force forward
 
-### 1. User 模式认证
+#### Logs Tab
+- **Real-time Logs**: View running logs
+- **Log Lines**: Adjustable display lines
 
-**如何在 Docker 中进行首次认证？**
-- 方式一：本地先运行完成登录，再将 `sessions/` 目录挂载到容器
-- 方式二：Docker 容器启动后，通过 Web 界面的认证标签页完成认证
+#### Authentication Tab (User Mode Only)
+- **Auth Status**: Display current login status and account info
+- **Auth Operations**: Start authentication, cancel authentication
+- **Input Forms**: Phone number, verification code, password
 
-**会话过期怎么办？**
-- 在 Web 界面的认证标签页点击「取消认证」清除旧会话
-- 重新点击「开始认证」完成新的登录
+## 🔧 FAQ
 
-### 2. Bot 模式配置
+### 1. User Mode Authentication
 
-**为什么看不到认证标签页？**
-- Bot 模式不需要手机验证，认证标签页会自动隐藏
-- 确认 `.env` 中 `SESSION_TYPE=bot` 且 `BOT_TOKEN` 已配置
+**How to authenticate in Docker for the first time?**
+- Method 1: Run locally first to complete login, then mount `sessions/` directory to container
+- Method 2: After Docker container starts, complete authentication through Web interface auth tab
 
-### 3. 消息转发问题
+**What if session expires?**
+- Click "Cancel Authentication" in Web interface auth tab to clear old session
+- Click "Start Authentication" again to complete new login
 
-**消息未转发？**
-检查：
-- Bot 是否正在运行（查看 Web 界面状态）
-- 过滤规则是否正确（检查日志）
-- Bot 是否有发送消息权限
+### 2. Bot Mode Configuration
 
-**触发速率限制 (FloodWait)？**
-- 程序会自动处理并等待
-- 可增加 `forwarding.delay` 延迟时间
+**Why can't I see the authentication tab?**
+- Bot mode doesn't require phone verification, auth tab is automatically hidden
+- Confirm `SESSION_TYPE=bot` and `BOT_TOKEN` are configured in `.env`
 
-### 4. 代理配置
+### 3. Message Forwarding Issues
 
-**如何配置代理？**
+**Messages not forwarding?**
+Check:
+- Is Bot running (check Web interface status)
+- Are filter rules correct (check logs)
+- Does Bot have permission to send messages
+- If using multi-rule configuration, check if rules are enabled
+
+**Triggered rate limit (FloodWait)?**
+- Program will automatically handle and wait
+- Can increase `forwarding.delay` time
+
+**Can't forward restricted channel content?**
+- Enable `forwarding.force_forward: true` for force forward
+- Note: Force forward downloads then re-uploads, may be slower
+
+### 4. Proxy Configuration
+
+**How to configure proxy?**
 ```env
-# SOCKS5 代理
+# SOCKS5 proxy
 PROXY_URL=socks5://127.0.0.1:1080
 
-# HTTP 代理
+# HTTP proxy
 PROXY_URL=http://127.0.0.1:1080
 
-# 带认证的代理
+# Proxy with authentication
 PROXY_URL=socks5://user:password@127.0.0.1:1080
 ```
 
-## 📦 项目结构
+## 📦 Project Structure
 
 ```
 tg-box/
-├── .env.example          # 环境变量示例
-├── config/               # 配置文件目录
+├── .env.example          # Environment variables example
+├── config/               # Configuration directory
 │   └── config.yaml.example
-├── logs/                 # 日志文件
-├── sessions/             # Telegram 会话文件
-├── src/                  # 源代码
-│   ├── webui/            # Gradio Web 界面
-│   │   ├── handlers/     # 业务处理器
-│   │   │   ├── auth.py         # 认证处理
-│   │   │   ├── bot_control.py  # Bot 控制
-│   │   │   ├── config.py       # 配置管理
-│   │   │   └── log.py          # 日志查看
-│   │   ├── app.py        # UI 构建
-│   │   └── utils.py      # 工具函数
-│   ├── main.py           # 主程序入口
-│   ├── config.py         # 配置管理
-│   ├── client.py         # Telegram 客户端
-│   ├── auth_manager.py   # User 模式认证管理
-│   ├── bot_manager.py    # Bot 生命周期管理
-│   ├── filters.py        # 消息过滤
-│   ├── forwarder.py      # 消息转发
-│   ├── constants.py      # 常量定义
-│   ├── utils.py          # 工具函数
-│   └── logger.py         # 日志配置
-├── Dockerfile            # Docker 镜像
-├── docker-compose.yml    # Docker Compose 配置
-└── requirements.txt      # Python 依赖
+├── logs/                 # Log files
+├── sessions/             # Telegram session files
+├── src/                  # Source code
+│   ├── i18n/             # Internationalization module
+│   │   ├── locales/      # Language packs
+│   │   │   ├── zh_CN.py  # Chinese translation
+│   │   │   └── en_US.py  # English translation
+│   │   └── translator.py # Translator
+│   ├── forwarder/        # Forwarding module
+│   │   ├── forwarder.py  # Message forwarding logic
+│   │   ├── downloader.py # Media downloader
+│   │   └── media_group.py # Media group handling
+│   ├── webui/            # Gradio Web interface
+│   │   ├── handlers/     # Business handlers
+│   │   │   ├── auth.py         # Authentication handling
+│   │   │   ├── bot_control.py  # Bot control
+│   │   │   ├── config.py       # Configuration management
+│   │   │   └── log.py          # Log viewing
+│   │   ├── app.py        # UI construction
+│   │   └── utils.py      # Utility functions
+│   ├── main.py           # Main program entry
+│   ├── config.py         # Configuration management
+│   ├── rule.py           # Forwarding rule data class
+│   ├── client.py         # Telegram client
+│   ├── auth_manager.py   # User mode auth management
+│   ├── bot_manager.py    # Bot lifecycle management
+│   ├── filters.py        # Message filtering
+│   ├── constants.py      # Constants definition
+│   ├── utils.py          # Utility functions
+│   └── logger.py         # Logging configuration
+├── Dockerfile            # Docker image
+├── docker-compose.yml    # Docker Compose configuration
+└── requirements.txt      # Python dependencies
 ```
 
-## 🛡️ 安全建议
+## 🛡️ Security Recommendations
 
-1. **保护敏感信息**
-   - 不要将 `.env` 文件提交到 Git
-   - 定期更改 API 凭据
-   - 妥善保管会话文件
+1. **Protect Sensitive Information**
+   - Don't commit `.env` file to Git
+   - Regularly change API credentials
+   - Keep session files secure
 
-2. **Web 界面安全**
-   - 生产环境必须配置 `WEB_AUTH_USERNAME` 和 `WEB_AUTH_PASSWORD`
-   - 使用反向代理（如 Nginx）添加 HTTPS
+2. **Web Interface Security**
+   - Must configure `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` in production
+   - Use reverse proxy (like Nginx) to add HTTPS
 
-3. **限制访问**
-   - 在生产环境中配置防火墙
-   - 限制 Web 界面的访问 IP
+3. **Restrict Access**
+   - Configure firewall in production environment
+   - Restrict Web interface access IPs
 
-4. **定期备份**
-   - 备份会话文件（`sessions/`）
-   - 备份配置文件
+4. **Regular Backups**
+   - Backup session files (`sessions/`)
+   - Backup configuration files
 
-## 📝 许可证
+## 📝 License
 
 MIT License
 
-## 🤝 贡献
+## 🤝 Contributing
 
-欢迎提交 Issue 和 Pull Request！
+Issues and Pull Requests are welcome!
 
-## 📧 联系
+## 📧 Contact
 
-如有问题，请提交 Issue。
+For questions, please submit an Issue.

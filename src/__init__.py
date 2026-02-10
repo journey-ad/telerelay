@@ -1,5 +1,5 @@
 """
-Telegram 消息转发工具
+Telegram Message Forwarder
 """
 
 __version__ = "1.0.0"

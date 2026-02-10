@@ -2,24 +2,21 @@ version: '3.8'
 
 services:
   telegram-forwarder:
-    build: .
     container_name: telegram-forwarder
+    image: ghcr.io/journey-ad/telegram-forwarder:latest
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      # 配置目录（需要先创建 config.yaml）
+      # Environment variables file
+      - ./.env:/app/.env
+      # Configuration directory
       - ./config:/app/config
-      # 会话文件持久化
+      # Session file persistence
       - ./sessions:/app/sessions
-      # 日志持久化
+      # Log persistence
       - ./logs:/app/logs
+    env_file:
+      - .env
     environment:
       - TZ=Asia/Shanghai
-    # 健康检查
-    healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8080/api/bot/status')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s

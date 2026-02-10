@@ -1,5 +1,5 @@
 """
-媒体下载模块
+Media download module
 """
 import os
 import tempfile
@@ -7,22 +7,23 @@ from typing import List, Optional
 from telethon import TelegramClient
 from telethon.tl.types import Message
 from src.logger import get_logger
+from src.i18n import t
 
 logger = get_logger()
 
-# 临时文件目录
+# Temporary file directory
 TEMP_DIR = os.path.join(tempfile.gettempdir(), "tg-box-cache")
 
 
 class MediaDownloader:
-    """处理媒体文件的下载和清理"""
+    """Handle media file download and cleanup"""
 
     def __init__(self, client: TelegramClient, rule_name: str):
         self.client = client
         self.rule_name = rule_name
 
     async def download(self, messages: List[Message]) -> List[str]:
-        """下载消息的媒体文件，返回文件路径列表"""
+        """Download media files from messages, return list of file paths"""
         os.makedirs(TEMP_DIR, exist_ok=True)
         file_paths = []
 
@@ -36,22 +37,22 @@ class MediaDownloader:
         return file_paths
 
     async def _download_single(self, message: Message) -> Optional[str]:
-        """下载单条消息的媒体"""
+        """Download media from a single message"""
         if not message.media:
             return None
 
-        logger.info(f"[{self.rule_name}] ⬇️ 开始下载媒体文件...")
+        logger.info(t("log.forward.downloader.downloading"))
         path = await self.client.download_media(message, file=TEMP_DIR)
 
         if path:
             file_size_mb = os.path.getsize(path) / 1048576
-            logger.info(f"[{self.rule_name}] ⬇️ 下载完成: {os.path.basename(path)} ({file_size_mb:.1f} MB)")
+            logger.info(t("log.forward.downloader.complete", filename=os.path.basename(path), size=f"{file_size_mb:.1f}"))
 
         return path
 
     async def _download_group(self, messages: List[Message]) -> List[str]:
-        """下载媒体组的所有媒体"""
-        logger.info(f"[{self.rule_name}] ⬇️ 开始下载媒体组 ({len(messages)} 项)...")
+        """Download all media from a media group"""
+        logger.info(t("log.forward.downloader.group_downloading", count=len(messages)))
         file_paths = []
 
         for i, msg in enumerate(messages):
@@ -59,20 +60,20 @@ class MediaDownloader:
                 path = await self.client.download_media(msg, file=TEMP_DIR)
                 if path:
                     file_paths.append(path)
-                    logger.debug(f"[{self.rule_name}] ⬇️ 下载 {i+1}/{len(messages)}: {os.path.basename(path)}")
+                    logger.debug(t("log.forward.downloader.group_progress", current=i+1, total=len(messages), filename=os.path.basename(path)))
 
         if file_paths:
-            logger.info(f"[{self.rule_name}] ⬇️ 媒体组下载完成: {len(file_paths)} 个文件")
+            logger.info(t("log.forward.downloader.group_complete", count=len(file_paths)))
 
         return file_paths
 
     @staticmethod
     def cleanup(file_paths: List[str]) -> None:
-        """清理临时文件"""
+        """Cleanup temporary files"""
         for path in file_paths:
             if path and os.path.exists(path):
                 try:
                     os.remove(path)
-                    logger.debug(f"已清理临时文件: {path}")
+                    logger.debug(t("log.forward.downloader.cleanup", path=path))
                 except OSError as e:
-                    logger.warning(f"清理临时文件失败: {path}, {e}")
+                    logger.warning(t("log.forward.downloader.cleanup_failed", path=path, error=e))

@@ -1,5 +1,5 @@
 """
-WebUI处理器模块
+WebUI handlers module
 """
 from .bot_control import BotControlHandler
 from .config import ConfigHandler

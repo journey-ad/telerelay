@@ -1,34 +1,35 @@
 """
-转发规则数据类
-定义多规则组的数据结构
+Forwarding rule data class
+Defines data structure for multi-rule groups
 """
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
+from src.i18n import t
 
 
 @dataclass
 class ForwardingRule:
-    """转发规则"""
+    """Forwarding rule"""
     name: str
     enabled: bool = True
-    
-    # 源和目标
+
+    # Source and target
     source_chats: List[Any] = field(default_factory=list)
     target_chats: List[Any] = field(default_factory=list)
-    
-    # 过滤配置
+
+    # Filter configuration
     filter_mode: str = "whitelist"
     filter_keywords: List[str] = field(default_factory=list)
     filter_regex_patterns: List[str] = field(default_factory=list)
     filter_media_types: List[str] = field(default_factory=list)
     filter_max_file_size: int = 0
     filter_min_file_size: int = 0
-    
-    # 忽略配置
+
+    # Ignore configuration
     ignored_user_ids: List[int] = field(default_factory=list)
     ignored_keywords: List[str] = field(default_factory=list)
-    
-    # 转发配置
+
+    # Forwarding configuration
     preserve_format: bool = True
     add_source_info: bool = True
     delay: float = 0.5
@@ -36,13 +37,13 @@ class ForwardingRule:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ForwardingRule':
-        """从字典创建规则"""
+        """Create rule from dictionary"""
         filters = data.get("filters", {})
         ignore = data.get("ignore", {})
         forwarding = data.get("forwarding", {})
         
         return cls(
-            name=data.get("name", "默认规则"),
+            name=data.get("name", t("ui.status.default_rule")),
             enabled=data.get("enabled", True),
             source_chats=data.get("source_chats", []),
             target_chats=data.get("target_chats", []),
@@ -61,7 +62,7 @@ class ForwardingRule:
         )
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式（用于保存配置）"""
+        """Convert to dictionary format (for saving configuration)"""
         return {
             "name": self.name,
             "enabled": self.enabled,
@@ -90,18 +91,18 @@ class ForwardingRule:
 
 def load_rules_from_config(config_data: Dict[str, Any]) -> List[ForwardingRule]:
     """
-    从配置数据加载规则列表
-    
-    支持新格式（forwarding_rules）和旧格式（扁平结构）
+    Load rule list from configuration data
+
+    Supports new format (forwarding_rules) and old format (flat structure)
     """
-    # 新格式：forwarding_rules 列表
+    # New format: forwarding_rules list
     if "forwarding_rules" in config_data:
         return [ForwardingRule.from_dict(rule) for rule in config_data["forwarding_rules"]]
-    
-    # 旧格式：转换为单规则
+
+    # Old format: convert to single rule
     if config_data.get("source_chats"):
         return [ForwardingRule.from_dict({
-            "name": "默认规则",
+            "name": t("ui.status.default_rule"),
             "enabled": True,
             "source_chats": config_data.get("source_chats", []),
             "target_chats": config_data.get("target_chats", []),
@@ -114,7 +115,7 @@ def load_rules_from_config(config_data: Dict[str, Any]) -> List[ForwardingRule]:
 
 
 def save_rules_to_config(rules: List[ForwardingRule]) -> Dict[str, Any]:
-    """将规则列表保存为配置数据"""
+    """Save rule list as configuration data"""
     return {
         "forwarding_rules": [rule.to_dict() for rule in rules]
     }

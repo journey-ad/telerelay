@@ -1,6 +1,6 @@
 """
-Telegram 消息转发工具 - 主入口
-使用 Gradio 提供 WebUI 界面
+Telegram Message Forwarder - Main Entry Point
+Provides WebUI interface using Gradio
 """
 import sys
 from pathlib import Path
@@ -9,58 +9,62 @@ from src.config import create_config
 from src.bot_manager import BotManager
 from src.auth_manager import AuthManager
 from src.logger import setup_logger, get_logger, add_ui_update_handler
+from src.i18n import t, set_language
 
-# 设置日志
+# Setup logger
 logger = setup_logger()
 
 
 def main():
-    """启动应用"""
+    """Start the application"""
     try:
-        # 创建配置
+        # Create configuration
         config = create_config()
 
+        # Set language
+        set_language(config.language)
+
         logger.info("=" * 60)
-        logger.info("Telegram 消息转发工具启动中...")
+        logger.info(t("log.main.startup"))
         logger.info("=" * 60)
 
-        # 重新设置日志级别
+        # Reset log level
         setup_logger(level=config.log_level)
 
-        # 创建 AuthManager（仅在 User 模式下需要）
+        # Create AuthManager (only needed in User mode)
         auth_manager = None
         if config.session_type == "user":
             auth_manager = AuthManager(input_timeout=300)
-            logger.info("✓ AuthManager 已创建（User 模式）")
+            logger.info(t("log.main.auth_manager_created"))
 
-        # 创建Bot管理器
+        # Create Bot manager
         bot_manager = BotManager(config, auth_manager)
 
-        # 日志记录时自动触发 UI 更新
+        # Automatically trigger UI update when logging
         add_ui_update_handler(bot_manager)
 
-        # 如果存在 session 缓存，自动尝试登录
+        # Auto-login if session cache exists
         session_file = Path("sessions/telegram_session.session")
         if session_file.exists():
-            logger.info("检测到 session 缓存，自动启动 Bot...")
+            logger.info(t("log.main.session_auto_start"))
             bot_manager.start()
 
-        # 创建 Gradio 界面
+        # Create Gradio interface
         app = create_ui(config, bot_manager, auth_manager)
 
-        # 显示访问信息
-        logger.info(f"Web 界面地址: http://{config.web_host}:{config.web_port}")
+        # Display access information
+        logger.info(t("log.main.web_address", host=config.web_host, port=config.web_port))
         logger.info("=" * 60)
 
-        # 准备认证配置
+        # Prepare authentication configuration
         auth = None
         if config.web_auth_username and config.web_auth_password:
             auth = (config.web_auth_username, config.web_auth_password)
-            logger.info("✓ HTTP Basic Auth 已启用")
+            logger.info(t("log.main.http_auth_enabled"))
         else:
-            logger.warning("⚠ HTTP Basic Auth 未启用，建议在生产环境配置认证")
+            logger.warning(t("log.main.http_auth_disabled"))
 
-        # 启动 Gradio 服务
+        # Start Gradio service
         app.launch(
             server_name=config.web_host,
             server_port=config.web_port,
@@ -71,9 +75,9 @@ def main():
         )
 
     except KeyboardInterrupt:
-        logger.info("\n收到终止信号，正在关闭...")
+        logger.info(t("log.main.shutdown"))
     except Exception as e:
-        logger.error(f"程序运行出错: {e}", exc_info=True)
+        logger.error(t("log.main.error", error=str(e)), exc_info=True)
         sys.exit(1)
 
 

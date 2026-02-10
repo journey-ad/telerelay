@@ -1,6 +1,6 @@
 """
-配置加载和验证模块
-支持从 .env 和 config.yaml 加载配置
+Configuration loading and validation module
+Supports loading configuration from .env and config.yaml
 """
 import os
 import yaml
@@ -9,69 +9,70 @@ from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 from src.logger import get_logger
 from src.rule import ForwardingRule, load_rules_from_config
+from src.i18n import t
 
 logger = get_logger()
 
 
 class Config:
-    """配置管理类"""
+    """Configuration management class"""
     
     def __init__(self, env_file: str = ".env", config_file: str = "config/config.yaml"):
         """
-        初始化配置
-        
-        参数:
-            env_file: 环境变量文件路径
-            config_file: YAML 配置文件路径
+        Initialize configuration
+
+        Args:
+            env_file: Path to environment variable file
+            config_file: Path to YAML configuration file
         """
         self.env_file = env_file
         self.config_file = config_file
         self.config_data: Dict[str, Any] = {}
-        
-        # 加载配置
+
+        # Load configuration
         self.load()
     
     def load(self) -> None:
-        """加载所有配置"""
-        # 加载环境变量
+        """Load all configuration"""
+        # Load environment variables
         env_path = Path(self.env_file)
         if env_path.exists():
             load_dotenv(env_path)
-            logger.info(f"已加载环境变量文件: {env_path}")
+            logger.info(t("log.config.env_loaded", path=env_path))
         else:
-            logger.warning(f"环境变量文件不存在: {env_path}")
-        
-        # 加载 YAML 配置
+            logger.warning(t("log.config.env_not_found", path=env_path))
+
+        # Load YAML configuration
         config_path = Path(self.config_file)
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 self.config_data = yaml.safe_load(f) or {}
-            logger.info(f"已加载 YAML 配置文件: {config_path}")
+            logger.info(t("log.config.yaml_loaded", path=config_path))
         else:
-            logger.warning(f"YAML 配置文件不存在: {config_path}")
+            logger.warning(t("log.config.yaml_not_found", path=config_path))
             self.config_data = {}
     
     def save(self) -> None:
-        """保存配置到 YAML 文件"""
+        """Save configuration to YAML file"""
         config_path = Path(self.config_file)
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(config_path, 'w', encoding='utf-8') as f:
             yaml.dump(self.config_data, f, allow_unicode=True, default_flow_style=False)
-        
-        logger.debug(f"已保存配置到: {config_path}")
+
+        logger.debug(t("log.config.saved", path=config_path))
     
     def update(self, new_config: Dict[str, Any]) -> None:
         """
-        更新配置
-        
-        参数:
-            new_config: 新的配置数据
+        Update configuration
+
+        Args:
+            new_config: New configuration data
         """
         self.config_data.update(new_config)
         self.save()
-    
-    # Telegram API 配置
+
+    # Telegram API configuration
     @property
     def api_id(self) -> Optional[int]:
         """Telegram API ID"""
@@ -90,164 +91,179 @@ class Config:
     
     @property
     def session_type(self) -> str:
-        """会话类型: user 或 bot"""
+        """Session type: user or bot"""
         return os.getenv("SESSION_TYPE", "user")
     
     @property
     def proxy_url(self) -> Optional[str]:
-        """代理 URL（可选）"""
+        """Proxy URL (optional)"""
         return os.getenv("PROXY_URL") or None
-    
-    # Web 服务配置
+
+    # Web service configuration
     @property
     def web_host(self) -> str:
-        """Web 服务主机"""
+        """Web service host"""
         return os.getenv("WEB_HOST", "0.0.0.0")
     
     @property
     def web_port(self) -> int:
-        """Web 服务端口"""
+        """Web service port"""
         return int(os.getenv("WEB_PORT", "8080"))
     
     @property
     def web_auth_username(self) -> str:
-        """Web 认证用户名"""
+        """Web authentication username"""
         return os.getenv("WEB_AUTH_USERNAME", "")
     
     @property
     def web_auth_password(self) -> str:
-        """Web 认证密码"""
+        """Web authentication password"""
         return os.getenv("WEB_AUTH_PASSWORD", "")
-    
-    # 日志配置
+
+    # Logging configuration
     @property
     def log_level(self) -> str:
-        """日志级别"""
+        """Log level"""
         return os.getenv("LOG_LEVEL", "INFO")
-    
-    # 源和目标配置
+
+    # Language configuration
+    @property
+    def language(self) -> str:
+        """Interface language"""
+        # Priority: config.yaml > environment variable > default Chinese
+        config_lang = self.config_data.get("language")
+        if config_lang:
+            return config_lang
+        return os.getenv("LANGUAGE", "zh_CN")
+
+    def set_language(self, lang: str):
+        """Set language and save to configuration file"""
+        self.config_data["language"] = lang
+        self.save()
+
+    # Source and target configuration
     @property
     def source_chats(self) -> List[Any]:
-        """源群组/频道列表"""
+        """Source group/channel list"""
         return self.config_data.get("source_chats", [])
     
     @property
     def target_chats(self) -> List[Any]:
-        """目标群组/频道列表"""
+        """Target group/channel list"""
         return self.config_data.get("target_chats", [])
-    
-    # 过滤规则配置
+
+    # Filter rules configuration
     @property
     def filter_regex_patterns(self) -> List[str]:
-        """正则表达式过滤规则"""
+        """Regular expression filter rules"""
         filters = self.config_data.get("filters", {})
         return filters.get("regex_patterns", [])
     
     @property
     def filter_keywords(self) -> List[str]:
-        """关键词过滤规则"""
+        """Keyword filter rules"""
         filters = self.config_data.get("filters", {})
         return filters.get("keywords", [])
     
     @property
     def filter_mode(self) -> str:
-        """过滤模式: whitelist 或 blacklist"""
+        """Filter mode: whitelist or blacklist"""
         filters = self.config_data.get("filters", {})
         return filters.get("mode", "whitelist")
     
     @property
     def filter_media_types(self) -> List[str]:
-        """允许的媒体类型列表（空=全部允许）"""
+        """Allowed media types list (empty = all allowed)"""
         filters = self.config_data.get("filters", {})
         return filters.get("media_types", [])
     
     @property
     def filter_max_file_size(self) -> int:
-        """最大文件大小（字节），0=不限制"""
+        """Maximum file size (bytes), 0 = no limit"""
         filters = self.config_data.get("filters", {})
         return int(filters.get("max_file_size", 0))
     
     @property
     def filter_min_file_size(self) -> int:
-        """最小文件大小（字节）"""
+        """Minimum file size (bytes)"""
         filters = self.config_data.get("filters", {})
         return int(filters.get("min_file_size", 0))
-    
-    # 忽略列表配置
+
+    # Ignore list configuration
     @property
     def ignored_user_ids(self) -> List[int]:
-        """忽略的用户 ID 列表"""
+        """Ignored user ID list"""
         ignore = self.config_data.get("ignore", {})
         user_ids = ignore.get("user_ids", [])
-        # 确保转换为整数列表，过滤掉 None 值
+        # Ensure conversion to integer list, filter out None values
         return [int(uid) for uid in user_ids if uid is not None]
     
     @property
     def ignored_keywords(self) -> List[str]:
-        """忽略的关键词列表"""
+        """Ignored keywords list"""
         ignore = self.config_data.get("ignore", {})
         return ignore.get("keywords", [])
-    
-    # 转发选项配置
+
+    # Forwarding options configuration
     @property
     def preserve_format(self) -> bool:
-        """是否保留原始格式"""
+        """Whether to preserve original format"""
         forwarding = self.config_data.get("forwarding", {})
         return forwarding.get("preserve_format", True)
     
     @property
     def add_source_info(self) -> bool:
-        """是否添加来源信息"""
+        """Whether to add source information"""
         forwarding = self.config_data.get("forwarding", {})
         return forwarding.get("add_source_info", True)
     
     @property
     def forward_delay(self) -> float:
-        """转发延迟（秒）"""
+        """Forwarding delay (seconds)"""
         forwarding = self.config_data.get("forwarding", {})
         return float(forwarding.get("delay", 0.5))
     
     def get_forwarding_rules(self) -> List[ForwardingRule]:
-        """获取转发规则列表"""
+        """Get forwarding rules list"""
         return load_rules_from_config(self.config_data)
     
     def get_enabled_rules(self) -> List[ForwardingRule]:
-        """获取启用的规则"""
+        """Get enabled rules"""
         return [r for r in self.get_forwarding_rules() if r.enabled]
     
     def validate(self) -> tuple[bool, str]:
-        """验证配置是否完整"""
-        # 验证 API 凭据
+        """Validate if configuration is complete"""
+        # Validate API credentials
         if not self.api_id or not self.api_hash:
-            return False, "缺少 API_ID 或 API_HASH 配置"
-        
-        # 如果是 bot 模式，需要 Bot Token
+            return False, t("message.validation.api_missing")
+
+        # If in bot mode, Bot Token is required
         if self.session_type == "bot" and not self.bot_token:
-            return False, "Bot 模式需要配置 BOT_TOKEN"
-        
-        # 验证规则
+            return False, t("message.validation.bot_token_required")
+
+        # Validate rules
         rules = self.get_enabled_rules()
         if not rules:
-            return False, "未配置任何启用的转发规则"
-        
+            return False, t("message.validation.no_rules")
+
         for rule in rules:
             if not rule.source_chats:
-                return False, f"规则 '{rule.name}' 未配置源群组"
+                return False, t("message.validation.no_source", rule=rule.name)
             if not rule.target_chats:
-                return False, f"规则 '{rule.name}' 未配置目标群组"
-        
-        return True, "配置验证通过"
+                return False, t("message.validation.no_target", rule=rule.name)
+
+        return True, t("message.validation.passed")
     
     def to_dict(self) -> Dict[str, Any]:
         """
-        将配置转换为字典
-        
-        返回:
-            配置字典
+        Convert configuration to dictionary
+
+        Returns:
+            Configuration dictionary
         """
         return {
             "api_id": self.api_id,
-            "api_hash": "***" if self.api_hash else None,  # 隐藏敏感信息
+            "api_hash": "***" if self.api_hash else None,  # Hide sensitive information
             "bot_token": "***" if self.bot_token else None,
             "session_type": self.session_type,
             "web_host": self.web_host,
@@ -257,16 +273,16 @@ class Config:
         }
 
 
-# 工厂函数
+# Factory function
 def create_config(env_file: str = ".env", config_file: str = "config/config.yaml") -> Config:
     """
-    创建配置实例
+    Create configuration instance
 
-    参数:
-        env_file: 环境变量文件路径
-        config_file: YAML配置文件路径
+    Args:
+        env_file: Path to environment variable file
+        config_file: Path to YAML configuration file
 
-    返回:
-        Config对象
+    Returns:
+        Config object
     """
     return Config(env_file, config_file)

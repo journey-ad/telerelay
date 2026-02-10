@@ -1,40 +1,41 @@
-"""认证处理器"""
+"""Authentication Handler"""
 import gradio as gr
 from typing import Tuple, Optional
 from src.auth_manager import AuthManager
 from src.bot_manager import BotManager
 from src.logger import get_logger
+from src.i18n import t
 from ..utils import format_message
 
 logger = get_logger()
 
-# 状态描述映射
+# State description mapping
 STATE_DESCRIPTIONS = {
-    "idle": "未开始认证",
-    "connecting": "🔄 正在连接...",
-    "waiting_phone": "⏳ 请输入手机号",
-    "waiting_code": "⏳ 验证码已发送到您的 Telegram，请查收",
-    "waiting_password": "⏳ 检测到两步验证，请输入密码",
-    "success": "✅ 认证成功！",
-    "error": "❌ 认证失败"
+    "idle": t("ui.auth.idle"),
+    "connecting": t("ui.auth.connecting"),
+    "waiting_phone": t("ui.auth.waiting_phone"),
+    "waiting_code": t("ui.auth.waiting_code"),
+    "waiting_password": t("ui.auth.waiting_password"),
+    "success": t("ui.auth.success"),
+    "error": t("ui.auth.error")
 }
 
 
 class AuthHandler:
-    """认证处理器"""
+    """Authentication Handler"""
 
     def __init__(self, auth_manager: AuthManager, bot_manager: BotManager):
         self.auth_manager = auth_manager
         self.bot_manager = bot_manager
 
     def get_auth_state(self) -> Tuple[str, dict, dict, dict, dict, dict, dict, dict]:
-        """获取认证状态
+        """Get authentication state
 
-        返回:
-            (状态文本, phone_input可见性, submit_phone_btn可见性,
-             code_input可见性, submit_code_btn可见性,
-             password_input可见性, submit_password_btn可见性,
-             error可见性)
+        Returns:
+            (status text, phone_input visibility, submit_phone_btn visibility,
+             code_input visibility, submit_code_btn visibility,
+             password_input visibility, submit_password_btn visibility,
+             error visibility)
         """
         try:
             state_info = self.auth_manager.get_state()
@@ -42,14 +43,14 @@ class AuthHandler:
             error = state_info["error"]
             user_info = state_info.get("user_info", "")
 
-            # 状态文本
-            status_text = STATE_DESCRIPTIONS.get(state, "未知状态")
+            # Status text
+            status_text = STATE_DESCRIPTIONS.get(state, t("ui.auth.unknown"))
 
-            # 如果认证成功且有用户信息，显示用户信息
+            # If authentication is successful and has user info, display user info
             if state == "success" and user_info:
-                status_text = f"✅ 已登录: {user_info}"
+                status_text = t("ui.auth.logged_in", user_info=user_info)
 
-            # 控制各输入组件的可见性
+            # Control visibility of each input component
             phone_visible = (state == "waiting_phone")
             code_visible = (state == "waiting_code")
             password_visible = (state == "waiting_password")
@@ -67,9 +68,9 @@ class AuthHandler:
             )
 
         except Exception as e:
-            logger.error(f"获取认证状态失败: {e}", exc_info=True)
+            logger.error(t("log.auth.get_failed", name=t("log.auth.auth_state"), error=str(e)), exc_info=True)
             return (
-                "❌ 状态异常",
+                t("ui.status.error"),
                 gr.update(visible=False),
                 gr.update(visible=False),
                 gr.update(visible=False),
@@ -80,125 +81,125 @@ class AuthHandler:
             )
 
     def start_auth(self) -> str:
-        """开始认证流程
+        """Start authentication process
 
-        返回:
-            操作结果消息
+        Returns:
+            Operation result message
         """
         try:
-            # 如果 bot 已在运行，检查认证状态
+            # If bot is already running, check authentication status
             if self.bot_manager.is_running:
                 state_info = self.auth_manager.get_state()
                 state = state_info["state"]
 
-                # 如果正在认证过程中，提示用户
+                # If in authentication process, prompt user
                 if state in ["waiting_phone", "waiting_code", "waiting_password"]:
-                    return format_message(f"认证正在进行中，{STATE_DESCRIPTIONS.get(state, '请按提示操作')}", "info")
+                    return format_message(t("message.auth.in_progress", state=STATE_DESCRIPTIONS.get(state, "")), "info")
 
-                # 如果认证已成功
+                # If authentication is already successful
                 if state == "success":
-                    return format_message("认证已完成，Bot 正在运行中", "success")
+                    return format_message(t("message.auth.completed"), "success")
 
-                # 其他情况，提示无需重新认证
-                return format_message("Bot 已在运行中", "info")
+                # In other cases, no need to re-authenticate
+                return format_message(t("message.bot.already_running"), "info")
 
-            # 重置认证状态
+            # Reset authentication state
             self.auth_manager.reset()
 
-            # 启动 Bot（会触发认证流程）
+            # Start Bot (will trigger authentication process)
             success = self.bot_manager.start()
 
             if success:
-                logger.info("认证流程已启动")
-                return format_message("认证流程已启动，请按提示操作", "success")
+                logger.info(t("log.auth.submitted", name=t("log.auth.auth_flow")))
+                return format_message(t("message.auth.started"), "success")
             else:
-                return format_message("启动认证流程失败", "error")
+                return format_message(t("message.auth.start_failed"), "error")
 
         except Exception as e:
-            logger.error(f"启动认证失败: {e}", exc_info=True)
-            return format_message(f"启动认证失败: {str(e)}", "error")
+            logger.error(t("log.auth.get_failed", name=t("log.auth.start_auth"), error=str(e)), exc_info=True)
+            return format_message(t("message.auth.start_failed") + f": {str(e)}", "error")
 
     def cancel_auth(self) -> str:
-        """取消认证流程
+        """Cancel authentication process
 
-        返回:
-            操作结果消息
+        Returns:
+            Operation result message
         """
         try:
-            # 停止 Bot
+            # Stop Bot
             if self.bot_manager.is_running:
                 self.bot_manager.stop()
 
-            # 清除 session 文件
+            # Clear session file
             from src.client import TelegramClientManager
             TelegramClientManager(self.bot_manager.config).clear_session()
 
-            # 重置认证状态
+            # Reset authentication state
             self.auth_manager.reset()
 
-            logger.info("认证已取消，session 已清除")
-            return format_message("认证已取消，session 已清除", "info")
+            logger.info(t("log.auth.reset") + t("misc.session_cleared"))
+            return format_message(t("message.auth.cancelled"), "info")
 
         except Exception as e:
-            logger.error(f"取消认证失败: {e}", exc_info=True)
-            return format_message(f"取消认证失败: {str(e)}", "error")
+            logger.error(t("log.auth.get_failed", name=t("log.auth.cancel_auth"), error=str(e)), exc_info=True)
+            return format_message(t("message.auth.cancel_failed", error=str(e)), "error")
 
     def submit_phone(self, phone: str) -> str:
-        """提交手机号
+        """Submit phone number
 
-        参数:
-            phone: 手机号
+        Args:
+            phone: Phone number
 
-        返回:
-            操作结果消息
+        Returns:
+            Operation result message
         """
         try:
             success = self.auth_manager.submit_phone(phone)
             if success:
-                return format_message("手机号已提交，等待验证码...", "success")
+                return format_message(t("message.auth.phone_submitted"), "success")
             else:
-                return format_message("提交手机号失败，请检查格式", "error")
+                return format_message(t("message.auth.phone_invalid"), "error")
 
         except Exception as e:
-            logger.error(f"提交手机号失败: {e}", exc_info=True)
+            logger.error(t("log.auth.get_failed", name=t("log.auth.submit_phone"), error=str(e)), exc_info=True)
             return format_message(str(e), "error")
 
     def submit_code(self, code: str) -> str:
-        """提交验证码
+        """Submit verification code
 
-        参数:
-            code: 验证码
+        Args:
+            code: Verification code
 
-        返回:
-            操作结果消息
+        Returns:
+            Operation result message
         """
         try:
             success = self.auth_manager.submit_code(code)
             if success:
-                return format_message("验证码已提交，正在验证...", "success")
+                return format_message(t("message.auth.code_submitted"), "success")
             else:
-                return format_message("提交验证码失败", "error")
+                return format_message(t("message.auth.code_failed"), "error")
 
         except Exception as e:
-            logger.error(f"提交验证码失败: {e}", exc_info=True)
+            logger.error(t("log.auth.get_failed", name=t("log.auth.submit_code"), error=str(e)), exc_info=True)
             return format_message(str(e), "error")
 
     def submit_password(self, password: str) -> str:
-        """提交两步验证密码
+        """Submit two-step verification password
 
-        参数:
-            password: 密码
+        Args:
+            password: Password
 
-        返回:
-            操作结果消息
+        Returns:
+            Operation result message
         """
         try:
             success = self.auth_manager.submit_password(password)
             if success:
-                return format_message("密码已提交，正在验证...", "success")
+                return format_message(t("message.auth.password_submitted"), "success")
             else:
-                return format_message("提交密码失败", "error")
+                return format_message(t("message.auth.password_failed"), "error")
 
         except Exception as e:
-            logger.error(f"提交密码失败: {e}", exc_info=True)
+            logger.error(t("log.auth.get_failed", name=t("log.auth.submit_password"), error=str(e)), exc_info=True)
             return format_message(str(e), "error")

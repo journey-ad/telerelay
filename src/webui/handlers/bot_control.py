@@ -1,10 +1,11 @@
 """
-Bot控制处理器
+Bot Control Handler
 """
 from typing import Tuple
 from src.bot_manager import BotManager
 from src.config import Config
 from src.logger import get_logger
+from src.i18n import t
 from ..utils import format_message
 from .auth import STATE_DESCRIPTIONS
 
@@ -12,106 +13,106 @@ logger = get_logger()
 
 
 class BotControlHandler:
-    """Bot控制处理器"""
+    """Bot Control Handler"""
 
     def __init__(self, bot_manager: BotManager, config: Config):
         self.bot_manager = bot_manager
         self.config = config
 
     def start_bot(self) -> str:
-        """启动Bot"""
+        """Start Bot"""
         try:
             if self.bot_manager.is_running:
-                # 如果是 User 模式，检查认证状态
+                # If in User mode, check authentication status
                 if self.config.session_type == "user" and self.bot_manager.auth_manager:
                     state_info = self.bot_manager.auth_manager.get_state()
                     state = state_info["state"]
 
-                    # 如果正在认证过程中，提示用户
+                    # If in authentication process, prompt user
                     if state in ["waiting_phone", "waiting_code", "waiting_password"]:
-                        return format_message(f"认证正在进行中，{STATE_DESCRIPTIONS.get(state, '请按提示操作')}", "info")
+                        return format_message(t("message.bot.auth_in_progress", state=STATE_DESCRIPTIONS.get(state, "")), "info")
 
-                    # 如果认证已成功
+                    # If authentication is already successful
                     if state == "success":
-                        return format_message("Bot 正在运行中", "success")
+                        return format_message(t("message.bot.running"), "success")
 
-                return format_message("Bot 已在运行中", "info")
+                return format_message(t("message.bot.already_running"), "info")
 
-            # 验证配置
+            # Validate configuration
             is_valid, error_msg = self.config.validate()
             if not is_valid:
-                return format_message(f"配置验证失败: {error_msg}", "error")
+                return format_message(t("message.bot.config_invalid", error=error_msg), "error")
 
-            # 启动 Bot（User 模式会自动触发认证流程）
+            # Start Bot (User mode will automatically trigger authentication process)
             success = self.bot_manager.start()
             if success:
-                logger.info("Bot 已通过 WebUI 启动")
+                logger.info(t("log.bot.started", count=1) + t("misc.via_webui"))
                 if self.config.session_type == "user":
-                    # 检查是否有 session 文件
+                    # Check if session file exists
                     from pathlib import Path
                     session_file = Path("sessions/telegram_session.session")
                     if session_file.exists():
-                        return format_message("检测到认证缓存，正在自动登录…", "success")
+                        return format_message(t("message.bot.session_detected"), "success")
                     else:
-                        return format_message("认证流程已启动，请在「🔐 认证」标签页输入认证信息", "success")
+                        return format_message(t("message.bot.auth_started"), "success")
                 else:
-                    return format_message("Bot 已成功启动", "success")
+                    return format_message(t("message.bot.start_success"), "success")
             else:
-                return format_message("Bot 启动失败", "error")
+                return format_message(t("message.bot.start_failed"), "error")
 
         except Exception as e:
-            logger.error(f"启动 Bot 失败: {e}", exc_info=True)
-            return format_message(f"启动失败: {str(e)}", "error")
+            logger.error(t("log.bot.start_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.bot.start_failed") + f": {str(e)}", "error")
 
     def stop_bot(self) -> str:
-        """停止Bot"""
+        """Stop Bot"""
         try:
             if not self.bot_manager.is_running:
-                return format_message("Bot 未在运行", "info")
+                return format_message(t("message.bot.not_running"), "info")
 
             success = self.bot_manager.stop()
             if success:
-                logger.info("Bot 已通过 WebUI 停止")
-                return format_message("Bot 已成功停止", "success")
+                logger.info(t("log.bot.stop_success") + t("misc.via_webui"))
+                return format_message(t("message.bot.stop_success"), "success")
             else:
-                return format_message("Bot 停止失败", "error")
+                return format_message(t("message.bot.stop_failed"), "error")
 
         except Exception as e:
-            logger.error(f"停止 Bot 失败: {e}", exc_info=True)
-            return format_message(f"停止失败: {str(e)}", "error")
+            logger.error(t("log.bot.stop_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.bot.stop_failed") + f": {str(e)}", "error")
 
     def restart_bot(self) -> str:
-        """重启Bot"""
+        """Restart Bot"""
         try:
-            # 重新加载配置
+            # Reload configuration
             self.config.load()
 
             success = self.bot_manager.restart()
 
             if success:
-                logger.info("Bot 已通过 WebUI 重启")
-                return format_message("Bot 已成功重启", "success")
+                logger.info(t("log.bot.started", count=1) + t("misc.via_webui_restart"))
+                return format_message(t("message.bot.restart_success"), "success")
             else:
-                return format_message("Bot 重启失败", "error")
+                return format_message(t("message.bot.restart_failed"), "error")
 
         except Exception as e:
-            logger.error(f"重启 Bot 失败: {e}", exc_info=True)
-            return format_message(f"重启失败: {str(e)}", "error")
+            logger.error(t("log.bot.start_failed", error=str(e)) + t("misc.restart_suffix"), exc_info=True)
+            return format_message(t("message.bot.restart_failed") + f": {str(e)}", "error")
 
     def get_status(self) -> Tuple[str, str, str, str]:
         """
-        获取Bot状态
+        Get Bot status
 
-        返回:
-            (状态文本, 已转发数, 已过滤数, 总计数)
+        Returns:
+            (status text, forwarded count, filtered count, total count)
         """
         try:
             status = self.bot_manager.get_status()
 
             if status['is_running']:
-                status_text = "🟢 运行中" if status['is_connected'] else "🟡 连接中..."
+                status_text = t("ui.status.running") if status['is_connected'] else t("ui.status.connecting")
             else:
-                status_text = "⚫ 已停止"
+                status_text = t("ui.status.stopped")
 
             stats = status.get('stats', {})
             forwarded = str(stats.get('forwarded', 0))
@@ -121,11 +122,11 @@ class BotControlHandler:
             return status_text, forwarded, filtered, total
 
         except Exception as e:
-            logger.error(f"获取状态失败: {e}", exc_info=True)
-            return "❌ 状态异常", "0", "0", "0"
+            logger.error(t("log.auth.get_failed", name=t("log.auth.status"), error=str(e)), exc_info=True)
+            return t("ui.status.error"), "0", "0", "0"
 
     def get_auth_success_message(self) -> str:
-        """获取认证成功消息（如果有）"""
+        """Get authentication success message (if any)"""
         if self.config.session_type == "user" and self.bot_manager.auth_manager:
             user_info = self.bot_manager.get_and_clear_auth_success_user_info()
             if user_info:

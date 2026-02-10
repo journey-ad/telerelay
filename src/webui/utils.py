@@ -1,5 +1,5 @@
 """
-WebUI工具函数
+WebUI utility functions
 """
 from typing import List
 from src.constants import SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX
@@ -7,13 +7,13 @@ from src.constants import SUCCESS_PREFIX, ERROR_PREFIX, INFO_PREFIX
 
 def parse_chat_list(text: str) -> List:
     """
-    解析聊天列表
+    Parse chat list
 
-    参数:
-        text: 多行文本，每行一个聊天 ID 或用户名
+    Args:
+        text: Multi-line text, one chat ID or username per line
 
-    返回:
-        解析后的聊天列表（整数或字符串）
+    Returns:
+        Parsed chat list (integers or strings)
     """
     if not text or not text.strip():
         return []
@@ -23,7 +23,7 @@ def parse_chat_list(text: str) -> List:
         line = line.strip()
         if not line:
             continue
-        # 判断是数字还是用户名
+        # Determine if it's a number or username
         if line.lstrip('-').isdigit():
             result.append(int(line))
         else:
@@ -33,14 +33,14 @@ def parse_chat_list(text: str) -> List:
 
 def format_message(msg: str, msg_type: str) -> str:
     """
-    统一的消息格式化
+    Unified message formatting
 
-    参数:
-        msg: 消息内容
-        msg_type: 消息类型 ('success', 'error', 'info')
+    Args:
+        msg: Message content
+        msg_type: Message type ('success', 'error', 'info')
 
-    返回:
-        格式化后的消息
+    Returns:
+        Formatted message
     """
     prefixes = {
         'success': SUCCESS_PREFIX,

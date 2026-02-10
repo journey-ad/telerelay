@@ -1,5 +1,5 @@
 """
-WebUI模块
+WebUI module
 """
 from .app import create_ui
 

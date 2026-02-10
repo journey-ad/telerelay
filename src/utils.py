@@ -1,19 +1,20 @@
 """
-工具函数模块
+Utility functions module
 """
 from telethon.tl.types import Message
 from telethon.tl import types
+from src.i18n import t
 
 
 def get_media_description(message: Message) -> str:
     """
-    获取媒体消息的描述
+    Get media message description
 
-    参数:
-        message: Telegram 消息对象
+    Args:
+        message: Telegram message object
 
-    返回:
-        媒体描述字符串
+    Returns:
+        Media description string
     """
     if not message.media:
         return ""
@@ -21,30 +22,30 @@ def get_media_description(message: Message) -> str:
     media = message.media
 
     if isinstance(media, types.MessageMediaPhoto):
-        return "[图片]"
+        return t("misc.media.photo")
     elif isinstance(media, types.MessageMediaDocument):
-        # 检查文档类型
+        # Check document type
         if message.gif:
-            return "[GIF]"
+            return t("misc.media.gif")
         elif message.video:
-            return "[视频]"
+            return t("misc.media.video")
         elif message.audio:
-            return "[音频]"
+            return t("misc.media.audio")
         elif message.voice:
-            return "[语音]"
+            return t("misc.media.voice")
         elif message.sticker:
-            return "[贴纸]"
+            return t("misc.media.sticker")
         elif message.video_note:
-            return "[视频消息]"
+            return t("misc.media.video_note")
         else:
-            return "[文件]"
+            return t("misc.media.file")
     elif isinstance(media, types.MessageMediaContact):
-        return "[联系人]"
+        return t("misc.media.contact")
     elif isinstance(media, types.MessageMediaPoll):
-        return "[投票]"
+        return t("misc.media.poll")
     elif isinstance(media, (types.MessageMediaGeo, types.MessageMediaGeoLive)):
-        return "[位置]"
+        return t("misc.media.location")
     elif isinstance(media, types.MessageMediaDice):
-        return "[表情]"
+        return t("misc.media.dice")
     else:
-        return "[媒体]"
+        return t("misc.media.media")

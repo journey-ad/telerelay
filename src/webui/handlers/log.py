@@ -1,39 +1,40 @@
 """
-日志处理器
+Log Handler
 """
 from pathlib import Path
 from src.logger import get_logger
+from src.i18n import t
 
 logger = get_logger()
 
 
 class LogHandler:
-    """日志处理器"""
+    """Log Handler"""
 
     @staticmethod
     def get_recent_logs(lines: int = 50) -> str:
         """
-        获取最近的日志
+        Get recent logs
 
-        参数:
-            lines: 返回的日志行数
+        Args:
+            lines: Number of log lines to return
 
-        返回:
-            日志文本
+        Returns:
+            Log text
         """
         try:
             log_dir = Path("logs")
 
             if not log_dir.exists():
-                return "暂无日志"
+                return t("message.log.no_logs")
 
-            # 获取最新的日志文件
+            # Get the latest log file
             log_files = sorted(log_dir.glob("*.log"), key=lambda f: f.stat().st_mtime, reverse=True)
 
             if not log_files:
-                return "暂无日志"
+                return t("message.log.no_logs")
 
-            # 读取最新日志文件的最后N行
+            # Read the last N lines of the latest log file
             log_file = log_files[0]
             with open(log_file, 'r', encoding='utf-8') as f:
                 all_lines = f.readlines()
@@ -42,5 +43,5 @@ class LogHandler:
             return ''.join(recent_lines)
 
         except Exception as e:
-            logger.error(f"读取日志失败: {e}", exc_info=True)
-            return f"读取日志失败: {str(e)}"
+            logger.error(t("message.log.read_failed", error=str(e)), exc_info=True)
+            return t("message.log.read_failed", error=str(e))

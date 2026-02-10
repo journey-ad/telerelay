@@ -1,40 +1,41 @@
 """
-配置处理器 - 支持多规则管理
+Configuration Handler - Multi-rule Management Support
 """
 from typing import List, Tuple
 from src.bot_manager import BotManager
 from src.config import Config
 from src.rule import ForwardingRule
 from src.logger import get_logger
+from src.i18n import t
 from ..utils import parse_chat_list, format_message
 
 logger = get_logger()
 
 
 class ConfigHandler:
-    """配置处理器 - 支持多规则管理"""
+    """Configuration Handler - Multi-rule Management Support"""
 
     def __init__(self, config: Config, bot_manager: BotManager):
         self.config = config
         self.bot_manager = bot_manager
 
     def get_rule_names(self) -> List[str]:
-        """获取所有规则名称列表"""
+        """Get list of all rule names"""
         rules = self.config.get_forwarding_rules()
         if not rules:
-            return ["默认规则"]
+            return [t("ui.status.default_rule")]
         return [rule.name for rule in rules]
 
     def load_rule(self, index: int = 0) -> dict:
-        """加载指定索引的规则到 UI"""
+        """Load rule at specified index to UI"""
         try:
             rules = self.config.get_forwarding_rules()
             if not rules:
                 return self._default_rule_dict()
-            
+
             if index >= len(rules):
                 index = 0
-            
+
             rule = rules[index]
             return {
                 "source_chats": '\n'.join(str(chat) for chat in rule.source_chats),
@@ -53,11 +54,11 @@ class ConfigHandler:
                 "enabled": rule.enabled,
             }
         except Exception as e:
-            logger.error(f"加载规则失败: {e}", exc_info=True)
+            logger.error(t("message.config.load_failed", error=str(e)), exc_info=True)
             return self._default_rule_dict()
 
     def _default_rule_dict(self) -> dict:
-        """返回默认规则字典"""
+        """Return default rule dictionary"""
         return {
             "source_chats": "",
             "target_chats": "",
@@ -93,9 +94,9 @@ class ConfigHandler:
         delay: float,
         enabled: bool = True,
     ) -> str:
-        """保存指定索引的规则"""
+        """Save rule at specified index"""
         try:
-            # 解析输入
+            # Parse input
             source_list = parse_chat_list(source_chats)
             target_list = parse_chat_list(target_chats)
             regex_list = [line.strip() for line in regex_patterns.split('\n') if line.strip()]
@@ -109,22 +110,22 @@ class ConfigHandler:
 
             ignored_keyword_list = [line.strip() for line in ignored_keywords.split('\n') if line.strip()]
 
-            # 验证
+            # Validate
             if not source_list:
-                return format_message("请至少配置一个源群组/频道", "error")
+                return format_message(t("message.config.source_required"), "error")
             if not target_list:
-                return format_message("请至少配置一个目标群组/频道", "error")
+                return format_message(t("message.config.target_required"), "error")
 
-            # 获取现有规则，如果为空则创建默认规则
+            # Get existing rules, create default rule if empty
             rules = self.config.get_forwarding_rules()
             if not rules:
-                # 没有规则时创建新规则
-                rules = [ForwardingRule(name="默认规则", enabled=True)]
-            
-            if index >= len(rules):
-                index = 0  # 回退到第一个规则
+                # Create new rule when no rules exist
+                rules = [ForwardingRule(name=t("ui.status.default_rule"), enabled=True)]
 
-            # 更新规则
+            if index >= len(rules):
+                index = 0  # Fall back to first rule
+
+            # Update rule
             rule = rules[index]
             rule_dict = rule.to_dict()
             rule_dict.update({
@@ -150,47 +151,52 @@ class ConfigHandler:
                 }
             })
 
-            # 保存所有规则
+            # Save all rules
             all_rules = [r.to_dict() for r in rules]
             all_rules[index] = rule_dict
             self.config.update({"forwarding_rules": all_rules})
 
-            return self._maybe_restart(f"规则 '{rule.name}' 已保存")
+            return self._maybe_restart(t("message.config.rule_saved", rule=rule.name))
 
         except Exception as e:
-            logger.error(f"保存规则失败: {e}", exc_info=True)
-            return format_message(f"保存失败: {str(e)}", "error")
+            logger.error(t("message.config.save_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.config.save_failed", error=str(e)), "error")
 
     def add_rule(self, name: str) -> Tuple[str, List[str], int]:
-        """添加新规则，返回 (消息, 规则名称列表, 新规则索引)"""
+        """Add new rule, returns (message, rule name list, new rule index)"""
         try:
-            name = name.strip() or f"规则 {len(self.config.get_forwarding_rules()) + 1}"
-            
+            if not name.strip():
+                # Generate default name: Rule 1, Rule 2, ...
+                rule_count = len(self.config.get_forwarding_rules()) + 1
+                name = t("misc.rule_name_template", count=rule_count)
+            else:
+                name = name.strip()
+
             rules = self.config.get_forwarding_rules()
             new_rule = ForwardingRule(name=name, enabled=True)
             all_rules = [r.to_dict() for r in rules] + [new_rule.to_dict()]
-            
+
             self.config.update({"forwarding_rules": all_rules})
-            
+
             new_index = len(all_rules) - 1
             return (
-                format_message(f"已添加规则 '{name}'", "success"),
+                format_message(t("message.config.rule_added", name=name), "success"),
                 self.get_rule_names(),
                 new_index
             )
         except Exception as e:
-            logger.error(f"添加规则失败: {e}", exc_info=True)
-            return format_message(f"添加失败: {str(e)}", "error"), self.get_rule_names(), 0
+            logger.error(t("message.config.add_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.config.add_failed", error=str(e)), "error"), self.get_rule_names(), 0
 
     def delete_rule(self, index: int) -> Tuple[str, List[str], int]:
-        """删除规则，返回 (消息, 规则名称列表, 新选中索引)"""
+        """Delete rule, returns (message, rule name list, new selected index)"""
         try:
             rules = self.config.get_forwarding_rules()
             if len(rules) <= 1:
-                return format_message("至少需要保留一个规则", "error"), self.get_rule_names(), 0
-            
+                return format_message(t("message.config.delete_last_rule"), "error"), self.get_rule_names(), 0
+
             if index >= len(rules):
-                return format_message("规则索引无效", "error"), self.get_rule_names(), 0
+                return format_message(t("message.config.invalid_index"), "error"), self.get_rule_names(), 0
 
             deleted_name = rules[index].name
             all_rules = [r.to_dict() for i, r in enumerate(rules) if i != index]
@@ -198,24 +204,24 @@ class ConfigHandler:
 
             new_index = min(index, len(all_rules) - 1)
             return (
-                format_message(f"已删除规则 '{deleted_name}'", "success"),
+                format_message(t("message.config.rule_deleted", name=deleted_name), "success"),
                 self.get_rule_names(),
                 new_index
             )
         except Exception as e:
-            logger.error(f"删除规则失败: {e}", exc_info=True)
-            return format_message(f"删除失败: {str(e)}", "error"), self.get_rule_names(), 0
+            logger.error(t("message.config.delete_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.config.delete_failed", error=str(e)), "error"), self.get_rule_names(), 0
 
     def rename_rule(self, index: int, new_name: str) -> Tuple[str, List[str]]:
-        """重命名规则，返回 (消息, 规则名称列表)"""
+        """Rename rule, returns (message, rule name list)"""
         try:
             new_name = new_name.strip()
             if not new_name:
-                return format_message("规则名称不能为空", "error"), self.get_rule_names()
+                return format_message(t("message.config.name_empty"), "error"), self.get_rule_names()
 
             rules = self.config.get_forwarding_rules()
             if index >= len(rules):
-                return format_message("规则索引无效", "error"), self.get_rule_names()
+                return format_message(t("message.config.invalid_index"), "error"), self.get_rule_names()
 
             old_name = rules[index].name
             all_rules = [r.to_dict() for r in rules]
@@ -223,46 +229,46 @@ class ConfigHandler:
             self.config.update({"forwarding_rules": all_rules})
 
             return (
-                format_message(f"已将 '{old_name}' 重命名为 '{new_name}'", "success"),
+                format_message(t("message.config.rule_renamed", old_name=old_name, new_name=new_name), "success"),
                 self.get_rule_names()
             )
         except Exception as e:
-            logger.error(f"重命名规则失败: {e}", exc_info=True)
-            return format_message(f"重命名失败: {str(e)}", "error"), self.get_rule_names()
+            logger.error(t("message.config.rename_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.config.rename_failed", error=str(e)), "error"), self.get_rule_names()
 
     def toggle_rule(self, index: int, enabled: bool) -> str:
-        """启用/禁用规则"""
+        """Enable/disable rule"""
         try:
             rules = self.config.get_forwarding_rules()
             if index >= len(rules):
-                return format_message("规则索引无效", "error")
+                return format_message(t("message.config.invalid_index"), "error")
 
             all_rules = [r.to_dict() for r in rules]
             all_rules[index]["enabled"] = enabled
             self.config.update({"forwarding_rules": all_rules})
 
-            status = "启用" if enabled else "禁用"
-            return format_message(f"规则 '{rules[index].name}' 已{status}", "success")
+            status = t("message.config.enabled") if enabled else t("message.config.disabled")
+            return format_message(t("message.config.rule_toggled", rule=rules[index].name, status=status), "success")
         except Exception as e:
-            logger.error(f"切换规则状态失败: {e}", exc_info=True)
-            return format_message(f"操作失败: {str(e)}", "error")
+            logger.error(t("message.config.toggle_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.config.toggle_failed", error=str(e)), "error")
 
     def _maybe_restart(self, success_msg: str) -> str:
-        """如果 Bot 运行中则重启"""
+        """Restart if Bot is running"""
         if self.bot_manager.is_running:
-            logger.info("Bot 正在运行，将自动重启以应用新配置")
+            logger.info(t("log.bot.restarting") + t("misc.config_updated"))
             if self.bot_manager.restart():
-                return format_message(f"{success_msg}，已重启 Bot", "success")
+                return format_message(t("message.config.rule_saved_restarted", msg=success_msg), "success")
             else:
-                return format_message(f"{success_msg}，但重启失败", "success")
-        return format_message(f"{success_msg}，下次启动时生效", "success")
+                return format_message(t("message.config.rule_saved_restart_failed", msg=success_msg), "success")
+        return format_message(t("message.config.rule_saved_next_start", msg=success_msg), "success")
 
-    # 兼容旧接口
+    # Compatible with old interface
     def load_config(self) -> dict:
-        """兼容旧接口：加载第一个规则"""
+        """Compatible with old interface: load first rule"""
         return self.load_rule(0)
 
     def save_config(self, *args, **kwargs) -> str:
-        """兼容旧接口：保存第一个规则"""
+        """Compatible with old interface: save first rule"""
         return self.save_rule(0, *args, **kwargs)
 

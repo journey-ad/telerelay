@@ -1,36 +1,36 @@
-# 多阶段构建，优化镜像大小
+# Multi-stage build to optimize image size
 FROM python:3.11-slim AS builder
 
-# 设置工作目录
+# Set working directory
 WORKDIR /app
 
-# 安装依赖
+# Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# 最终镜像
+# Final image
 FROM python:3.11-slim
 
-# 设置工作目录
+# Set working directory
 WORKDIR /app
 
-# 创建必要目录
+# Create necessary directories
 RUN mkdir -p /app/logs /app/sessions /app/config
 
-# 从 builder 复制依赖
+# Copy dependencies from builder
 COPY --from=builder /root/.local /root/.local
 
-# 设置环境变量
+# Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH=/root/.local/bin:$PATH
 
-# 复制应用代码
+# Copy application code
 COPY src/ ./src/
 COPY config/*.example ./config/
 
-# 暴露端口
+# Expose port
 EXPOSE 8080
 
-# 启动命令
+# Start command
 CMD ["python", "-m", "src.main"]

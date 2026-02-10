@@ -1,56 +1,61 @@
-# 源群组/频道列表（需要监控的）
-# 支持的格式：
-# - 群组 ID（负数）：-100123456789
-# - 频道用户名：@channel_name
-# - 私聊用户名：@username
+# Source groups/channels list (to monitor)
+# Supported formats:
+# - Group ID (negative number): -100123456789
+# - Channel username: @channel_name
+# - Private chat username: @username
 source_chats:
-  - -100123456789  # 示例群组 ID
-  # - "@example_channel"  # 示例频道
+  - -100123456789  # Example group ID
+  # - "@example_channel"  # Example channel
 
-# 目标群组/频道（转发到的位置）
-# 可以是群组 ID、频道用户名或私聊用户名
+# Target group/channel (where to forward messages)
+# Can be group ID, channel username, or private chat username
 target_chat: -100987654321
 
-# 消息过滤规则
+# UI language configuration
+# en_US: English (default)
+# zh_CN: Chinese
+language: en_US
+
+# Message filtering rules
 filters:
-  # 正则表达式列表（任意匹配即通过）
-  # 为空则不使用正则过滤
+  # Regex pattern list (any match passes)
+  # Leave empty to disable regex filtering
   regex_patterns:
-    - "\\[重要\\].*"
-    - "紧急通知.*"
-  
-  # 关键词列表（任意匹配即通过）
-  # 为空则不使用关键词过滤
+    - "\\[Important\\].*"
+    - "Alert.*"
+
+  # Keyword list (any match passes)
+  # Leave empty to disable keyword filtering
   keywords:
-    - "关键词1"
-    - "关键词2"
-  
-  # 过滤模式：whitelist（白名单）或 blacklist（黑名单）
-  # whitelist: 只转发匹配规则的消息
-  # blacklist: 转发所有消息，除了匹配规则的
+    - "keyword1"
+    - "keyword2"
+
+  # Filter mode: whitelist or blacklist
+  # whitelist: Only forward messages matching the rules
+  # blacklist: Forward all messages except those matching the rules
   mode: whitelist
 
-# 转发选项
+# Forwarding options
 forwarding:
-  # 是否保留原始格式（转发而非复制）
+  # Whether to preserve original format (forward instead of copy)
   preserve_format: true
-  
-  # 是否添加来源信息
+
+  # Whether to add source information
   add_source_info: true
-  
-  # 转发延迟（秒），避免触发限制
+
+  # Forwarding delay (seconds) to avoid rate limits
   delay: 0.5
 
-# 忽略列表（优先级高于过滤规则）
+# Ignore list (higher priority than filter rules)
 ignore:
-  # 忽略的用户 ID 列表
-  # 格式：数字 ID，可以通过 @userinfobot 获取
+  # List of user IDs to ignore
+  # Format: numeric ID, can be obtained via @userinfobot
   user_ids:
     # - 123456789
     # - 987654321
-  
-  # 忽略的关键词列表
-  # 消息包含任意关键词将被忽略
+
+  # List of keywords to ignore
+  # Messages containing any keyword will be ignored
   keywords:
-    # - "广告"
-    # - "推广"
+    # - "advertisement"
+    # - "promotion"
