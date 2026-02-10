@@ -1,19 +1,23 @@
+[中文文档](README_zh.md)
+
 # TeleRelay
 
 An intelligent Telegram message relay tool with smart filtering based on regex patterns and keywords, featuring a modern Web management interface.
 
+<p align="center">
+  <img src="https://count.getloli.com/@telerelay.github?theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
+</p>
+
 ## ✨ Features
 
-- 🤖 **Smart Forwarding**: Automatically monitor specified Telegram groups/channels and forward messages to multiple targets
+- 🤖 **Smart Forwarding**: Automatically monitor specified Telegram groups/channels/accounts and forward messages to multiple targets
 - 📋 **Multi-Rule Management**: Support multiple independent forwarding rules, each with its own sources, targets, and filters
 - 🔍 **Powerful Filtering**: Support regex and keyword matching, whitelist/blacklist modes, media type and file size filtering
 - 🚫 **Ignore List**: Ignore specific messages by user ID and keywords
 - 💪 **Force Forward**: Bypass noforwards restrictions on channels/groups by downloading and re-uploading
-- 📸 **Media Group Support**: Full support for media group (album) forwarding with automatic deduplication and smart filtering
-- 🌐 **Web Management Interface**: Intuitive configuration management and real-time log viewing based on Gradio
+- 🌐 **Web Management Interface**: Gradio-based configuration panel with real-time Bot status, statistics, and logs
 - 🌍 **Internationalization**: Full i18n support with built-in Chinese and English interfaces, switchable in Web UI
 - 🔐 **Dual Authentication Modes**: Support both User Session (phone login) and Bot Token methods
-- 📊 **Real-time Monitoring**: Display Bot status, statistics, and logs in real-time
 - 🐳 **Docker Support**: One-click deployment, ready to use
 - 🔒 **Secure**: Support HTTP Basic Auth for Web interface
 - ⚡ **Performance Optimized**: Asynchronous processing with rate limiting and error retry
@@ -33,34 +37,42 @@ An intelligent Telegram message relay tool with smart filtering based on regex p
 
 ### Method 1: Docker Deployment (Recommended)
 
-1. **Clone the project**
-   ```bash
-   cd telerelay
-   ```
+Pull the pre-built image from GitHub Container Registry:
 
-2. **Configure environment variables**
-   ```bash
-   # Copy example configuration
-   cp .env.example .env
-   # Edit the config file, fill in your API_ID and API_HASH
-   nano .env
-   ```
+```bash
+docker pull ghcr.io/journey-ad/telerelay:latest
+```
 
-3. **Configure forwarding rules**
-   ```bash
-   cp config/config.yaml.example config/config.yaml
-   # Edit config.yaml to configure source and target groups
-   nano config/config.yaml
-   ```
+Run with Docker:
 
-4. **Start the container**
-   ```bash
-   docker-compose up -d
-   ```
+```bash
+docker run -d -p 8080:8080 \
+  -v $(pwd)/.env:/app/.env \
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/logs:/app/logs \
+  -v $(pwd)/sessions:/app/sessions \
+  ghcr.io/journey-ad/telerelay:latest
+```
 
-5. **Access Web interface**
-   - Open browser and visit: `http://localhost:8080`
-   - If HTTP Basic Auth is configured, enter username and password
+Or use docker-compose:
+
+```yaml
+version: '3'
+services:
+  telerelay:
+    image: ghcr.io/journey-ad/telerelay:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./.env:/app/.env
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./sessions:/app/sessions
+```
+
+Access Web interface:
+- Open browser and visit: `http://localhost:8080`
+- If HTTP Basic Auth is configured, enter username and password
 
 ### Method 2: Local Run
 
@@ -115,118 +127,6 @@ LOG_LEVEL=INFO
 LANGUAGE=zh_CN
 ```
 
-### Configuration File (config/config.yaml)
-
-Two configuration methods are supported:
-
-#### Method 1: Single Rule Configuration (Simple Scenarios)
-
-```yaml
-# Source groups/channels list (to monitor)
-source_chats:
-  - -100123456789  # Group ID
-  - "@channel_name"  # Channel username
-
-# Target groups/channels list (forward to, supports multiple targets)
-target_chats:
-  - -100987654321  # Target group 1
-  - "@target_channel"  # Target channel 2
-
-# Filter rules
-filters:
-  # Regex patterns (any match passes)
-  regex_patterns:
-    - "\\[Important\\].*"
-    - "Urgent notification.*"
-
-  # Keywords (any match passes)
-  keywords:
-    - "keyword1"
-    - "keyword2"
-
-  # Filter mode: whitelist or blacklist
-  mode: whitelist
-
-  # Media type filtering (optional)
-  media_types:
-    - text      # Text messages
-    - photo     # Photos
-    - video     # Videos
-    - document  # Documents
-    - audio     # Audio
-    - voice     # Voice messages
-    - sticker   # Stickers
-    - animation # Animations/GIFs
-
-  # File size limits (optional, in bytes)
-  max_file_size: 52428800  # 50MB
-  min_file_size: 0
-
-# Forwarding options
-forwarding:
-  preserve_format: true  # Preserve original format
-  add_source_info: true  # Add source information
-  delay: 0.5  # Forwarding delay (seconds)
-  force_forward: false  # Force forward (bypass noforwards restrictions)
-
-# Ignore list (higher priority than filter rules)
-ignore:
-  # Ignored user ID list
-  user_ids:
-    # - 123456789
-
-  # Ignored keywords list (case insensitive)
-  keywords:
-    # - "spam"
-```
-
-#### Method 2: Multi-Rule Configuration (Complex Scenarios)
-
-```yaml
-# Multi-rule configuration, each rule runs independently
-rules:
-  - name: "Rule 1"
-    enabled: true
-    source_chats:
-      - -100123456789
-    target_chats:
-      - -100987654321
-    filters:
-      regex_patterns:
-        - "\\[Important\\].*"
-      mode: whitelist
-    forwarding:
-      preserve_format: true
-      add_source_info: true
-      delay: 0.5
-      force_forward: false
-    ignore:
-      user_ids: []
-      keywords: []
-
-  - name: "Rule 2"
-    enabled: true
-    source_chats:
-      - "@source_channel"
-    target_chats:
-      - "@target_channel"
-    filters:
-      keywords:
-        - "keyword"
-      mode: whitelist
-      media_types:
-        - photo
-        - video
-    forwarding:
-      preserve_format: false
-      add_source_info: false
-      delay: 1.0
-      force_forward: true
-    ignore:
-      user_ids: []
-      keywords: []
-```
-
 ## 🎮 Usage Guide
 
 ### Authentication Mode Comparison
@@ -235,9 +135,7 @@ rules:
 |---------|-----------|----------|
 | Authentication | Phone + Code | Bot Token |
 | Monitoring Scope | All joined groups | Only groups bot joined |
-| Web Interface | Has auth tab | No auth tab |
 | First Use | Requires phone verification | No verification |
-| Session Persistence | sessions/ directory | sessions/ directory |
 
 ### User Mode Authentication Flow
 
@@ -252,12 +150,13 @@ rules:
 ### Getting Group ID
 
 1. **Using @userinfobot**
-   - Add [@userinfobot](https://t.me/userinfobot) to the group
-   - Send any message in the group, bot will reply with group ID
+   - Share the group to [@userinfobot](https://t.me/userinfobot)
+   - Bot will reply with the group ID
 
-2. **From messages**
-   - Forward a group message to [@userinfobot](https://t.me/userinfobot)
-   - Get the group ID from the message source
+2. **From Web Telegram URL**
+   - Open Web Telegram and enter the group chat
+   - URL format: `https://web.telegram.org/a/#-100123456789`
+   - The number after `#` is the group ID, e.g., `-100123456789`
 
 ### Web Interface Features
 
@@ -286,23 +185,7 @@ rules:
 
 ## 🔧 FAQ
 
-### 1. User Mode Authentication
-
-**How to authenticate in Docker for the first time?**
-- Method 1: Run locally first to complete login, then mount `sessions/` directory to container
-- Method 2: After Docker container starts, complete authentication through Web interface auth tab
-
-**What if session expires?**
-- Click "Cancel Authentication" in Web interface auth tab to clear old session
-- Click "Start Authentication" again to complete new login
-
-### 2. Bot Mode Configuration
-
-**Why can't I see the authentication tab?**
-- Bot mode doesn't require phone verification, auth tab is automatically hidden
-- Confirm `SESSION_TYPE=bot` and `BOT_TOKEN` are configured in `.env`
-
-### 3. Message Forwarding Issues
+### Message Forwarding Issues
 
 **Messages not forwarding?**
 Check:
@@ -319,7 +202,7 @@ Check:
 - Enable `forwarding.force_forward: true` for force forward
 - Note: Force forward downloads then re-uploads, may be slower
 
-### 4. Proxy Configuration
+### Proxy Configuration
 
 **How to configure proxy?**
 ```env
@@ -378,30 +261,20 @@ telerelay/
 ## 🛡️ Security Recommendations
 
 1. **Protect Sensitive Information**
-   - Don't commit `.env` file to Git
+   - Don't expose `.env` file publicly
    - Regularly change API credentials
    - Keep session files secure
 
 2. **Web Interface Security**
    - Must configure `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` in production
    - Use reverse proxy (like Nginx) to add HTTPS
-
-3. **Restrict Access**
    - Configure firewall in production environment
    - Restrict Web interface access IPs
 
-4. **Regular Backups**
+3. **Regular Backups**
    - Backup session files (`sessions/`)
    - Backup configuration files
 
 ## 📝 License
 
-MIT License
-
-## 🤝 Contributing
-
-Issues and Pull Requests are welcome!
-
-## 📧 Contact
-
-For questions, please submit an Issue.
+[MIT License](LICENSE)
