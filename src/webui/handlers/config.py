@@ -173,7 +173,7 @@ class ConfigHandler:
                 name = name.strip()
 
             rules = self.config.get_forwarding_rules()
-            new_rule = ForwardingRule(name=name, enabled=True)
+            new_rule = ForwardingRule(name=name, enabled=False)
             all_rules = [r.to_dict() for r in rules] + [new_rule.to_dict()]
 
             self.config.update({"forwarding_rules": all_rules})
