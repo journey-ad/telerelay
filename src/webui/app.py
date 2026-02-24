@@ -184,6 +184,12 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                         info=t("ui.info.force_forward")
                     )
 
+                    hide_sender = gr.Checkbox(
+                        label=t("ui.label.hide_sender"),
+                        value=False,
+                        info=t("ui.info.hide_sender")
+                    )
+
                     delay = gr.Slider(
                         minimum=0,
                         maximum=5,
@@ -281,6 +287,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             'preserve_format': preserve_format,
             'add_source_info': add_source_info,
             'force_forward': force_forward,
+            'hide_sender': hide_sender,
             'delay': delay,
             'enabled': rule_enabled,
         }
@@ -382,6 +389,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                 preserve_format,
                 add_source_info,
                 force_forward,
+                hide_sender,
                 delay,
                 rule_enabled,
             ],

@@ -34,6 +34,7 @@ class ForwardingRule:
     add_source_info: bool = True
     delay: float = 0.5
     force_forward: bool = False
+    hide_sender: bool = False
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ForwardingRule':
@@ -59,6 +60,7 @@ class ForwardingRule:
             add_source_info=forwarding.get("add_source_info", True),
             delay=forwarding.get("delay", 0.5),
             force_forward=forwarding.get("force_forward", False),
+            hide_sender=forwarding.get("hide_sender", False),
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -85,6 +87,7 @@ class ForwardingRule:
                 "add_source_info": self.add_source_info,
                 "delay": self.delay,
                 "force_forward": self.force_forward,
+                "hide_sender": self.hide_sender,
             },
         }
 

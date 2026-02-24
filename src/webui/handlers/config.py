@@ -50,6 +50,7 @@ class ConfigHandler:
                 "preserve_format": rule.preserve_format,
                 "add_source_info": rule.add_source_info,
                 "force_forward": rule.force_forward,
+                "hide_sender": rule.hide_sender,
                 "delay": rule.delay,
                 "enabled": rule.enabled,
             }
@@ -72,6 +73,7 @@ class ConfigHandler:
             "preserve_format": True,
             "add_source_info": True,
             "force_forward": False,
+            "hide_sender": False,
             "delay": 0.5,
             "enabled": True,
         }
@@ -91,6 +93,7 @@ class ConfigHandler:
         preserve_format: bool,
         add_source_info: bool,
         force_forward: bool,
+        hide_sender: bool,
         delay: float,
         enabled: bool = True,
     ) -> str:
@@ -147,6 +150,7 @@ class ConfigHandler:
                     "preserve_format": preserve_format,
                     "add_source_info": add_source_info,
                     "force_forward": force_forward,
+                    "hide_sender": hide_sender,
                     "delay": float(delay)
                 }
             })

@@ -4,7 +4,7 @@ Message forwarding core module
 import asyncio
 from typing import List
 from telethon import TelegramClient
-from telethon.tl.types import Message
+from telethon.tl.types import Message, MessageEntityTextUrl, MessageEntityBlockquote
 from telethon.errors import FloodWaitError, ChatForwardsRestrictedError
 from src.rule import ForwardingRule
 from src.filters import MessageFilter
@@ -44,6 +44,14 @@ class MessageForwarder:
     async def handle_message(self, event) -> None:
         """Handle new message event (called by bot_manager central handler)"""
         message: Message = event.message
+
+        # Debug serialized message
+        try:
+            if hasattr(message, 'to_dict'):
+                # Avoid overly large outputs via pretty print if possible, but keep it simple
+                logger.debug(f"[DEBUG] Intercepted message: {message.to_dict()}")
+        except Exception:
+            pass
 
         try:
             await self.forward_message(message, event.sender_id)
@@ -88,15 +96,16 @@ class MessageForwarder:
                 return
 
         # 3. Execute forwarding: loop through all targets
-        source_text = self._build_source_text(message)
+        source_data = self._get_source_data(message) if self.rule.hide_sender else None
+        source_text = self._build_source_text(message) if not self.rule.hide_sender else ""
         success_count = 0
 
         for i, target in enumerate(targets):
             try:
                 if downloaded_files:
-                    await self._send_files(downloaded_files, messages, target, source_text)
+                    await self._send_files(downloaded_files, messages, target, source_data, source_text)
                 else:
-                    await self._forward_normal(messages, target, source_text, is_noforwards)
+                    await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
 
                 success_count += 1
 
@@ -111,7 +120,7 @@ class MessageForwarder:
                     if not downloaded_files:
                         downloaded_files = await self.downloader.download(messages)
                     if downloaded_files:
-                        await self._send_files(downloaded_files, messages, target, source_text)
+                        await self._send_files(downloaded_files, messages, target, source_data, source_text)
                         success_count += 1
                 except Exception as e2:
                     logger.error(t("log.forward.fallback_failed", target=target, error=e2))
@@ -128,82 +137,221 @@ class MessageForwarder:
     # ===== Forwarding strategies =====
 
     async def _forward_normal(
-        self, messages: List[Message], target, source_text: str, is_noforwards: bool
+        self, messages: List[Message], target, source_data: dict, source_text: str, is_noforwards: bool
     ) -> None:
         """Normal forwarding flow (no download needed)"""
-        if is_noforwards:
+        if self.rule.hide_sender:
+            await self._forward_copy(messages, target, source_data, "")
+        elif is_noforwards:
             # noforwards restriction → copy with reference
-            await self._forward_copy(messages, target, source_text)
+            await self._forward_copy(messages, target, None, source_text)
         elif self.rule.preserve_format:
             # Preserve format → direct forward
             await self.client.forward_messages(target, messages)
             logger.info(t("log.forward.direct_success", target=target))
         else:
             # Don't preserve format → copy with reference
-            await self._forward_copy(messages, target, source_text)
+            await self._forward_copy(messages, target, None, source_text)
 
-    async def _forward_copy(self, messages: List[Message], target, source_text: str) -> None:
+    async def _forward_copy(self, messages: List[Message], target, source_data: dict, source_text: str) -> None:
         """Copy message by referencing media ID (without preserving 'forwarded from' label)"""
+        has_media = any(msg.media for msg in messages)
+        
         if len(messages) == 1:
             msg = messages[0]
-            text = self._prepend_source(msg.text or "", source_text)
+            text = msg.text or ""
+            entities = list(msg.entities) if msg.entities else []
+            
+            if source_data:
+                text, added_entities = self._format_source_append(text, source_data)
+                entities.extend(added_entities)
+            elif source_text:
+                text = self._prepend_source(text, source_text)
+                
             await self.client.send_message(
                 target, text,
                 file=msg.media,
-                formatting_entities=msg.entities,
+                formatting_entities=entities,
+                link_preview=False if source_data else None
             )
         else:
             # Media group: collect all media, text attached to first message
             first = messages[0]
-            text = self._prepend_source(first.text or "", source_text)
+            text = first.text or ""
+            entities = list(first.entities) if first.entities else []
+            
+            if source_data:
+                text, added_entities = self._format_source_append(text, source_data)
+                entities.extend(added_entities)
+            elif source_text:
+                text = self._prepend_source(text, source_text)
+                
             media_list = [msg.media for msg in messages if msg.media]
+            
             await self.client.send_file(
                 target,
                 file=media_list,
                 caption=text,
-                formatting_entities=first.entities,
+                formatting_entities=entities,
             )
+            
         logger.info(t("log.forward.copy_success", target=target))
 
     async def _send_files(
-        self, file_paths: List[str], messages: List[Message], target, source_text: str
+        self, file_paths: List[str], messages: List[Message], target, source_data: dict, source_text: str
     ) -> None:
         """Send to target using downloaded files"""
         if not file_paths:
-            # No media files, send text only
-            text = self._prepend_source(messages[0].text or "", source_text)
-            await self.client.send_message(target, text, formatting_entities=messages[0].entities)
+            # No media files, send text only (this should be rare here)
+            text = messages[0].text or ""
+            entities = list(messages[0].entities) if messages[0].entities else []
+            
+            if source_data:
+                text, added_entities = self._format_source_append(text, source_data)
+                entities.extend(added_entities)
+            elif source_text:
+                text = self._prepend_source(text, source_text)
+                
+            await self.client.send_message(
+                target, text,
+                formatting_entities=entities,
+                link_preview=False if source_data else None
+            )
             logger.info(t("log.forward.text_sent", target=target))
             return
 
         first = messages[0]
-        text = self._prepend_source(first.text or "", source_text)
+        text = first.text or ""
+        entities = list(first.entities) if first.entities else []
+
+        file_passed = file_paths[0] if len(file_paths) == 1 else file_paths
+        
+        if source_data:
+            text, added_entities = self._format_source_append(text, source_data)
+            entities.extend(added_entities)
+        elif source_text:
+            text = self._prepend_source(text, source_text)
 
         logger.info(t("log.forward.uploading", target=target))
-        if len(file_paths) == 1:
-            await self.client.send_file(
-                target,
-                file=file_paths[0],
-                caption=text,
-                formatting_entities=first.entities,
-            )
-        else:
-            await self.client.send_file(
-                target,
-                file=file_paths,
-                caption=text,
-                formatting_entities=first.entities,
-            )
+        await self.client.send_file(
+            target,
+            file=file_passed,
+            caption=text,
+            formatting_entities=entities,
+        )
+            
         logger.info(t("log.forward.force_success", target=target))
 
     # ===== Helper methods =====
 
+    def _get_source_data(self, message: Message) -> dict:
+        """
+        Build source information data (name, link)
+        """
+        if not self.rule.add_source_info:
+            return None
+
+        name = "Unknown"
+        link = ""
+        
+        import datetime
+        # telethon message.date is usually a timezone-aware datetime in UTC
+        if getattr(message, 'date', None):
+            date_str = message.date.astimezone().strftime("%Y-%m-%d %H-%M-%S")
+        else:
+            date_str = datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H-%M-%S")
+        
+        # 1. Determine the main subject (priority given to forward source)
+        target = None
+        is_forward = False
+        if message.forward:
+            target = message.forward.chat or message.forward.sender
+            is_forward = True
+        else:
+            target = message.chat or message.sender
+
+        if not target:
+            return {"name": name, "link": link, "date": date_str}
+
+        # 2. Extract the name
+        username = getattr(target, 'username', None)
+        if username:
+            name = f"@{username}"
+        else:
+            first_name = getattr(target, 'first_name', '')
+            last_name = getattr(target, 'last_name', '')
+            if first_name or last_name:
+                name = f"{first_name} {last_name}".strip()
+            else:
+                name = getattr(target, 'title', "Unknown")
+
+        # 3. Construct the link
+        msg_id = None
+        if is_forward:
+            msg_id = getattr(message.forward, 'channel_post', getattr(message.forward, 'msg_id', None))
+        else:
+            msg_id = message.id
+
+        is_chat = hasattr(target, 'title') or (message.chat and hasattr(message.chat, 'title'))
+        
+        if username:
+            # Public channel/group, deep link to message
+            if is_chat and msg_id:
+                link = f"https://t.me/{username}/{msg_id}"
+            else:
+                link = f"https://t.me/{username}"
+        elif is_chat and msg_id:
+            # Private group/channel
+            chat_id = getattr(target, 'id', None)
+            if chat_id:
+                clean_id = str(chat_id).replace("-100", "", 1) if str(chat_id).startswith("-100") else str(chat_id)
+                link = f"https://t.me/c/{clean_id}/{msg_id}"
+
+        return {"name": name, "link": link, "date": date_str}
+
+    def _format_source_append(self, text: str, source_data: dict) -> tuple[str, list]:
+        """Append source information to message text, returning (text, entities)"""
+        if not source_data:
+            return text, []
+
+        name = source_data.get("name", "Unknown")
+        link = source_data.get("link", "")
+        date_str = source_data.get("date", "")
+        
+        spacer = "\n" if text else ""
+        
+        # Use Blockquote for visual separation
+        source_label = f"{date_str}" if date_str else "Ref:"
+        append_str = f"{source_label} {name}"
+        
+        base_offset = len((text + spacer).encode('utf-16-le')) // 2
+        append_length = len(append_str.encode('utf-16-le')) // 2
+        
+        entities = [
+            MessageEntityBlockquote(
+                offset=base_offset,
+                length=append_length
+            )
+        ]
+        
+        if link:
+            prefix_length = len(f"{source_label} ".encode('utf-16-le')) // 2
+            entities.append(
+                MessageEntityTextUrl(
+                    offset=base_offset + prefix_length,
+                    length=len(name.encode('utf-16-le')) // 2,
+                    url=link
+                )
+            )
+            
+        full_append = spacer + append_str
+        return text + full_append, entities
+
+
+
     def _build_source_text(self, message: Message) -> str:
         """
-        Build source information text (including t.me link)
-
-        For public channels/groups: https://t.me/{username}/{message_id}
-        For private groups: https://t.me/c/{channel_id}/{message_id}
+        Build source information text (including t.me link) - old format
         """
         if not self.rule.add_source_info:
             return ""
