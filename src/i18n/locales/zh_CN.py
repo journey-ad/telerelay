@@ -17,6 +17,7 @@ TRANSLATIONS = {
             "auth_warning": "⚠ HTTP Basic Auth 未启用，建议在生产环境配置认证",
             "shutdown": "\\n收到终止信号，正在关闭...",
             "error": "程序运行出错: {error}",
+            "admin_bot_started": "✓ 管理 Bot 已启动",
         },
 
         # log.bot.* - bot_manager.py 的日志
@@ -151,6 +152,14 @@ TRANSLATIONS = {
             "yaml_loaded": "已加载 YAML 配置文件: {path}",
             "yaml_not_found": "YAML 配置文件不存在: {path}",
             "saved": "已保存配置到: {path}",
+        },
+
+        # log.admin_bot.* - admin bot logs
+        "admin_bot": {
+            "started": "✓ 管理 Bot 已连接到 Telegram",
+            "error": "管理 Bot 运行出错: {error}",
+            "proxy_failed": "管理 Bot 代理解析失败: {error}",
+            "retry": "管理 Bot 连接重试 ({attempt}): {error}",
         },
     },
 
@@ -414,5 +423,107 @@ TRANSLATIONS = {
             "dice": "[表情]",
             "media": "[媒体]",
         },
+    },
+
+    # ===== Admin Bot Commands =====
+    "bot_cmd": {
+        "no_permission": "⛔ 你没有权限使用此命令",
+        "yes": "是",
+        "no": "否",
+        "enabled": "已启用",
+        "disabled": "已禁用",
+        "welcome": "🤖 **TeleRelay 管理面板**\n\n"
+            "可用命令:\n"
+            "`/status` 查看运行状态\n"
+            "`/bot start` 启动转发服务\n"
+            "`/bot stop` 停止转发服务\n"
+            "`/bot restart` 重启转发服务\n"
+            "`/rule list` 列出所有规则\n"
+            "`/rule detail 规则名` 查看规则详情\n"
+            "`/rule add 规则名` 添加规则\n"
+            "`/rule del 规则名` 删除规则\n"
+            "`/rule rename 旧规则名 新规则名` 重命名规则\n"
+            "`/rule toggle 规则名` 启用/禁用规则\n"
+            "`/rule set 规则名 <属性> <值>` 修改规则\n\n"
+            "**可设置的属性:** `source`, `target`, `keywords`, `regex`, `mode`, `delay`, `force_forward`, `hide_sender`, `add_source_info`, `preserve_format`, `ignore_users`, `ignore_keywords`, `media_types`, `max_file_size`, `min_file_size`\n\n"
+            "💡 列表型字段可用 `clear` 清空",
+        "status_msg": "📊 **运行状态**\n\n"
+            "{running_icon} 运行中: {running}\n"
+            "{connected_icon} 已连接: {connected}\n"
+            "📨 已转发: {forwarded}\n"
+            "🚫 已过滤: {filtered}\n"
+            "📊 总计: {total}\n"
+            "📋 规则: {enabled}/{rule_total} 个启用",
+        "bot_usage": "用法: `/bot start` | `/bot stop` | `/bot restart`",
+        "bot_already_running": "⚠️ 转发服务已在运行中",
+        "bot_started": "✅ 转发服务已启动",
+        "bot_start_failed": "❌ 转发服务启动失败",
+        "bot_not_running": "⚠️ 转发服务未在运行",
+        "bot_stopped": "✅ 转发服务已停止",
+        "bot_stop_failed": "❌ 转发服务停止失败",
+        "bot_restarting": "🔄 正在重启转发服务...",
+        "bot_restarted": "✅ 转发服务已重启",
+        "bot_restart_failed": "❌ 转发服务重启失败",
+        "rule_usage": "用法:\n"
+            "`/rule list` 列出规则\n"
+            "`/rule detail 规则名` 查看详情\n"
+            "`/rule add 规则名` 添加规则\n"
+            "`/rule del 规则名` 删除规则\n"
+            "`/rule rename 旧规则名 新规则名` 重命名\n"
+            "`/rule toggle 规则名` 启用/禁用\n"
+            "`/rule set 规则名 <属性> <值>` 修改属性",
+        "no_rules": "📋 暂无转发规则",
+        "rules_header": "📋 **转发规则列表**",
+        "rule_name_required": "⚠️ 请指定规则名称",
+        "rule_not_found": "❌ 未找到规则: {name}",
+        "rule_exists": "⚠️ 规则 '{name}' 已存在",
+        "rule_added": "✅ 已添加规则: {name}",
+        "rule_deleted": "✅ 已删除规则: {name}",
+        "rule_delete_last": "⚠️ 至少需要保留一个规则",
+        "rule_toggled": "✅ 规则 '{name}' 已{status}",
+        "rule_renamed": "✅ 已将规则 '{old_name}' 重命名为 '{new_name}'",
+        "rule_rename_usage": "用法: `/rule rename 旧规则名 新规则名`\n\n💡 名称含空格时请用引号包裹",
+        "rule_name_empty": "⚠️ 规则名称不能为空",
+        "rule_detail_msg": "📋 **规则: {name}**\n\n"
+            "状态: {status}\n"
+            "模式: `{mode}`\n\n"
+            "**📥 源:**\n{sources}\n\n"
+            "**📤 目标:**\n{targets}\n\n"
+            "**🔍 关键词:** {keywords}\n"
+            "**🔍 正则:** {regex}\n"
+            "**🎞️ 媒体类型:** {media_types}\n"
+            "**📦 文件大小:** {file_size}\n\n"
+            "**⚙️ 选项:**\n"
+            "  延迟: `{delay}s`\n"
+            "  保留格式: `{preserve_format}`\n"
+            "  添加来源: `{add_source_info}`\n"
+            "  强制转发: `{force_forward}`\n"
+            "  隐藏发送者: `{hide_sender}`\n\n"
+            "**🚫 忽略:**\n"
+            "  用户: {ignored_users}\n"
+            "  关键词: {ignored_keywords}",
+        "rule_set_usage": "用法: `/rule set 规则名 <属性> <值>`\n\n"
+            "可设置的属性:\n"
+            "`source` 源群组 (逗号分隔)\n"
+            "`target` 目标群组 (逗号分隔)\n"
+            "`keywords` 关键词 (逗号分隔)\n"
+            "`regex` 正则表达式 (逗号分隔)\n"
+            "`mode` 模式 (whitelist/blacklist)\n"
+            "`delay` 延迟秒数\n"
+            "`force_forward` 强制转发 (true/false)\n"
+            "`hide_sender` 隐藏发送者 (true/false)\n"
+            "`add_source_info` 添加来源 (true/false)\n"
+            "`preserve_format` 保留格式 (true/false)\n"
+            "`ignore_users` 忽略用户ID (逗号分隔)\n"
+            "`ignore_keywords` 忽略关键词 (逗号分隔)\n"
+            "`media_types` 媒体类型 (逗号分隔)\n"
+            "`max_file_size` 最大文件大小 (MB)\n"
+            "`min_file_size` 最小文件大小 (MB)\n\n"
+            "💡 列表型字段可传 `clear` 清空",
+        "invalid_mode": "⚠️ 模式必须是 whitelist 或 blacklist",
+        "invalid_media_types": "⚠️ 无效的媒体类型: {types}\n合法值: {valid}",
+        "unknown_field": "⚠️ 未知属性: {field}",
+        "rule_updated": "✅ 规则 '{name}' 已更新: {field} = {value}",
+        "rule_set_error": "❌ 设置失败: {error}",
     },
 }

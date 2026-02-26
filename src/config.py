@@ -132,6 +132,18 @@ class Config:
         """Interface language"""
         return os.getenv("LANGUAGE", "zh_CN")
 
+    # Admin Bot configuration
+    @property
+    def admin_bot_token(self) -> Optional[str]:
+        """Admin Bot Token for managing via Telegram commands"""
+        return os.getenv("ADMIN_BOT_TOKEN") or None
+
+    @property
+    def admin_chat_id(self) -> Optional[int]:
+        """Admin Chat ID (only this user can use management commands)"""
+        val = os.getenv("ADMIN_CHAT_ID")
+        return int(val) if val else None
+
     # Source and target configuration
     @property
     def source_chats(self) -> List[Any]:

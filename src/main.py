@@ -3,6 +3,7 @@ Telegram Message Forwarder - Main Entry Point
 Provides WebUI interface using Gradio
 """
 import sys
+import threading
 from pathlib import Path
 from src.webui import create_ui
 from src.config import create_config
@@ -48,6 +49,14 @@ def main():
         if session_file.exists():
             logger.info(t("log.main.session_detected"))
             bot_manager.start()
+
+        # Start Admin Bot if configured
+        if config.admin_bot_token and config.admin_chat_id:
+            from src.bot_commands import AdminBotManager
+            admin_bot = AdminBotManager(config, bot_manager)
+            admin_thread = threading.Thread(target=admin_bot.run, daemon=True)
+            admin_thread.start()
+            logger.info(t("log.main.admin_bot_started"))
 
         # Create Gradio interface
         app = create_ui(config, bot_manager, auth_manager)

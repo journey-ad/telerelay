@@ -17,6 +17,7 @@ TRANSLATIONS = {
             "auth_warning": "⚠ HTTP Basic Auth not enabled, authentication recommended for production",
             "shutdown": "\\nShutdown signal received, closing...",
             "error": "Program error: {error}",
+            "admin_bot_started": "✓ Admin Bot started",
         },
 
         # log.bot.* - bot_manager.py logs
@@ -151,6 +152,14 @@ TRANSLATIONS = {
             "yaml_loaded": "YAML configuration file loaded: {path}",
             "yaml_not_found": "YAML configuration file not found: {path}",
             "saved": "Configuration saved to: {path}",
+        },
+
+        # log.admin_bot.* - admin bot logs
+        "admin_bot": {
+            "started": "✓ Admin Bot connected to Telegram",
+            "error": "Admin Bot error: {error}",
+            "proxy_failed": "Admin Bot proxy parse failed: {error}",
+            "retry": "Admin Bot connection retry ({attempt}): {error}",
         },
     },
 
@@ -415,5 +424,106 @@ TRANSLATIONS = {
             "media": "[Media]",
         },
     },
-}
 
+    # ===== Admin Bot Commands =====
+    "bot_cmd": {
+        "no_permission": "⛔ You don't have permission to use this command",
+        "yes": "Yes",
+        "no": "No",
+        "enabled": "enabled",
+        "disabled": "disabled",
+        "welcome": "🤖 **TeleRelay Admin Panel**\n\n"
+            "Available commands:\n"
+            "`/status` View running status\n"
+            "`/bot start` Start forwarding service\n"
+            "`/bot stop` Stop forwarding service\n"
+            "`/bot restart` Restart forwarding service\n"
+            "`/rule list` List all rules\n"
+            "`/rule detail rule_name` View rule details\n"
+            "`/rule add rule_name` Add rule\n"
+            "`/rule del rule_name` Delete rule\n"
+            "`/rule rename old_name new_name` Rename rule\n"
+            "`/rule toggle rule_name` Enable/disable rule\n"
+            "`/rule set rule_name <field> <value>` Modify rule\n\n"
+            "**Available fields:** `source`, `target`, `keywords`, `regex`, `mode`, `delay`, `force_forward`, `hide_sender`, `add_source_info`, `preserve_format`, `ignore_users`, `ignore_keywords`, `media_types`, `max_file_size`, `min_file_size`\n\n"
+            "💡 Use `clear` to empty list-type fields",
+        "status_msg": "📊 **Status**\n\n"
+            "{running_icon} Running: {running}\n"
+            "{connected_icon} Connected: {connected}\n"
+            "📨 Forwarded: {forwarded}\n"
+            "🚫 Filtered: {filtered}\n"
+            "📊 Total: {total}\n"
+            "📋 Rules: {enabled}/{rule_total} enabled",
+        "bot_usage": "Usage: `/bot start` | `/bot stop` | `/bot restart`",
+        "bot_already_running": "⚠️ Forwarding service is already running",
+        "bot_started": "✅ Forwarding service started",
+        "bot_start_failed": "❌ Failed to start forwarding service",
+        "bot_not_running": "⚠️ Forwarding service is not running",
+        "bot_stopped": "✅ Forwarding service stopped",
+        "bot_stop_failed": "❌ Failed to stop forwarding service",
+        "bot_restarting": "🔄 Restarting forwarding service...",
+        "bot_restarted": "✅ Forwarding service restarted",
+        "bot_restart_failed": "❌ Failed to restart forwarding service",
+        "rule_usage": "Usage:\n"
+            "`/rule list` List rules\n"
+            "`/rule detail rule_name` View details\n"
+            "`/rule add rule_name` Add rule\n"
+            "`/rule del rule_name` Delete rule\n"
+            "`/rule rename old_name new_name` Rename\n"
+            "`/rule toggle rule_name` Enable/disable\n"
+            "`/rule set rule_name <field> <value>` Modify field",
+        "no_rules": "📋 No forwarding rules configured",
+        "rules_header": "📋 **Forwarding Rules**",
+        "rule_name_required": "⚠️ Please specify a rule name",
+        "rule_not_found": "❌ Rule not found: {name}",
+        "rule_exists": "⚠️ Rule '{name}' already exists",
+        "rule_added": "✅ Rule added: {name}",
+        "rule_deleted": "✅ Rule deleted: {name}",
+        "rule_delete_last": "⚠️ At least one rule must be kept",
+        "rule_toggled": "✅ Rule '{name}' {status}",
+        "rule_renamed": "✅ Rule '{old_name}' renamed to '{new_name}'",
+        "rule_rename_usage": "Usage: `/rule rename old_name new_name`\n\n💡 Use quotes for names with spaces",
+        "rule_name_empty": "⚠️ Rule name cannot be empty",
+        "rule_detail_msg": "📋 **Rule: {name}**\n\n"
+            "Status: {status}\n"
+            "Mode: `{mode}`\n\n"
+            "**📥 Sources:**\n{sources}\n\n"
+            "**📤 Targets:**\n{targets}\n\n"
+            "**🔍 Keywords:** {keywords}\n"
+            "**🔍 Regex:** {regex}\n"
+            "**🎞️ Media types:** {media_types}\n"
+            "**📦 File size:** {file_size}\n\n"
+            "**⚙️ Options:**\n"
+            "  Delay: `{delay}s`\n"
+            "  Preserve format: `{preserve_format}`\n"
+            "  Add source info: `{add_source_info}`\n"
+            "  Force forward: `{force_forward}`\n"
+            "  Hide sender: `{hide_sender}`\n\n"
+            "**🚫 Ignore:**\n"
+            "  Users: {ignored_users}\n"
+            "  Keywords: {ignored_keywords}",
+        "rule_set_usage": "Usage: `/rule set rule_name <field> <value>`\n\n"
+            "Available fields:\n"
+            "`source` Source chats (comma-separated)\n"
+            "`target` Target chats (comma-separated)\n"
+            "`keywords` Keywords (comma-separated)\n"
+            "`regex` Regex patterns (comma-separated)\n"
+            "`mode` Mode (whitelist/blacklist)\n"
+            "`delay` Delay in seconds\n"
+            "`force_forward` Force forward (true/false)\n"
+            "`hide_sender` Hide sender (true/false)\n"
+            "`add_source_info` Add source info (true/false)\n"
+            "`preserve_format` Preserve format (true/false)\n"
+            "`ignore_users` Ignored user IDs (comma-separated)\n"
+            "`ignore_keywords` Ignored keywords (comma-separated)\n"
+            "`media_types` Media types (comma-separated)\n"
+            "`max_file_size` Max file size (MB)\n"
+            "`min_file_size` Min file size (MB)\n\n"
+            "💡 Use `clear` to empty list-type fields",
+        "invalid_mode": "⚠️ Mode must be whitelist or blacklist",
+        "invalid_media_types": "⚠️ Invalid media types: {types}\nValid types: {valid}",
+        "unknown_field": "⚠️ Unknown field: {field}",
+        "rule_updated": "✅ Rule '{name}' updated: {field} = {value}",
+        "rule_set_error": "❌ Set failed: {error}",
+    },
+}
