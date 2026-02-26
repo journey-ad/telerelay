@@ -8,6 +8,14 @@ import shlex
 import threading
 from typing import Optional, List
 from telethon import TelegramClient, events
+from telethon.tl.types import (
+    KeyboardButtonWebView,
+    KeyboardButtonRow,
+    ReplyInlineMarkup,
+    BotMenuButton,
+    DataJSON,
+)
+from telethon.tl.functions.bots import SetBotMenuButtonRequest
 from telethon.errors import FloodWaitError
 from src.config import Config
 from src.logger import get_logger
@@ -106,6 +114,9 @@ class AdminBotManager:
 
         logger.info(t("log.admin_bot.started"))
 
+        # Set Menu Button to Mini App if webapp_url is configured
+        await self._set_menu_button()
+
         await self.client.run_until_disconnected()
 
     def _register_handlers(self) -> None:
@@ -116,7 +127,26 @@ class AdminBotManager:
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            await event.reply(t("bot_cmd.welcome"), parse_mode='md')
+            # Send welcome message with Mini App button if configured
+            webapp_url = self.config.webapp_url
+            if webapp_url:
+                buttons = ReplyInlineMarkup(
+                    rows=[
+                        KeyboardButtonRow(
+                            buttons=[KeyboardButtonWebView(
+                                text=t("bot_cmd.webapp_button"),
+                                url=webapp_url,
+                            )]
+                        )
+                    ]
+                )
+                await event.reply(
+                    t("bot_cmd.welcome"),
+                    parse_mode='md',
+                    buttons=buttons,
+                )
+            else:
+                await event.reply(t("bot_cmd.welcome"), parse_mode='md')
 
         @self.client.on(events.NewMessage(pattern=r'^/status\b'))
         async def handle_status(event):
@@ -138,6 +168,13 @@ class AdminBotManager:
                 await event.reply(t("bot_cmd.no_permission"))
                 return
             await self._handle_rule_cmd(event)
+
+        @self.client.on(events.NewMessage(pattern=r'^/webapp\b'))
+        async def handle_webapp(event):
+            if not self._check_permission(event):
+                await event.reply(t("bot_cmd.no_permission"))
+                return
+            await self._handle_webapp(event)
 
     def _check_permission(self, event) -> bool:
         """Check if the sender is the authorized admin"""
@@ -512,6 +549,55 @@ class AdminBotManager:
 
         except Exception as e:
             await event.reply(t("bot_cmd.rule_set_error", error=str(e)))
+
+    # ===== Mini App Methods =====
+
+    async def _handle_webapp(self, event) -> None:
+        """Handle /webapp command - send a button to open WebUI Mini App"""
+        webapp_url = self.config.webapp_url
+        if not webapp_url:
+            await event.reply(t("bot_cmd.webapp_not_configured"))
+            return
+
+        try:
+            buttons = ReplyInlineMarkup(
+                rows=[
+                    KeyboardButtonRow(
+                        buttons=[KeyboardButtonWebView(
+                            text=t("bot_cmd.webapp_button"),
+                            url=webapp_url,
+                        )]
+                    )
+                ]
+            )
+            await event.reply(
+                t("bot_cmd.webapp_open"),
+                parse_mode='md',
+                buttons=buttons,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send WebApp button: {e}")
+            await event.reply(t("bot_cmd.webapp_url_invalid", error=str(e)))
+
+    async def _set_menu_button(self) -> None:
+        """Set Bot menu button to open WebUI Mini App"""
+        webapp_url = self.config.webapp_url
+        if not webapp_url:
+            return
+
+        try:
+            await self.client(
+                SetBotMenuButtonRequest(
+                    user_id=self.config.admin_chat_id,
+                    button=BotMenuButton(
+                        text="Open",
+                        url=webapp_url,
+                    ),
+                )
+            )
+            logger.info(t("log.admin_bot.menu_button_set"))
+        except Exception as e:
+            logger.warning(t("log.admin_bot.menu_button_failed", error=str(e)))
 
     # ===== Helper Methods =====
 

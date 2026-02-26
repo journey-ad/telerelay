@@ -144,6 +144,11 @@ class Config:
         val = os.getenv("ADMIN_CHAT_ID")
         return int(val) if val else None
 
+    @property
+    def webapp_url(self) -> Optional[str]:
+        """WebApp URL for Telegram Mini App (must be HTTPS)"""
+        return os.getenv("WEBAPP_URL") or None
+
     # Source and target configuration
     @property
     def source_chats(self) -> List[Any]:

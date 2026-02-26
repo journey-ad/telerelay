@@ -122,6 +122,9 @@ PROXY_URL=
 WEB_HOST=0.0.0.0
 WEB_PORT=8080
 
+# Web App URL for Mini App mode
+WEBAPP_URL=
+
 # Web interface authentication (recommended for production)
 WEB_AUTH_USERNAME=
 WEB_AUTH_PASSWORD=
@@ -131,6 +134,12 @@ LOG_LEVEL=INFO
 
 # Interface language: zh_CN (Chinese) or en_US (English)
 LANGUAGE=zh_CN
+
+# Admin Bot Token (Get from @BotFather, DO NOT use the same token as BOT_TOKEN)
+ADMIN_BOT_TOKEN=
+
+# Admin Telegram User ID
+ADMIN_CHAT_ID=
 ```
 
 ## 🎮 Usage Guide
@@ -187,6 +196,16 @@ LANGUAGE=zh_CN
 - **Auth Status**: Display current login status and account info
 - **Auth Operations**: Start authentication, cancel authentication
 - **Input Forms**: Phone number, verification code, password
+
+#### Admin Bot Remote Control
+1. Search and start your Admin Bot on Telegram
+2. Use commands (e.g. `/status`) to monitor the forwarding service
+3. Available commands:
+   - `/status` : View running status
+   - `/bot start|stop|restart` : Control forwarding service
+   - `/rule list|detail|add|del|rename|toggle|set` : Manage forwarding rules
+   - `/webapp` : Open configuration panel as Telegram Mini App
+
 
 ## 🔧 FAQ
 

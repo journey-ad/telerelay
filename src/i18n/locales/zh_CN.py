@@ -160,6 +160,8 @@ TRANSLATIONS = {
             "error": "管理 Bot 运行出错: {error}",
             "proxy_failed": "管理 Bot 代理解析失败: {error}",
             "retry": "管理 Bot 连接重试 ({attempt}): {error}",
+            "menu_button_set": "✓ 已设置 Bot 菜单按钮为小程序入口",
+            "menu_button_failed": "设置 Bot 菜单按钮失败: {error}",
         },
     },
 
@@ -525,5 +527,13 @@ TRANSLATIONS = {
         "unknown_field": "⚠️ 未知属性: {field}",
         "rule_updated": "✅ 规则 '{name}' 已更新: {field} = {value}",
         "rule_set_error": "❌ 设置失败: {error}",
+        # Mini App
+        "webapp_button": "打开配置面板",
+        "webapp_open": "点击下方按钮打开 WebUI 配置面板 👇",
+        "webapp_not_configured": "⚠️ 未配置 WebApp URL\n\n"
+            "请在 `.env` 文件中设置 `WEBAPP_URL` 为你的 WebUI 公网 HTTPS 地址\n"
+            "例如: `WEBAPP_URL=https://your-domain.com:8080`",
+        "webapp_url_invalid": "❌ 发送 WebApp 按钮失败: {error}\n\n"
+            "请确保 `.env` 中的 `WEBAPP_URL` 是一个有效的公网 HTTPS 地址 (Telegram 不允许使用 localhost 或无效的域名)。",
     },
 }

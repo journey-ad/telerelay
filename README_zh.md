@@ -122,6 +122,9 @@ PROXY_URL=
 WEB_HOST=0.0.0.0
 WEB_PORT=8080
 
+# Web 面板公网访问地址
+WEBAPP_URL=
+
 # Web 界面认证（推荐在生产环境启用）
 WEB_AUTH_USERNAME=
 WEB_AUTH_PASSWORD=
@@ -131,6 +134,12 @@ LOG_LEVEL=INFO
 
 # 界面语言：zh_CN（中文）或 en_US（英文）
 LANGUAGE=zh_CN
+
+# 管理 Bot Token，通过 @BotFather 创建，不能和 BOT_TOKEN 重复
+ADMIN_BOT_TOKEN=
+
+# 管理员用户 ID
+ADMIN_CHAT_ID=
 ```
 
 ## 🎮 使用说明
@@ -187,6 +196,19 @@ LANGUAGE=zh_CN
 - **认证状态**: 显示当前登录状态和账号信息
 - **认证操作**: 开始认证、取消认证
 - **输入表单**: 手机号、验证码、密码
+
+### 管理 Bot 功能
+
+通过配置 `ADMIN_BOT_TOKEN` 和 `ADMIN_CHAT_ID`，你可以通过 Telegram Bot 远程管理 TeleRelay。
+
+**使用步骤：**
+1. 在 Telegram 中搜索并启动你的管理 Bot
+2. 发送命令（如 `/status`）监控转发服务
+3. 支持的命令列表：
+   - `/status` : 查看运行状态统计
+   - `/bot start|stop|restart` : 控制转发服务的启停
+   - `/rule list|detail|add|del|rename|toggle|set` : 管理转发规则
+   - `/webapp` : 以 Telegram 小程序(Mini App)方式打开配置面板
 
 ## 🔧 常见问题
 

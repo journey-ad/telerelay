@@ -160,6 +160,8 @@ TRANSLATIONS = {
             "error": "Admin Bot error: {error}",
             "proxy_failed": "Admin Bot proxy parse failed: {error}",
             "retry": "Admin Bot connection retry ({attempt}): {error}",
+            "menu_button_set": "✓ Bot menu button set to Mini App",
+            "menu_button_failed": "Failed to set Bot menu button: {error}",
         },
     },
 
@@ -525,5 +527,13 @@ TRANSLATIONS = {
         "unknown_field": "⚠️ Unknown field: {field}",
         "rule_updated": "✅ Rule '{name}' updated: {field} = {value}",
         "rule_set_error": "❌ Set failed: {error}",
+        # Mini App
+        "webapp_button": "Open Config Panel",
+        "webapp_open": "Click the button below to open WebUI config panel 👇",
+        "webapp_not_configured": "⚠️ WebApp URL not configured\n\n"
+            "Please set `WEBAPP_URL` in your `.env` file to your WebUI public HTTPS address\n"
+            "Example: `WEBAPP_URL=https://your-domain.com:8080`",
+        "webapp_url_invalid": "❌ Failed to send WebApp button: {error}\n\n"
+            "Ensure your `WEBAPP_URL` in `.env` is a valid public HTTPS URL (Telegram rejects localhost or invalid URLs).",
     },
 }
