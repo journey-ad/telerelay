@@ -45,7 +45,7 @@ def main():
         add_ui_update_handler(bot_manager)
 
         # Auto-login if session cache exists
-        session_file = Path("sessions/telegram_session.session")
+        session_file = Path("data/telegram_session.session")
         if session_file.exists():
             logger.info(t("log.main.session_detected"))
             bot_manager.start()

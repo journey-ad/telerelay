@@ -15,7 +15,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/sessions /app/config
+RUN mkdir -p /app/logs /app/data /app/config
 
 # Copy dependencies from builder
 COPY --from=builder /root/.local /root/.local

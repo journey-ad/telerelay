@@ -50,7 +50,7 @@ class BotControlHandler:
                 if self.config.session_type == "user":
                     # Check if session file exists
                     from pathlib import Path
-                    session_file = Path("sessions/telegram_session.session")
+                    session_file = Path("data/telegram_session.session")
                     if session_file.exists():
                         return format_message(t("message.bot.session_detected"), "success")
                     else:

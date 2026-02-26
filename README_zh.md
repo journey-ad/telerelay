@@ -56,7 +56,7 @@ docker run -d -p 8080:8080 \
   -v $(pwd)/.env:/app/.env \
   -v $(pwd)/config:/app/config \
   -v $(pwd)/logs:/app/logs \
-  -v $(pwd)/sessions:/app/sessions \
+  -v $(pwd)/data:/app/data \
   ghcr.io/journey-ad/telerelay:latest
 ```
 
@@ -73,7 +73,7 @@ services:
       - ./.env:/app/.env
       - ./config:/app/config
       - ./logs:/app/logs
-      - ./sessions:/app/sessions
+      - ./data:/app/data
 ```
 
 访问 Web 界面：
@@ -251,7 +251,7 @@ telerelay/
 ├── config/               # 配置文件目录
 │   └── config.yaml.example
 ├── logs/                 # 日志文件
-├── sessions/             # Telegram 会话文件
+├── data/                 # Telegram 会话文件
 ├── src/                  # 源代码
 │   ├── i18n/             # i18n 模块
 │   │   ├── locales/      # 语言包
@@ -275,6 +275,7 @@ telerelay/
 │   ├── rule.py           # 转发规则数据类
 │   ├── client.py         # Telegram 客户端
 │   ├── auth_manager.py   # User 模式认证管理
+│   ├── bot_commands.py   # 管理机器人指令
 │   ├── bot_manager.py    # Bot 生命周期管理
 │   ├── filters.py        # 消息过滤
 │   ├── constants.py      # 常量定义
@@ -299,7 +300,7 @@ telerelay/
    - 限制 Web 界面的访问 IP
 
 3. **定期备份**
-   - 备份会话文件（`sessions/`）
+   - 备份会话文件（`data/`）
    - 备份配置文件
 
 ## 📝 许可证

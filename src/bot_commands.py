@@ -58,7 +58,7 @@ class AdminBotManager:
         from pathlib import Path
         from urllib.parse import urlparse
 
-        session_dir = Path("sessions")
+        session_dir = Path("data")
         session_dir.mkdir(exist_ok=True)
         session_name = str(session_dir / "admin_bot_session")
 

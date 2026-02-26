@@ -39,7 +39,7 @@ class TelegramClientManager:
         self.is_connected = False
 
         # Ensure session directory exists
-        session_dir = Path("sessions")
+        session_dir = Path("data")
         session_dir.mkdir(exist_ok=True)
 
         # Session file path

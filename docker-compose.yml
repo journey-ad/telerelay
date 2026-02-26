@@ -13,7 +13,7 @@ services:
       # Configuration directory
       - ./config:/app/config
       # Session file persistence
-      - ./sessions:/app/sessions
+      - ./data:/app/data
       # Log persistence
       - ./logs:/app/logs
     env_file:

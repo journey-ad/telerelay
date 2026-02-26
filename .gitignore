@@ -18,8 +18,8 @@ build/
 config/config.yaml
 
 # Telegram session files
-sessions/*.session
-sessions/*.session-journal
+data/*.session
+data/*.session-journal
 
 # Log files
 logs/*.log

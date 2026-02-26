@@ -15,7 +15,7 @@ build/
 
 # Environment
 .env
-sessions/
+data/
 *.session
 *.session-journal
 

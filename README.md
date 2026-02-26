@@ -56,7 +56,7 @@ docker run -d -p 8080:8080 \
   -v $(pwd)/.env:/app/.env \
   -v $(pwd)/config:/app/config \
   -v $(pwd)/logs:/app/logs \
-  -v $(pwd)/sessions:/app/sessions \
+  -v $(pwd)/data:/app/data \
   ghcr.io/journey-ad/telerelay:latest
 ```
 
@@ -73,7 +73,7 @@ services:
       - ./.env:/app/.env
       - ./config:/app/config
       - ./logs:/app/logs
-      - ./sessions:/app/sessions
+      - ./data:/app/data
 ```
 
 Access Web interface:
@@ -248,7 +248,7 @@ telerelay/
 ├── config/               # Configuration directory
 │   └── config.yaml.example
 ├── logs/                 # Log files
-├── sessions/             # Telegram session files
+├── data/                 # Telegram session files
 ├── src/                  # Source code
 │   ├── i18n/             # Internationalization module
 │   │   ├── locales/      # Language packs
@@ -272,6 +272,7 @@ telerelay/
 │   ├── rule.py           # Forwarding rule data class
 │   ├── client.py         # Telegram client
 │   ├── auth_manager.py   # User mode auth management
+│   ├── bot_commands.py   # Admin bot commands
 │   ├── bot_manager.py    # Bot lifecycle management
 │   ├── filters.py        # Message filtering
 │   ├── constants.py      # Constants definition
@@ -296,7 +297,7 @@ telerelay/
    - Restrict Web interface access IPs
 
 3. **Regular Backups**
-   - Backup session files (`sessions/`)
+   - Backup session files (`data/`)
    - Backup configuration files
 
 ## 📝 License

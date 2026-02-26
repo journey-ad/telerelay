@@ -107,7 +107,7 @@ Edit the `MessageFilter.should_forward()` method in `src/filters.py`.
 
 ### Telegram Client
 - Supports two modes: User Session (user account) and Bot Token (bot)
-- User mode requires phone verification on first run, session files saved in `sessions/` directory
+- User mode requires phone verification on first run, session files saved in `data/` directory
 - Bot mode requires no verification, but can only monitor groups the bot has joined
 
 ### Thread Safety
