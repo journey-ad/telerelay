@@ -183,6 +183,20 @@ class AdminBotManager:
                 return
             await self._handle_stats_cmd(event)
 
+        @self.client.on(events.NewMessage(pattern=r'^/history\b'))
+        async def handle_history(event):
+            if not self._check_permission(event):
+                await event.reply(t("bot_cmd.no_permission"))
+                return
+            await self._handle_history_cmd(event)
+
+        @self.client.on(events.NewMessage(pattern=r'^/config\b'))
+        async def handle_config(event):
+            if not self._check_permission(event):
+                await event.reply(t("bot_cmd.no_permission"))
+                return
+            await self._handle_config_cmd(event)
+
     def _check_permission(self, event) -> bool:
         """Check if the sender is the authorized admin"""
         return event.sender_id == self.config.admin_chat_id
@@ -582,6 +596,105 @@ class AdminBotManager:
             await event.reply(t("bot_cmd.stats_reset_done"))
         else:
             await event.reply(t("bot_cmd.stats_usage"), parse_mode='md')
+
+    # ===== History Command =====
+
+    async def _handle_history_cmd(self, event) -> None:
+        """Handle /history [rule_name] [N] - show recent N forwarding history"""
+        args = self._parse_args(event.raw_text, "/history")
+
+        rule_name = None
+        limit = 10
+
+        for arg in args:
+            if arg.isdigit():
+                limit = min(int(arg), 50)  # max 50
+            else:
+                rule_name = arg
+
+        from src.stats_db import get_stats_db
+        rows, total = get_stats_db().query_history(
+            rule_name=rule_name, limit=limit, offset=0
+        )
+
+        if not rows:
+            await event.reply(t("bot_cmd.history_empty"))
+            return
+
+        lines = [t("bot_cmd.history_header", count=len(rows), total=total)]
+        for r in rows:
+            time_str = r.get("forwarded_at", "")[:16]  # trim seconds
+            source = r.get("source_chat_name", "?")
+            preview = (r.get("content", "") or "[media]")[:80]
+            lines.append(f"  `{time_str}` [{source}] {preview}")
+
+        await event.reply("\n".join(lines), parse_mode='md')
+
+    # ===== Config Command =====
+
+    async def _handle_config_cmd(self, event) -> None:
+        """Handle /config <export|import> commands"""
+        args = self._parse_args(event.raw_text, "/config")
+
+        if not args:
+            await event.reply(t("bot_cmd.config_usage"), parse_mode='md')
+            return
+
+        subcmd = args[0].lower()
+
+        if subcmd == "export":
+            config_path = self.config.config_file
+            import os
+            if os.path.exists(config_path):
+                await event.reply(
+                    file=config_path,
+                    message=t("bot_cmd.config_exported")
+                )
+            else:
+                await event.reply(t("bot_cmd.config_not_found"))
+
+        elif subcmd == "import":
+            # Check if the message is a reply to a file
+            reply_msg = await event.get_reply_message()
+            if not reply_msg or not reply_msg.file:
+                await event.reply(t("bot_cmd.config_import_usage"))
+                return
+
+            import tempfile, yaml, shutil
+            try:
+                # Download the file
+                tmp_path = os.path.join(tempfile.gettempdir(), "config_import.yaml")
+                await reply_msg.download_media(file=tmp_path)
+
+                # Validate YAML
+                with open(tmp_path, "r", encoding="utf-8") as f:
+                    new_config = yaml.safe_load(f)
+
+                if not isinstance(new_config, dict) or (
+                    "forwarding_rules" not in new_config and "source_chats" not in new_config
+                ):
+                    await event.reply(t("bot_cmd.config_invalid_file"))
+                    return
+
+                # Backup and replace
+                config_path = self.config.config_file
+                if os.path.exists(config_path):
+                    shutil.copy2(config_path, config_path + ".bak")
+
+                shutil.copy2(tmp_path, config_path)
+                self.config.load()
+
+                if self.bot_manager.is_running:
+                    self.bot_manager.restart()
+                    await event.reply(t("bot_cmd.config_imported_restarted"))
+                else:
+                    await event.reply(t("bot_cmd.config_imported"))
+
+            except Exception as e:
+                await event.reply(t("bot_cmd.config_import_error", error=str(e)))
+
+        else:
+            await event.reply(t("bot_cmd.config_usage"), parse_mode='md')
 
     # ===== Mini App Methods =====
 

@@ -265,6 +265,7 @@ class BotManager:
             for _, forwarder in filtered_by:
                 forwarder.filtered_count += 1
                 forwarder._stats_db.increment_filtered(forwarder.rule.name)
+                forwarder._stats_db.increment_daily(forwarder.rule.name, is_forwarded=False)
             return
 
         # Forward to all matching rules

@@ -106,6 +106,9 @@ TRANSLATIONS = {
                 "duplicate": "↩ 媒体组重复触发，跳过 (grouped_id={group_id})",
                 "filtered": "媒体组被过滤 (无匹配消息) - grouped_id: {group_id}",
             },
+
+            # dedup
+            "deduplicated": "↩ 消息重复，已跳过 (内容: {preview})",
         },
 
         # log.filter.* - filters.py 的日志
@@ -169,6 +172,14 @@ TRANSLATIONS = {
             "reset": "✓ 转发统计已重置",
             "reset_failed": "重置统计失败: {error}",
         },
+
+        # log.backup.* - backup logs
+        "backup": {
+            "exported": "✓ 配置已导出",
+            "export_failed": "导出配置失败: {error}",
+            "backup_created": "已备份当前配置: {path}",
+            "import_failed": "导入配置失败: {error}",
+        },
     },
 
     # ===== UI 相关 =====
@@ -180,6 +191,9 @@ TRANSLATIONS = {
             "tab_config": "⚙️ 配置",
             "tab_log": "📋 日志",
             "tab_auth": "🔐 认证",
+            "tab_stats": "📊 统计",
+            "tab_history": "📜 历史记录",
+            "tab_backup": "💾 备份",
         },
 
         # ui.button.* - 按钮
@@ -199,6 +213,13 @@ TRANSLATIONS = {
             "submit_code": "提交验证码",
             "submit_password": "提交密码",
             "reset_stats": "🔄 重置统计",
+            "search": "🔍 搜索",
+            "export": "📥 导出",
+            "prev_page": "◀ 上一页",
+            "next_page": "下一页 ▶",
+            "refresh_stats": "🔄 刷新",
+            "export_config": "📥 导出配置",
+            "import_config": "📤 导入配置",
         },
 
         # ui.label.* - 标签
@@ -233,6 +254,30 @@ TRANSLATIONS = {
             "code": "验证码",
             "password": "两步验证密码",
             "error_info": "错误信息",
+            # Stats tab
+            "rule_stats": "📋 各规则统计",
+            "daily_trend": "📈 每日转发趋势",
+            "days_range": "天数范围",
+            "export_format": "导出格式",
+            "export_file": "导出文件",
+            "no_stats_data": "暂无统计数据",
+            "rule_name": "规则名称",
+            "date": "日期",
+            "count": "数量",
+            # History tab
+            "rule_filter": "规则筛选",
+            "search_keyword": "搜索关键词",
+            "time": "时间",
+            "source": "来源",
+            "sender": "发送者",
+            "content": "内容",
+            "media_type": "媒体类型",
+            "page_info": "第 {page}/{total} 页 (共 {count} 条)",
+            "page_info_label": "分页",
+            # Backup tab
+            "export_config": "导出当前配置",
+            "import_config": "导入配置文件",
+            "upload_config": "上传配置文件 (.yaml)",
         },
 
         # ui.placeholder.* - 占位符
@@ -247,6 +292,7 @@ TRANSLATIONS = {
             "phone": "+8613800138000",
             "code": "12345",
             "password": "请输入密码",
+            "search_keyword": "输入关键词搜索消息内容、来源或发送者",
         },
 
         # ui.info.* - 提示信息
@@ -290,6 +336,13 @@ TRANSLATIONS = {
 3. 输入手机号（国际格式，如 +8613800138000）并点击「发送验证码」
 4. 输入 Telegram 发送的验证码并点击「提交验证码」
 5. 如果启用了两步验证，输入密码并点击「提交密码」
+""",
+            "backup_guide": """### 配置备份与恢复
+
+- **导出**: 点击「📥 导出配置」下载当前 `config.yaml` 文件
+- **导入**: 上传 `.yaml` 配置文件并点击「📤 导入配置」覆盖当前配置
+
+⚠️ 导入会自动备份当前配置为 `config.yaml.bak`
 """,
         },
 
@@ -388,6 +441,17 @@ TRANSLATIONS = {
         "stats": {
             "reset_success": "统计数据已重置",
             "reset_failed": "统计数据重置失败",
+        },
+
+        # message.backup.* - 备份消息
+        "backup": {
+            "no_file": "请先上传配置文件",
+            "invalid_yaml": "无效的 YAML 文件",
+            "no_rules_found": "配置文件中未找到转发规则",
+            "import_success": "配置导入成功，下次启动时生效",
+            "import_success_restarted": "配置导入成功，Bot 已重启",
+            "yaml_error": "YAML 解析错误: {error}",
+            "import_failed": "导入失败: {error}",
         },
 
         # message.log.* - 日志消息
@@ -551,5 +615,17 @@ TRANSLATIONS = {
             "例如: `WEBAPP_URL=https://your-domain.com:8080`",
         "webapp_url_invalid": "❌ 发送 WebApp 按钮失败: {error}\n\n"
             "请确保 `.env` 中的 `WEBAPP_URL` 是一个有效的公网 HTTPS 地址 (Telegram 不允许使用 localhost 或无效的域名)。",
+        # History command
+        "history_empty": "📜 暂无转发历史记录",
+        "history_header": "📜 **最近 {count} 条转发记录** (共 {total} 条)",
+        # Config command
+        "config_usage": "用法:\n`/config export` 导出配置文件\n`/config import` 导入配置（回复一个 YAML 文件）",
+        "config_exported": "📤 当前配置文件",
+        "config_not_found": "❌ 配置文件不存在",
+        "config_import_usage": "⚠️ 请回复一个 YAML 配置文件使用此命令\n\n用法: 先发送配置文件，然后回复该文件并输入 `/config import`",
+        "config_invalid_file": "❌ 无效的配置文件（未找到转发规则）",
+        "config_imported": "✅ 配置已导入，下次启动时生效",
+        "config_imported_restarted": "✅ 配置已导入，Bot 已重启",
+        "config_import_error": "❌ 导入失败: {error}",
     },
 }

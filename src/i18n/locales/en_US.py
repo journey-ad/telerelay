@@ -106,6 +106,9 @@ TRANSLATIONS = {
                 "duplicate": "↩ Media group duplicate trigger, skipping (grouped_id={group_id})",
                 "filtered": "Media group filtered (no matching messages) - grouped_id: {group_id}",
             },
+
+            # dedup
+            "deduplicated": "↩ Duplicate message skipped (content: {preview})",
         },
 
         # log.filter.* - filters.py logs
@@ -169,6 +172,14 @@ TRANSLATIONS = {
             "reset": "✓ Forwarding statistics reset",
             "reset_failed": "Failed to reset statistics: {error}",
         },
+
+        # log.backup.* - backup logs
+        "backup": {
+            "exported": "✓ Configuration exported",
+            "export_failed": "Failed to export configuration: {error}",
+            "backup_created": "Current config backed up: {path}",
+            "import_failed": "Failed to import configuration: {error}",
+        },
     },
 
     # ===== UI Related =====
@@ -180,6 +191,9 @@ TRANSLATIONS = {
             "tab_config": "⚙️ Configuration",
             "tab_log": "📋 Logs",
             "tab_auth": "🔐 Authentication",
+            "tab_stats": "📊 Statistics",
+            "tab_history": "📜 History",
+            "tab_backup": "💾 Backup",
         },
 
         # ui.button.* - buttons
@@ -199,6 +213,13 @@ TRANSLATIONS = {
             "submit_code": "Submit Code",
             "submit_password": "Submit Password",
             "reset_stats": "🔄 Reset Stats",
+            "search": "🔍 Search",
+            "export": "📥 Export",
+            "prev_page": "◀ Prev",
+            "next_page": "Next ▶",
+            "refresh_stats": "🔄 Refresh",
+            "export_config": "📥 Export Config",
+            "import_config": "📤 Import Config",
         },
 
         # ui.label.* - labels
@@ -233,6 +254,30 @@ TRANSLATIONS = {
             "code": "Verification Code",
             "password": "Two-Step Verification Password",
             "error_info": "Error Info",
+            # Stats tab
+            "rule_stats": "📋 Per-Rule Statistics",
+            "daily_trend": "📈 Daily Forwarding Trend",
+            "days_range": "Days Range",
+            "export_format": "Export Format",
+            "export_file": "Export File",
+            "no_stats_data": "No statistics data available",
+            "rule_name": "Rule Name",
+            "date": "Date",
+            "count": "Count",
+            # History tab
+            "rule_filter": "Rule Filter",
+            "search_keyword": "Search Keyword",
+            "time": "Time",
+            "source": "Source",
+            "sender": "Sender",
+            "content": "Content",
+            "media_type": "Media Type",
+            "page_info": "Page {page}/{total} ({count} total)",
+            "page_info_label": "Pagination",
+            # Backup tab
+            "export_config": "Export Current Config",
+            "import_config": "Import Config File",
+            "upload_config": "Upload config file (.yaml)",
         },
 
         # ui.placeholder.* - placeholders
@@ -247,6 +292,7 @@ TRANSLATIONS = {
             "phone": "+1234567890",
             "code": "12345",
             "password": "Enter password",
+            "search_keyword": "Search message content, source, or sender",
         },
 
         # ui.info.* - info messages
@@ -290,6 +336,13 @@ TRANSLATIONS = {
 3. Enter your phone number (international format, e.g., +8613800138000) and click "Send Code"
 4. Enter the verification code sent by Telegram and click "Submit Code"
 5. If two-step verification is enabled, enter your password and click "Submit Password"
+""",
+            "backup_guide": """### Configuration Backup & Restore
+
+- **Export**: Click "📥 Export Config" to download current `config.yaml`
+- **Import**: Upload a `.yaml` config file and click "📤 Import Config" to overwrite
+
+⚠️ Import will automatically backup current config as `config.yaml.bak`
 """,
         },
 
@@ -388,6 +441,17 @@ TRANSLATIONS = {
         "stats": {
             "reset_success": "Statistics have been reset",
             "reset_failed": "Failed to reset statistics",
+        },
+
+        # message.backup.* - backup messages
+        "backup": {
+            "no_file": "Please upload a config file first",
+            "invalid_yaml": "Invalid YAML file",
+            "no_rules_found": "No forwarding rules found in config file",
+            "import_success": "Config imported successfully, takes effect on next start",
+            "import_success_restarted": "Config imported successfully, Bot restarted",
+            "yaml_error": "YAML parse error: {error}",
+            "import_failed": "Import failed: {error}",
         },
 
         # message.log.* - log messages
@@ -551,5 +615,17 @@ TRANSLATIONS = {
             "Example: `WEBAPP_URL=https://your-domain.com:8080`",
         "webapp_url_invalid": "❌ Failed to send WebApp button: {error}\n\n"
             "Ensure your `WEBAPP_URL` in `.env` is a valid public HTTPS URL (Telegram rejects localhost or invalid URLs).",
+        # History command
+        "history_empty": "📜 No forwarding history yet",
+        "history_header": "📜 **Recent {count} forwarding records** ({total} total)",
+        # Config command
+        "config_usage": "Usage:\n`/config export` Export config file\n`/config import` Import config (reply to a YAML file)",
+        "config_exported": "📤 Current configuration file",
+        "config_not_found": "❌ Configuration file not found",
+        "config_import_usage": "⚠️ Please reply to a YAML config file with this command\n\nUsage: Send a config file first, then reply to it with `/config import`",
+        "config_invalid_file": "❌ Invalid config file (no forwarding rules found)",
+        "config_imported": "✅ Config imported, takes effect on next start",
+        "config_imported_restarted": "✅ Config imported, Bot restarted",
+        "config_import_error": "❌ Import failed: {error}",
     },
 }

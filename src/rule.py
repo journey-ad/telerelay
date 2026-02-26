@@ -35,6 +35,8 @@ class ForwardingRule:
     delay: float = 0.5
     force_forward: bool = False
     hide_sender: bool = False
+    deduplicate: bool = False
+    deduplicate_window: int = 3600
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ForwardingRule':
@@ -61,6 +63,8 @@ class ForwardingRule:
             delay=forwarding.get("delay", 0.5),
             force_forward=forwarding.get("force_forward", False),
             hide_sender=forwarding.get("hide_sender", False),
+            deduplicate=forwarding.get("deduplicate", False),
+            deduplicate_window=forwarding.get("deduplicate_window", 3600),
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -88,6 +92,8 @@ class ForwardingRule:
                 "delay": self.delay,
                 "force_forward": self.force_forward,
                 "hide_sender": self.hide_sender,
+                "deduplicate": self.deduplicate,
+                "deduplicate_window": self.deduplicate_window,
             },
         }
 

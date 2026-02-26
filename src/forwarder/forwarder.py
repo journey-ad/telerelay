@@ -8,11 +8,12 @@ from telethon import TelegramClient
 from telethon.tl.types import Message, MessageEntityTextUrl, MessageEntityBlockquote, MessageMediaWebPage
 from telethon.errors import FloodWaitError, ChatForwardsRestrictedError
 from src.rule import ForwardingRule
-from src.filters import MessageFilter
+from src.filters import MessageFilter, get_media_type
 from src.logger import get_logger
 from src.utils import get_media_description
 from src.constants import FORWARD_PREVIEW_LENGTH
 from src.stats_db import get_stats_db
+from src.dedup import DeduplicateCache
 from src.i18n import t
 from .media_group import MediaGroupHandler
 from .downloader import MediaDownloader
@@ -44,6 +45,9 @@ class MessageForwarder:
         # Helper components
         self.media_group = MediaGroupHandler(client, rule.name)
         self.downloader = MediaDownloader(client, rule.name)
+
+        # Deduplication cache (per-rule)
+        self._dedup = DeduplicateCache(window=rule.deduplicate_window) if rule.deduplicate else None
 
     async def handle_message(self, event) -> None:
         """Handle new message event (called by bot_manager central handler)"""
@@ -87,7 +91,18 @@ class MessageForwarder:
         if is_media_group and not self.media_group.should_forward(messages, self.filter, sender_id):
             self.filtered_count += 1
             self._stats_db.increment_filtered(self.rule.name)
+            self._stats_db.increment_daily(self.rule.name, is_forwarded=False)
             return
+
+        # Deduplication check
+        if self._dedup:
+            text_to_check = message.text or ""
+            if self._dedup.is_duplicate(text_to_check):
+                self.filtered_count += 1
+                self._stats_db.increment_filtered(self.rule.name)
+                self._stats_db.increment_daily(self.rule.name, is_forwarded=False)
+                logger.info(t("log.forward.deduplicated", preview=(text_to_check[:50] or "[media]")))
+                return
 
         # 2. Prepare resources: check if download is needed
         is_noforwards = getattr(message.chat, 'noforwards', False) if message.chat else False
@@ -414,6 +429,31 @@ class MessageForwarder:
         if success > 0:
             self.forwarded_count += 1
             self._stats_db.increment_forwarded(self.rule.name)
+            self._stats_db.increment_daily(self.rule.name, is_forwarded=True)
+
+            # Write history record
+            try:
+                chat = message.chat
+                sender = message.sender
+                self._stats_db.insert_history(
+                    rule_name=self.rule.name,
+                    message_id=message.id,
+                    source_chat_id=message.chat_id,
+                    source_chat_name=getattr(chat, 'title', None) or getattr(chat, 'username', None) or str(message.chat_id),
+                    sender_id=message.sender_id,
+                    sender_name=(
+                        ' '.join(filter(None, [getattr(sender, 'first_name', None), getattr(sender, 'last_name', None)]))
+                        if sender else str(message.sender_id)
+                    ),
+                    sender_first_name=getattr(sender, 'first_name', None) if sender else None,
+                    sender_last_name=getattr(sender, 'last_name', None) if sender else None,
+                    sender_username=getattr(sender, 'username', None) if sender else None,
+                    content=message.text or get_media_description(message),
+                    media_type=get_media_type(message) if message.media else "text",
+                )
+            except Exception as e:
+                logger.debug(f"Failed to insert history: {e}")
+
             group_info = t("misc.media_group_info", count=len(messages)) if is_media_group else ""
             group_id_info = f" gid={message.grouped_id}" if is_media_group else ""
             logger.info(

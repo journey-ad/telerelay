@@ -2,6 +2,7 @@ telethon==1.42.0
 python-socks[asyncio]>=2.0.0
 python-dotenv==1.0.1
 PyYAML==6.0.2
-gradio==5.16.0
+gradio==5.50.0
 requests>=2.31.0
 httpx[socks]>=0.24.1
+matplotlib>=3.7.0

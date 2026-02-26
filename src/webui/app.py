@@ -14,7 +14,7 @@ from src.constants import (
     MIN_LOG_LINES,
     MAX_LOG_LINES
 )
-from .handlers import BotControlHandler, ConfigHandler, LogHandler, AuthHandler
+from .handlers import BotControlHandler, ConfigHandler, LogHandler, AuthHandler, HistoryHandler, StatsHandler, BackupHandler
 
 logger = get_logger()
 
@@ -37,6 +37,11 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
     auth_handler = None
     if auth_manager:
         auth_handler = AuthHandler(auth_manager, bot_manager)
+
+    # Create new handlers
+    history_handler = HistoryHandler()
+    stats_handler = StatsHandler()
+    backup_handler = BackupHandler(config, bot_manager)
 
     # Use soft theme
     theme = gr.themes.Soft(
@@ -225,6 +230,95 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
                         label=t("ui.label.log_lines"),
                         scale=2
                     )
+
+            # --- Stats Tab ---
+            with gr.Tab(t("ui.title.tab_stats")):
+                gr.Markdown(f"### {t('ui.label.rule_stats')}")
+                stats_table = gr.Dataframe(
+                    headers=[t("ui.label.rule_name"), t("ui.label.forwarded"),
+                             t("ui.label.filtered"), t("ui.label.total")],
+                    datatype=["str", "number", "number", "number"],
+                    interactive=False,
+                    row_count=(1, "dynamic"),
+                )
+
+                gr.Markdown(f"### {t('ui.label.daily_trend')}")
+                with gr.Row():
+                    stats_days = gr.Slider(
+                        minimum=7, maximum=90, value=30, step=1,
+                        label=t("ui.label.days_range"), scale=2
+                    )
+                    refresh_stats_btn = gr.Button(t("ui.button.refresh_stats"), scale=0, min_width=100)
+
+                stats_plot = gr.Plot(label=t("ui.label.daily_trend"))
+
+                with gr.Row():
+                    stats_export_fmt = gr.Dropdown(
+                        choices=["csv", "json", "html"], value="csv",
+                        label=t("ui.label.export_format"), scale=1
+                    )
+                    export_stats_btn = gr.Button(t("ui.button.export"), scale=0, min_width=100)
+                    stats_export_file = gr.File(label=t("ui.label.export_file"), visible=True, scale=2)
+
+            # --- History Tab ---
+            with gr.Tab(t("ui.title.tab_history")):
+                with gr.Row():
+                    history_rule_filter = gr.Dropdown(
+                        choices=history_handler.get_rule_choices(),
+                        value="",
+                        label=t("ui.label.rule_filter"),
+                        scale=1
+                    )
+                    history_keyword = gr.Textbox(
+                        label=t("ui.label.search_keyword"),
+                        placeholder=t("ui.placeholder.search_keyword"),
+                        scale=2
+                    )
+                    search_btn = gr.Button(t("ui.button.search"), variant="primary", scale=0, min_width=100)
+
+                history_table = gr.Dataframe(
+                    headers=["time", "rule_name", "source_chat_id", "source_chat_name",
+                             "sender_name", "username", "content", "media_type"],
+                    datatype=["str", "str", "str", "str", "str", "str", "str", "str"],
+                    interactive=False,
+                    row_count=(1, "dynamic"),
+                )
+
+                with gr.Row():
+                    prev_page_btn = gr.Button(t("ui.button.prev_page"), scale=0, min_width=80)
+                    history_page_info = gr.Textbox(
+                        value="1/1 (0)", interactive=False,
+                        label=t("ui.label.page_info_label"), scale=1
+                    )
+                    next_page_btn = gr.Button(t("ui.button.next_page"), scale=0, min_width=80)
+                    history_page = gr.State(value=1)
+                    history_total_pages = gr.State(value=1)
+
+                with gr.Row():
+                    history_export_fmt = gr.Dropdown(
+                        choices=["csv", "json", "html"], value="csv",
+                        label=t("ui.label.export_format"), scale=1
+                    )
+                    export_history_btn = gr.Button(t("ui.button.export"), scale=0, min_width=100)
+                    history_export_file = gr.File(label=t("ui.label.export_file"), visible=True, scale=2)
+
+            # --- Backup Tab ---
+            with gr.Tab(t("ui.title.tab_backup")):
+                gr.Markdown(t("ui.markdown.backup_guide"))
+
+                with gr.Group():
+                    gr.Markdown(f"#### {t('ui.label.export_config')}")
+                    export_config_btn = gr.Button(t("ui.button.export_config"), variant="primary")
+                    config_export_file = gr.File(label=t("ui.label.export_file"), visible=True)
+
+                with gr.Group():
+                    gr.Markdown(f"#### {t('ui.label.import_config')}")
+                    config_upload = gr.File(
+                        label=t("ui.label.upload_config"),
+                        file_types=[".yaml", ".yml"],
+                    )
+                    import_config_btn = gr.Button(t("ui.button.import_config"), variant="secondary")
+                    import_message = gr.Textbox(label=t("ui.label.operation_message"), visible=False)
 
             # --- Authentication Tab (only shown in User mode) ---
             if auth_handler:
@@ -494,6 +588,86 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
 
 
 
+        # ===== Stats Tab event bindings =====
+        def refresh_stats(days):
+            table = stats_handler.get_rule_detail_table()
+            plot = stats_handler.get_daily_trend_plot(int(days))
+            return table, plot
+
+        refresh_stats_btn.click(
+            fn=refresh_stats,
+            inputs=stats_days,
+            outputs=[stats_table, stats_plot]
+        )
+
+        export_stats_btn.click(
+            fn=stats_handler.export_stats,
+            inputs=stats_export_fmt,
+            outputs=stats_export_file
+        )
+
+        # ===== History Tab event bindings =====
+        def do_search(rule, kw, _page):
+            data, info, total_pages = history_handler.search(rule, kw, 1)
+            return data, info, total_pages, 1
+
+        search_btn.click(
+            fn=do_search,
+            inputs=[history_rule_filter, history_keyword, history_page],
+            outputs=[history_table, history_page_info, history_total_pages, history_page]
+        )
+
+        history_keyword.submit(
+            fn=do_search,
+            inputs=[history_rule_filter, history_keyword, history_page],
+            outputs=[history_table, history_page_info, history_total_pages, history_page]
+        )
+
+        def go_prev(rule, kw, page, total):
+            new_page = max(1, page - 1)
+            data, info, tp = history_handler.search(rule, kw, new_page)
+            return data, info, tp, new_page
+
+        def go_next(rule, kw, page, total):
+            new_page = min(total, page + 1)
+            data, info, tp = history_handler.search(rule, kw, new_page)
+            return data, info, tp, new_page
+
+        prev_page_btn.click(
+            fn=go_prev,
+            inputs=[history_rule_filter, history_keyword, history_page, history_total_pages],
+            outputs=[history_table, history_page_info, history_total_pages, history_page]
+        )
+
+        next_page_btn.click(
+            fn=go_next,
+            inputs=[history_rule_filter, history_keyword, history_page, history_total_pages],
+            outputs=[history_table, history_page_info, history_total_pages, history_page]
+        )
+
+        export_history_btn.click(
+            fn=history_handler.export_data,
+            inputs=[history_rule_filter, history_keyword, history_export_fmt],
+            outputs=history_export_file
+        )
+
+        # ===== Backup Tab event bindings =====
+        export_config_btn.click(
+            fn=backup_handler.export_config,
+            outputs=config_export_file
+        )
+
+        import_config_btn.click(
+            fn=backup_handler.import_config,
+            inputs=config_upload,
+            outputs=import_message
+        ).then(
+            fn=update_message_visibility,
+            inputs=import_message,
+            outputs=import_message
+        )
+
+
         # Authentication event bindings (only in User mode)
         if auth_handler:
             # Start authentication
@@ -576,6 +750,13 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             fn=log_handler.get_recent_logs,
             inputs=log_lines,
             outputs=log_output
+        )
+
+        # Load stats on page load
+        app.load(
+            fn=refresh_stats,
+            inputs=stats_days,
+            outputs=[stats_table, stats_plot]
         )
 
     return app
