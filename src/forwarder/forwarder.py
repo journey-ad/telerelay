@@ -5,7 +5,7 @@ import asyncio
 import copy
 from typing import List
 from telethon import TelegramClient
-from telethon.tl.types import Message, MessageEntityTextUrl, MessageEntityBlockquote
+from telethon.tl.types import Message, MessageEntityTextUrl, MessageEntityBlockquote, MessageMediaWebPage
 from telethon.errors import FloodWaitError, ChatForwardsRestrictedError
 from src.rule import ForwardingRule
 from src.filters import MessageFilter
@@ -169,9 +169,12 @@ class MessageForwarder:
             elif source_text:
                 text, entities = self._prepend_source(text, source_text, entities)
                 
+            # WebPage preview cannot be sent as file
+            media = msg.media if not isinstance(msg.media, MessageMediaWebPage) else None
+            
             await self.client.send_message(
                 target, text,
-                file=msg.media,
+                file=media,
                 formatting_entities=entities,
                 link_preview=False if source_data else None
             )
@@ -187,7 +190,7 @@ class MessageForwarder:
             elif source_text:
                 text, entities = self._prepend_source(text, source_text, entities)
                 
-            media_list = [msg.media for msg in messages if msg.media]
+            media_list = [msg.media for msg in messages if msg.media and not isinstance(msg.media, MessageMediaWebPage)]
             
             await self.client.send_file(
                 target,
