@@ -163,6 +163,12 @@ TRANSLATIONS = {
             "menu_button_set": "✓ Bot menu button set to Mini App",
             "menu_button_failed": "Failed to set Bot menu button: {error}",
         },
+
+        # log.stats.* - statistics logs
+        "stats": {
+            "reset": "✓ Forwarding statistics reset",
+            "reset_failed": "Failed to reset statistics: {error}",
+        },
     },
 
     # ===== UI Related =====
@@ -192,6 +198,7 @@ TRANSLATIONS = {
             "send_code": "Send Code",
             "submit_code": "Submit Code",
             "submit_password": "Submit Password",
+            "reset_stats": "🔄 Reset Stats",
         },
 
         # ui.label.* - labels
@@ -377,6 +384,12 @@ TRANSLATIONS = {
             "load_failed": "Failed to load rule: {error}",
         },
 
+        # message.stats.* - statistics messages
+        "stats": {
+            "reset_success": "Statistics have been reset",
+            "reset_failed": "Failed to reset statistics",
+        },
+
         # message.log.* - log messages
         "log": {
             "no_logs": "No logs available",
@@ -446,7 +459,8 @@ TRANSLATIONS = {
             "`/rule del rule_name` Delete rule\n"
             "`/rule rename old_name new_name` Rename rule\n"
             "`/rule toggle rule_name` Enable/disable rule\n"
-            "`/rule set rule_name <field> <value>` Modify rule\n\n"
+            "`/rule set rule_name <field> <value>` Modify rule\n"
+            "`/stats reset` Reset forwarding statistics\n\n"
             "**Available fields:** `source`, `target`, `keywords`, `regex`, `mode`, `delay`, `force_forward`, `hide_sender`, `add_source_info`, `preserve_format`, `ignore_users`, `ignore_keywords`, `media_types`, `max_file_size`, `min_file_size`\n\n"
             "💡 Use `clear` to empty list-type fields",
         "status_msg": "📊 **Status**\n\n"
@@ -456,6 +470,8 @@ TRANSLATIONS = {
             "🚫 Filtered: {filtered}\n"
             "📊 Total: {total}\n"
             "📋 Rules: {enabled}/{rule_total} enabled",
+        "stats_usage": "Usage: `/stats reset` Reset forwarding statistics",
+        "stats_reset_done": "✅ Forwarding statistics have been reset",
         "bot_usage": "Usage: `/bot start` | `/bot stop` | `/bot restart`",
         "bot_already_running": "⚠️ Forwarding service is already running",
         "bot_started": "✅ Forwarding service started",

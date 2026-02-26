@@ -163,6 +163,12 @@ TRANSLATIONS = {
             "menu_button_set": "✓ 已设置 Bot 菜单按钮为小程序入口",
             "menu_button_failed": "设置 Bot 菜单按钮失败: {error}",
         },
+
+        # log.stats.* - statistics logs
+        "stats": {
+            "reset": "✓ 转发统计已重置",
+            "reset_failed": "重置统计失败: {error}",
+        },
     },
 
     # ===== UI 相关 =====
@@ -192,6 +198,7 @@ TRANSLATIONS = {
             "send_code": "发送验证码",
             "submit_code": "提交验证码",
             "submit_password": "提交密码",
+            "reset_stats": "🔄 重置统计",
         },
 
         # ui.label.* - 标签
@@ -377,6 +384,12 @@ TRANSLATIONS = {
             "load_failed": "加载规则失败: {error}",
         },
 
+        # message.stats.* - 统计消息
+        "stats": {
+            "reset_success": "统计数据已重置",
+            "reset_failed": "统计数据重置失败",
+        },
+
         # message.log.* - 日志消息
         "log": {
             "no_logs": "暂无日志",
@@ -446,7 +459,8 @@ TRANSLATIONS = {
             "`/rule del 规则名` 删除规则\n"
             "`/rule rename 旧规则名 新规则名` 重命名规则\n"
             "`/rule toggle 规则名` 启用/禁用规则\n"
-            "`/rule set 规则名 <属性> <值>` 修改规则\n\n"
+            "`/rule set 规则名 <属性> <值>` 修改规则\n"
+            "`/stats reset` 重置转发统计\n\n"
             "**可设置的属性:** `source`, `target`, `keywords`, `regex`, `mode`, `delay`, `force_forward`, `hide_sender`, `add_source_info`, `preserve_format`, `ignore_users`, `ignore_keywords`, `media_types`, `max_file_size`, `min_file_size`\n\n"
             "💡 列表型字段可用 `clear` 清空",
         "status_msg": "📊 **运行状态**\n\n"
@@ -456,6 +470,8 @@ TRANSLATIONS = {
             "🚫 已过滤: {filtered}\n"
             "📊 总计: {total}\n"
             "📋 规则: {enabled}/{rule_total} 个启用",
+        "stats_usage": "用法: `/stats reset` 重置转发统计",
+        "stats_reset_done": "✅ 转发统计已重置",
         "bot_usage": "用法: `/bot start` | `/bot stop` | `/bot restart`",
         "bot_already_running": "⚠️ 转发服务已在运行中",
         "bot_started": "✅ 转发服务已启动",

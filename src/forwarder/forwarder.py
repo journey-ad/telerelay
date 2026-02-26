@@ -12,6 +12,7 @@ from src.filters import MessageFilter
 from src.logger import get_logger
 from src.utils import get_media_description
 from src.constants import FORWARD_PREVIEW_LENGTH
+from src.stats_db import get_stats_db
 from src.i18n import t
 from .media_group import MediaGroupHandler
 from .downloader import MediaDownloader
@@ -34,9 +35,11 @@ class MessageForwarder:
         self.filter = message_filter
         self.bot_manager = bot_manager
 
-        # Statistics
-        self.forwarded_count = 0
-        self.filtered_count = 0
+        # Statistics (persistent via SQLite)
+        self._stats_db = get_stats_db()
+        db_stats = self._stats_db.get_stats(rule.name)
+        self.forwarded_count = db_stats["forwarded"]
+        self.filtered_count = db_stats["filtered"]
 
         # Helper components
         self.media_group = MediaGroupHandler(client, rule.name)
@@ -83,6 +86,7 @@ class MessageForwarder:
 
         if is_media_group and not self.media_group.should_forward(messages, self.filter, sender_id):
             self.filtered_count += 1
+            self._stats_db.increment_filtered(self.rule.name)
             return
 
         # 2. Prepare resources: check if download is needed
@@ -409,6 +413,7 @@ class MessageForwarder:
 
         if success > 0:
             self.forwarded_count += 1
+            self._stats_db.increment_forwarded(self.rule.name)
             group_info = t("misc.media_group_info", count=len(messages)) if is_media_group else ""
             group_id_info = f" gid={message.grouped_id}" if is_media_group else ""
             logger.info(

@@ -65,6 +65,7 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
             forwarded_count = gr.Textbox(label=t("ui.label.forwarded"), value="0", interactive=False, scale=1)
             filtered_count = gr.Textbox(label=t("ui.label.filtered"), value="0", interactive=False, scale=1)
             total_count = gr.Textbox(label=t("ui.label.total"), value="0", interactive=False, scale=1)
+            reset_stats_btn = gr.Button(t("ui.button.reset_stats"), size="sm", scale=0, min_width=80)
 
         control_message = gr.Textbox(label=t("ui.label.operation_message"), visible=False)
 
@@ -467,6 +468,19 @@ def create_ui(config: Config, bot_manager: BotManager, auth_manager: Optional[Au
 
         # Status refresh (manual)
         refresh_status_btn.click(
+            fn=bot_handler.get_status,
+            outputs=[status_text, forwarded_count, filtered_count, total_count]
+        )
+
+        # Reset stats
+        reset_stats_btn.click(
+            fn=bot_handler.reset_stats,
+            outputs=control_message
+        ).then(
+            fn=update_message_visibility,
+            inputs=control_message,
+            outputs=control_message
+        ).then(
             fn=bot_handler.get_status,
             outputs=[status_text, forwarded_count, filtered_count, total_count]
         )

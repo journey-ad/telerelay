@@ -12,6 +12,7 @@ from src.filters import MessageFilter
 from src.forwarder import MessageForwarder
 from src.logger import get_logger
 from src.i18n import t
+from src.stats_db import get_stats_db
 from src.constants import (
     BOT_STOP_TIMEOUT,
     BOT_RESTART_DELAY,
@@ -263,6 +264,7 @@ class BotManager:
             # Update filter count for each rule
             for _, forwarder in filtered_by:
                 forwarder.filtered_count += 1
+                forwarder._stats_db.increment_filtered(forwarder.rule.name)
             return
 
         # Forward to all matching rules
@@ -348,9 +350,16 @@ class BotManager:
             # Aggregate statistics from all forwarders
             total_forwarded = 0
             total_filtered = 0
-            if hasattr(self, 'forwarders'):
+            if hasattr(self, 'forwarders') and self.forwarders:
                 for forwarder in self.forwarders:
                     stats = forwarder.get_stats()
+                    total_forwarded += stats.get("forwarded", 0)
+                    total_filtered += stats.get("filtered", 0)
+            else:
+                # Bot not running, read from DB
+                db = get_stats_db()
+                all_stats = db.get_all_stats()
+                for stats in all_stats.values():
                     total_forwarded += stats.get("forwarded", 0)
                     total_filtered += stats.get("filtered", 0)
 
@@ -363,3 +372,13 @@ class BotManager:
                     "total": total_forwarded + total_filtered,
                 }
             }
+
+    def reset_stats(self) -> None:
+        """Reset all forwarding statistics"""
+        db = get_stats_db()
+        db.reset_stats()
+        # Also reset in-memory counters if forwarders are active
+        if hasattr(self, 'forwarders'):
+            for forwarder in self.forwarders:
+                forwarder.forwarded_count = 0
+                forwarder.filtered_count = 0

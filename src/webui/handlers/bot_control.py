@@ -125,6 +125,16 @@ class BotControlHandler:
             logger.error(t("log.auth.get_failed", name=t("log.auth.status"), error=str(e)), exc_info=True)
             return t("ui.status.error"), "0", "0", "0"
 
+    def reset_stats(self) -> str:
+        """Reset forwarding statistics"""
+        try:
+            self.bot_manager.reset_stats()
+            logger.info(t("log.stats.reset") + t("misc.via_webui"))
+            return format_message(t("message.stats.reset_success"), "success")
+        except Exception as e:
+            logger.error(t("log.stats.reset_failed", error=str(e)), exc_info=True)
+            return format_message(t("message.stats.reset_failed") + f": {str(e)}", "error")
+
     def get_auth_success_message(self) -> str:
         """Get authentication success message (if any)"""
         if self.config.session_type == "user" and self.bot_manager.auth_manager:

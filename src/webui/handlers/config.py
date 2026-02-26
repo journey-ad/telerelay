@@ -206,6 +206,10 @@ class ConfigHandler:
             all_rules = [r.to_dict() for i, r in enumerate(rules) if i != index]
             self.config.update({"forwarding_rules": all_rules})
 
+            # Delete stats from DB
+            from src.stats_db import get_stats_db
+            get_stats_db().delete_rule(deleted_name)
+
             new_index = min(index, len(all_rules) - 1)
             return (
                 format_message(t("message.config.rule_deleted", name=deleted_name), "success"),
@@ -231,6 +235,10 @@ class ConfigHandler:
             all_rules = [r.to_dict() for r in rules]
             all_rules[index]["name"] = new_name
             self.config.update({"forwarding_rules": all_rules})
+
+            # Rename in stats DB
+            from src.stats_db import get_stats_db
+            get_stats_db().rename_rule(old_name, new_name)
 
             return (
                 format_message(t("message.config.rule_renamed", old_name=old_name, new_name=new_name), "success"),

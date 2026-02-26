@@ -20,6 +20,7 @@ config/config.yaml
 # Telegram session files
 data/*.session
 data/*.session-journal
+data/*.db
 
 # Log files
 logs/*.log

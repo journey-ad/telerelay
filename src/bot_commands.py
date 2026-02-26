@@ -176,6 +176,13 @@ class AdminBotManager:
                 return
             await self._handle_webapp(event)
 
+        @self.client.on(events.NewMessage(pattern=r'^/stats\b'))
+        async def handle_stats(event):
+            if not self._check_permission(event):
+                await event.reply(t("bot_cmd.no_permission"))
+                return
+            await self._handle_stats_cmd(event)
+
     def _check_permission(self, event) -> bool:
         """Check if the sender is the authorized admin"""
         return event.sender_id == self.config.admin_chat_id
@@ -406,6 +413,10 @@ class AdminBotManager:
         rules.pop(idx)
         self._save_rules(rules)
 
+        # Delete stats from DB
+        from src.stats_db import get_stats_db
+        get_stats_db().delete_rule(rule_name)
+
         await event.reply(t("bot_cmd.rule_deleted", name=rule_name))
 
     async def _rule_rename(self, event, args: List[str]) -> None:
@@ -441,6 +452,10 @@ class AdminBotManager:
 
         rule.name = new_name
         self._save_rules(rules)
+
+        # Also rename in stats DB
+        from src.stats_db import get_stats_db
+        get_stats_db().rename_rule(old_name, new_name)
 
         await event.reply(t("bot_cmd.rule_renamed", old_name=old_name, new_name=new_name))
 
@@ -549,6 +564,24 @@ class AdminBotManager:
 
         except Exception as e:
             await event.reply(t("bot_cmd.rule_set_error", error=str(e)))
+
+    # ===== Stats Command =====
+
+    async def _handle_stats_cmd(self, event) -> None:
+        """Handle /stats <subcommand> commands"""
+        args = self._parse_args(event.raw_text, "/stats")
+
+        if not args:
+            await event.reply(t("bot_cmd.stats_usage"), parse_mode='md')
+            return
+
+        subcmd = args[0].lower()
+
+        if subcmd == "reset":
+            self.bot_manager.reset_stats()
+            await event.reply(t("bot_cmd.stats_reset_done"))
+        else:
+            await event.reply(t("bot_cmd.stats_usage"), parse_mode='md')
 
     # ===== Mini App Methods =====
 
