@@ -4,10 +4,52 @@ Provides unified logging configuration and management
 """
 import logging
 import os
+import re
 from pathlib import Path
-from datetime import datetime
-from logging.handlers import RotatingFileHandler
-from src.constants import LOG_FILE_MAX_BYTES, LOG_FILE_BACKUP_COUNT
+from logging.handlers import TimedRotatingFileHandler
+from src.constants import LOG_FILE_BACKUP_COUNT
+
+
+class DailyFileHandler(TimedRotatingFileHandler):
+    """Daily rotating file handler with name_YYYYMMDD.log format
+
+    Current log:  logs/telerelay.log
+    Rotated logs: logs/telerelay_20260226.log
+    """
+
+    def __init__(self, log_dir, base_name, backupCount=30, encoding='utf-8'):
+        self._base_name = base_name
+        self._log_dir = str(log_dir)
+        log_file = os.path.join(self._log_dir, f"{base_name}.log")
+        super().__init__(
+            log_file,
+            when='midnight',
+            interval=1,
+            backupCount=backupCount,
+            encoding=encoding,
+        )
+        self.suffix = '%Y%m%d'
+        self.extMatch = re.compile(r'^\d{4}\d{2}\d{2}$')
+
+    def rotation_filename(self, default_name):
+        # default_name: "logs/telerelay.log.20260226"
+        # target:       "logs/telerelay_20260226.log"
+        date_str = default_name.rsplit('.', 1)[-1]
+        return os.path.join(self._log_dir, f"{self._base_name}_{date_str}.log")
+
+    def getFilesToDelete(self):
+        prefix = f"{self._base_name}_"
+        suffix = ".log"
+        result = []
+        for f in os.listdir(self._log_dir):
+            if f.startswith(prefix) and f.endswith(suffix):
+                date_part = f[len(prefix):-len(suffix)]
+                if self.extMatch.match(date_part):
+                    result.append(os.path.join(self._log_dir, f))
+        result.sort()
+        if len(result) <= self.backupCount:
+            return []
+        return result[:len(result) - self.backupCount]
 
 
 def setup_logger(name: str = "telerelay", level: str = "INFO") -> logging.Logger:
@@ -45,13 +87,9 @@ def setup_logger(name: str = "telerelay", level: str = "INFO") -> logging.Logger
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 
-    # File handler - using rotation mechanism
-    log_file = log_dir / f"{name}.log"
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=LOG_FILE_MAX_BYTES,
-        backupCount=LOG_FILE_BACKUP_COUNT,
-        encoding='utf-8'
+    # File handler - daily rotation
+    file_handler = DailyFileHandler(
+        log_dir, name, backupCount=LOG_FILE_BACKUP_COUNT
     )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)

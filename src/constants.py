@@ -18,8 +18,7 @@ MIN_LOG_LINES = 20             # Minimum log lines
 MAX_LOG_LINES = 200            # Maximum log lines
 
 # Log constants
-LOG_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10MB
-LOG_FILE_BACKUP_COUNT = 5      # Keep 5 backups
+LOG_FILE_BACKUP_COUNT = 30     # Keep 30 days of logs
 
 # Message format
 SUCCESS_PREFIX = "✅"
