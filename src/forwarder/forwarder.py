@@ -2,6 +2,7 @@
 Message forwarding core module
 """
 import asyncio
+import copy
 from typing import List
 from telethon import TelegramClient
 from telethon.tl.types import Message, MessageEntityTextUrl, MessageEntityBlockquote
@@ -159,14 +160,14 @@ class MessageForwarder:
         
         if len(messages) == 1:
             msg = messages[0]
-            text = msg.text or ""
+            text = msg.raw_text or ""
             entities = list(msg.entities) if msg.entities else []
             
             if source_data:
                 text, added_entities = self._format_source_append(text, source_data)
                 entities.extend(added_entities)
             elif source_text:
-                text = self._prepend_source(text, source_text)
+                text, entities = self._prepend_source(text, source_text, entities)
                 
             await self.client.send_message(
                 target, text,
@@ -177,14 +178,14 @@ class MessageForwarder:
         else:
             # Media group: collect all media, text attached to first message
             first = messages[0]
-            text = first.text or ""
+            text = first.raw_text or ""
             entities = list(first.entities) if first.entities else []
             
             if source_data:
                 text, added_entities = self._format_source_append(text, source_data)
                 entities.extend(added_entities)
             elif source_text:
-                text = self._prepend_source(text, source_text)
+                text, entities = self._prepend_source(text, source_text, entities)
                 
             media_list = [msg.media for msg in messages if msg.media]
             
@@ -203,14 +204,14 @@ class MessageForwarder:
         """Send to target using downloaded files"""
         if not file_paths:
             # No media files, send text only (this should be rare here)
-            text = messages[0].text or ""
+            text = messages[0].raw_text or ""
             entities = list(messages[0].entities) if messages[0].entities else []
             
             if source_data:
                 text, added_entities = self._format_source_append(text, source_data)
                 entities.extend(added_entities)
             elif source_text:
-                text = self._prepend_source(text, source_text)
+                text, entities = self._prepend_source(text, source_text, entities)
                 
             await self.client.send_message(
                 target, text,
@@ -221,7 +222,7 @@ class MessageForwarder:
             return
 
         first = messages[0]
-        text = first.text or ""
+        text = first.raw_text or ""
         entities = list(first.entities) if first.entities else []
 
         file_passed = file_paths[0] if len(file_paths) == 1 else file_paths
@@ -230,7 +231,7 @@ class MessageForwarder:
             text, added_entities = self._format_source_append(text, source_data)
             entities.extend(added_entities)
         elif source_text:
-            text = self._prepend_source(text, source_text)
+            text, entities = self._prepend_source(text, source_text, entities)
 
         logger.info(t("log.forward.uploading", target=target))
         await self.client.send_file(
@@ -376,11 +377,27 @@ class MessageForwarder:
         chat_title = getattr(chat, 'title', None) or t("misc.unknown")
         return t("log.forward.source_unknown", chat_title=chat_title)
 
-    def _prepend_source(self, text: str, source_text: str) -> str:
-        """Prepend source information to message text"""
+    def _prepend_source(self, text: str, source_text: str, entities: list = None) -> tuple[str, list]:
+        """Prepend source information to message text, shifting entities offset"""
         if not source_text:
-            return text
-        return f"{source_text}\n\n{text}" if text else source_text
+            return text, entities or []
+
+        if text:
+            prefix = f"{source_text}\n\n"
+            new_text = prefix + text
+        else:
+            return source_text, entities or []
+
+        # Shift all existing entities by the prefix length (UTF-16 code units)
+        shifted_entities = []
+        if entities:
+            prefix_len = len(prefix.encode('utf-16-le')) // 2
+            for ent in entities:
+                ent_copy = copy.copy(ent)
+                ent_copy.offset = ent.offset + prefix_len
+                shifted_entities.append(ent_copy)
+
+        return new_text, shifted_entities
 
     def _log_result(self, message: Message, messages: List[Message], success: int, total: int) -> None:
         """Log forwarding result"""
