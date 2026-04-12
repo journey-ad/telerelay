@@ -115,6 +115,10 @@ class BotManager:
     async def _bot_main(self) -> None:
         """Bot main logic"""
         try:
+            # Purge residual temp files from previous runs
+            from src.forwarder.downloader import MediaDownloader
+            MediaDownloader.purge_temp_dir()
+
             # Mark as running (even during connection/authentication phase)
             self.is_running = True
 

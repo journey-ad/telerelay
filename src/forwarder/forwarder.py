@@ -20,6 +20,9 @@ from .downloader import MediaDownloader
 
 logger = get_logger()
 
+# Limit concurrent force-forward tasks (download + upload) to prevent tmp disk exhaustion
+_force_forward_semaphore = asyncio.Semaphore(3)
+
 
 class MessageForwarder:
     """Message forwarder - core forwarding logic"""
@@ -108,50 +111,62 @@ class MessageForwarder:
         is_noforwards = getattr(message.chat, 'noforwards', False) if message.chat else False
         need_download = is_noforwards and self.rule.force_forward
 
-        downloaded_files = []
         if need_download:
-            downloaded_files = await self.downloader.download(messages)
-            if not downloaded_files:
-                logger.error(t("log.forward.download_failed"))
-                return
+            async with _force_forward_semaphore:
+                await self._do_forward(messages, message, need_download, is_noforwards)
+        else:
+            await self._do_forward(messages, message, need_download, is_noforwards)
 
-        # 3. Execute forwarding: loop through all targets
-        source_data = self._get_source_data(message) if self.rule.hide_sender else None
-        source_text = self._build_source_text(message) if not self.rule.hide_sender else ""
-        success_count = 0
+    async def _do_forward(
+        self, messages: List[Message], message: Message, need_download: bool, is_noforwards: bool
+    ) -> None:
+        """Execute forwarding with optional download, cleanup guaranteed by try/finally"""
+        targets = self.rule.target_chats
+        downloaded_files = []
+        session_dir = None
+        try:
+            if need_download:
+                downloaded_files, session_dir = await self.downloader.download(messages)
+                if not downloaded_files:
+                    logger.error(t("log.forward.download_failed"))
+                    return
 
-        for i, target in enumerate(targets):
-            try:
-                if downloaded_files:
-                    await self._send_files(downloaded_files, messages, target, source_data, source_text)
-                else:
-                    await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
+            # Execute forwarding: loop through all targets
+            source_data = self._get_source_data(message) if self.rule.hide_sender else None
+            source_text = self._build_source_text(message) if not self.rule.hide_sender else ""
+            success_count = 0
 
-                success_count += 1
-
-                # Delay between multiple targets
-                if self.rule.delay > 0 and i < len(targets) - 1:
-                    await asyncio.sleep(self.rule.delay)
-
-            except ChatForwardsRestrictedError:
-                # Forwarding restricted, fallback to download and resend
-                logger.warning(t("log.forward.restricted_fallback"))
+            for i, target in enumerate(targets):
                 try:
-                    if not downloaded_files:
-                        downloaded_files = await self.downloader.download(messages)
                     if downloaded_files:
                         await self._send_files(downloaded_files, messages, target, source_data, source_text)
-                        success_count += 1
-                except Exception as e2:
-                    logger.error(t("log.forward.fallback_failed", target=target, error=e2))
-            except Exception as e:
-                logger.error(t("log.forward.target_failed", target=target, error=e))
+                    else:
+                        await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
 
-        # 4. Cleanup resources
-        if downloaded_files:
-            MediaDownloader.cleanup(downloaded_files)
+                    success_count += 1
 
-        # 5. Statistics and logging
+                    # Delay between multiple targets
+                    if self.rule.delay > 0 and i < len(targets) - 1:
+                        await asyncio.sleep(self.rule.delay)
+
+                except ChatForwardsRestrictedError:
+                    # Forwarding restricted, fallback to download and resend
+                    logger.warning(t("log.forward.restricted_fallback"))
+                    try:
+                        if not downloaded_files:
+                            downloaded_files, session_dir = await self.downloader.download(messages)
+                        if downloaded_files:
+                            await self._send_files(downloaded_files, messages, target, source_data, source_text)
+                            success_count += 1
+                    except Exception as e2:
+                        logger.error(t("log.forward.fallback_failed", target=target, error=e2))
+                except Exception as e:
+                    logger.error(t("log.forward.target_failed", target=target, error=e))
+        finally:
+            if session_dir:
+                MediaDownloader.cleanup(session_dir)
+
+        # Statistics and logging
         self._log_result(message, messages, success_count, len(targets))
 
     # ===== Forwarding strategies =====
