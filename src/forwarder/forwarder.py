@@ -73,11 +73,11 @@ class MessageForwarder:
         except FloodWaitError as e:
             logger.warning(t("log.forward.flood_wait", seconds=e.seconds))
             await asyncio.sleep(e.seconds)
-            await self.forward_message(message, event.sender_id)
+            await self.forward_message(message, event.sender_id, skip_dedup=True)
         except Exception as e:
             logger.error(t("log.forward.error", error=e), exc_info=True)
 
-    async def forward_message(self, message: Message, sender_id: int) -> None:
+    async def forward_message(self, message: Message, sender_id: int, skip_dedup: bool = False) -> None:
         """Forward message to all targets"""
         targets = self.rule.target_chats
         if not targets:
@@ -98,7 +98,7 @@ class MessageForwarder:
             return
 
         # Deduplication check
-        if self._dedup:
+        if self._dedup and not skip_dedup:
             text_to_check = message.text or ""
             if self._dedup.is_duplicate(text_to_check):
                 self.filtered_count += 1
@@ -149,6 +149,19 @@ class MessageForwarder:
                     if self.rule.delay > 0 and i < len(targets) - 1:
                         await asyncio.sleep(self.rule.delay)
 
+                except FloodWaitError as e:
+                    logger.warning(t("log.forward.flood_wait", seconds=e.seconds))
+                    await asyncio.sleep(e.seconds)
+                    try:
+                        if downloaded_files:
+                            await self._send_files(downloaded_files, messages, target, source_data, source_text)
+                        else:
+                            await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
+                        success_count += 1
+                        if self.rule.delay > 0 and i < len(targets) - 1:
+                            await asyncio.sleep(self.rule.delay)
+                    except Exception as e2:
+                        logger.error(t("log.forward.target_failed", target=target, error=e2))
                 except ChatForwardsRestrictedError:
                     # Forwarding restricted, fallback to download and resend
                     logger.warning(t("log.forward.restricted_fallback"))
