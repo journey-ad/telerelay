@@ -799,6 +799,8 @@ class ExportService:
     @staticmethod
     def _html_labels() -> Dict[str, str]:
         keys = (
+            "language",
+            "title",
             "chat_id",
             "kind",
             "created_at",
@@ -809,6 +811,30 @@ class ExportService:
             "bot",
             "none",
             "reply_to",
+            "search",
+            "search_placeholder",
+            "date_from",
+            "date_to",
+            "apply_filters",
+            "reset_filters",
+            "page_size",
+            "previous_page",
+            "next_page",
+            "page_status",
+            "result_status",
+            "filter_progress",
+            "archive_summary",
+            "range",
+            "loading",
+            "no_results",
+            "unknown_sender",
+            "edited",
+            "open_reply",
+            "reply_summary",
+            "reply_missing",
+            "reply_count",
+            "load_error",
+            "archive_readme",
         )
         return {key: t(f"export.html.{key}") for key in keys}
 

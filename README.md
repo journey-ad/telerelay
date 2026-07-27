@@ -206,7 +206,8 @@ export:
 
 #### Export Data Tab (User Mode Only)
 - **Group List Metadata**: Export every accessible group and channel with ID, title, type, creation time, public link, member count, description, and administrators. Unavailable fields are recorded as warnings without stopping the batch
-- **Group Message History**: Select one group and an inclusive time range, then export JSON, CSV, or offline HTML. Photos, files, videos, and other media are stored as readable placeholders without downloading binaries
+- **Group Message History**: Select one group and an inclusive time range, then export JSON, CSV, or an offline HTML archive. HTML is downloaded as a ZIP; extract it and open `index.html` for keyword search (including sender name, username, and ID), date filters, and pagination capped at 2,000 messages per page. Photos, files, videos, and other media are stored as readable placeholders without downloading binaries
+- **Reply Context**: HTML shows the original sender, time, and content excerpt. Replies can jump across data chunks when the original message is in the archive, and clearly indicate when it is outside the exported range
 - **Scheduled Exports**: Run hourly, daily, or weekly. Each successful run advances an incremental cursor; failed runs keep the previous cursor
 - **Run History**: Inspect record counts, ranges, output paths, and errors. Completed manual exports are also available as browser downloads
 

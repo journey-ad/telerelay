@@ -4,8 +4,16 @@ import csv
 import html
 import json
 import os
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
+
+from .html_viewer import (
+    chunk_script,
+    manifest_script,
+    prepare_archive,
+    render_index_html,
+)
 
 CHAT_FIELDS = (
     "chat_id",
@@ -259,6 +267,81 @@ class _HtmlWriter(_AtomicWriter):
         self._file.write("</main></body></html>\n")
 
 
+class _HtmlArchiveWriter:
+    """Collect message records into a paginated, offline ZIP archive."""
+
+    def __init__(
+        self,
+        target_base: Path,
+        metadata: Mapping[str, Any],
+        labels: Mapping[str, str],
+    ):
+        self.final_path = Path(str(target_base) + ".html.zip")
+        self.part_path = Path(str(self.final_path) + ".part")
+        self._metadata = dict(metadata)
+        self._labels = dict(labels)
+        self._records: List[Dict[str, Any]] = []
+        self._closed = False
+
+    def add(self, record: Mapping[str, Any]) -> None:
+        self._records.append(dict(record))
+
+    def finalize(self) -> Path:
+        if self._closed:
+            return self.final_path
+        manifest, chunks = prepare_archive(self._records, self._metadata, self._labels)
+        archive_root = self.final_path.name.removesuffix(".html.zip")
+        index_labels = dict(self._labels)
+        index_labels["title"] = str(self._metadata.get("title") or index_labels.get("title", "Message archive"))
+        self.part_path.unlink(missing_ok=True)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(self.part_path, flags, 0o600)
+        os.close(fd)
+        try:
+            with zipfile.ZipFile(
+                self.part_path,
+                "w",
+                compression=zipfile.ZIP_DEFLATED,
+                compresslevel=6,
+            ) as archive:
+                archive.writestr(
+                    f"{archive_root}/index.html",
+                    render_index_html(index_labels, variant="ledger"),
+                )
+                archive.writestr(
+                    f"{archive_root}/manifest.js",
+                    manifest_script(manifest),
+                )
+                for chunk_id, records in enumerate(chunks):
+                    archive.writestr(
+                        f"{archive_root}/data/chunk-{chunk_id + 1:06d}.js",
+                        chunk_script(chunk_id, records),
+                    )
+                archive.writestr(
+                    f"{archive_root}/README.txt",
+                    self._labels.get(
+                        "archive_readme",
+                        "Extract the archive, then open index.html in a browser.\n",
+                    ),
+                )
+            with self.part_path.open("rb") as handle:
+                os.fsync(handle.fileno())
+            os.replace(self.part_path, self.final_path)
+            os.chmod(self.final_path, 0o600)
+            self._closed = True
+            self._records.clear()
+            return self.final_path
+        except Exception:
+            self.part_path.unlink(missing_ok=True)
+            raise
+
+    def abort(self) -> None:
+        if not self._closed:
+            self.part_path.unlink(missing_ok=True)
+            self._records.clear()
+            self._closed = True
+
+
 class ExportWriterSet:
     """Fan records out to all selected formats with all-or-nothing publishing."""
 
@@ -303,7 +386,10 @@ def create_writer_set(
             elif fmt == "csv":
                 writers.append(_CsvWriter(target_base, fields))
             elif fmt == "html":
-                writers.append(_HtmlWriter(target_base, kind, metadata, labels))
+                if kind == "messages":
+                    writers.append(_HtmlArchiveWriter(target_base, metadata, labels))
+                else:
+                    writers.append(_HtmlWriter(target_base, kind, metadata, labels))
             else:
                 raise ValueError(f"Unsupported export format: {fmt}")
     except Exception:
