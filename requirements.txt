@@ -6,3 +6,4 @@ gradio==5.50.0
 requests>=2.31.0
 httpx[socks]>=0.24.1
 matplotlib>=3.7.0
+APScheduler>=3.10,<4.0

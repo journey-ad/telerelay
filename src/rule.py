@@ -3,7 +3,8 @@ Forwarding rule data class
 Defines data structure for multi-rule groups
 """
 from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from src.i18n import t
 
 
@@ -56,8 +57,10 @@ class ForwardingRule:
             filter_media_types=filters.get("media_types", []),
             filter_max_file_size=filters.get("max_file_size", 0),
             filter_min_file_size=filters.get("min_file_size", 0),
-            ignored_user_ids=[int(uid) for uid in ignore.get("user_ids", []) if uid],
-            ignored_keywords=ignore.get("keywords", []),
+            ignored_user_ids=[
+                int(uid) for uid in (ignore.get("user_ids") or []) if uid
+            ],
+            ignored_keywords=ignore.get("keywords") or [],
             preserve_format=forwarding.get("preserve_format", True),
             add_source_info=forwarding.get("add_source_info", True),
             delay=forwarding.get("delay", 0.5),

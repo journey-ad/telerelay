@@ -22,6 +22,7 @@ An intelligent Telegram message relay tool with smart filtering based on regex p
 - 🚫 **Ignore List**: Ignore specific messages by user ID and keywords
 - 💪 **Force Forward**: Bypass noforwards restrictions on channels/groups by downloading and re-uploading
 - 🌐 **Web Management Interface**: Gradio-based configuration panel with real-time Bot status, statistics, and logs
+- 📤 **Data Export**: Export group metadata and complete group history to JSON, CSV, or HTML with incremental schedules
 - 🌍 **Internationalization**: Full i18n support with built-in Chinese and English interfaces
 - 🔐 **Dual Authentication Modes**: Support both User Session (phone login) and Bot Token methods
 - 🐳 **Docker Support**: One-click deployment, ready to use
@@ -142,6 +143,17 @@ ADMIN_BOT_TOKEN=
 ADMIN_CHAT_ID=
 ```
 
+### Export Configuration (config/config.yaml)
+
+```yaml
+export:
+  root_dir: data/exports
+  timezone: Asia/Shanghai
+  concurrency: 2
+```
+
+`root_dir` is the server-side export root. The Web UI only accepts relative subdirectories below it. Docker already mounts the complete `data/` directory, so exports and the task database at `data/exports.db` persist across container recreation.
+
 ## 🎮 Usage Guide
 
 ### Authentication Mode Comparison
@@ -191,6 +203,14 @@ ADMIN_CHAT_ID=
 #### Logs Tab
 - **Real-time Logs**: View running logs
 - **Log Lines**: Adjustable display lines
+
+#### Export Data Tab (User Mode Only)
+- **Group List Metadata**: Export every accessible group and channel with ID, title, type, creation time, public link, member count, description, and administrators. Unavailable fields are recorded as warnings without stopping the batch
+- **Group Message History**: Select one group and an inclusive time range, then export JSON, CSV, or offline HTML. Photos, files, videos, and other media are stored as readable placeholders without downloading binaries
+- **Scheduled Exports**: Run hourly, daily, or weekly. Each successful run advances an incremental cursor; failed runs keep the previous cursor
+- **Run History**: Inspect record counts, ranges, output paths, and errors. Completed manual exports are also available as browser downloads
+
+Complete history export requires a Telegram user session and is unavailable in Bot Token mode. When `WEB_HOST` is externally bound, both `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` must be configured or exporting is disabled. Deleted Telegram messages cannot be recovered; edited messages are exported in their current state.
 
 #### Authentication Tab (User Mode Only)
 - **Auth Status**: Display current login status and account info
@@ -299,6 +319,7 @@ telerelay/
 3. **Regular Backups**
    - Backup session files (`data/`)
    - Backup configuration files
+   - Backup `data/exports.db` together with `data/exports/`
 
 ## 📝 License
 

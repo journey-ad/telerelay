@@ -9,6 +9,8 @@ from src.webui import create_ui
 from src.config import create_config
 from src.bot_manager import BotManager
 from src.auth_manager import AuthManager
+from src.exporter.scheduler import ExportScheduler
+from src.exporter.service import ExportService
 from src.logger import setup_logger, get_logger, add_ui_update_handler
 from src.i18n import t, set_language
 
@@ -18,6 +20,8 @@ logger = setup_logger()
 
 def main():
     """Start the application"""
+    export_service = None
+    export_scheduler = None
     try:
         # Create configuration
         config = create_config()
@@ -44,6 +48,11 @@ def main():
         # Automatically trigger UI update when logging
         add_ui_update_handler(bot_manager)
 
+        # Export service and persistent task scheduler
+        export_service = ExportService(config, bot_manager)
+        export_scheduler = ExportScheduler(export_service)
+        export_scheduler.start()
+
         # Auto-login if session cache exists
         session_file = Path("data/telegram_session.session")
         if session_file.exists():
@@ -59,7 +68,13 @@ def main():
             logger.info(t("log.main.admin_bot_started"))
 
         # Create Gradio interface
-        app = create_ui(config, bot_manager, auth_manager)
+        app = create_ui(
+            config,
+            bot_manager,
+            auth_manager,
+            export_service,
+            export_scheduler,
+        )
 
         # Display access information
         logger.info(t("log.main.web_address", host=config.web_host, port=config.web_port))
@@ -88,6 +103,11 @@ def main():
     except Exception as e:
         logger.error(t("log.main.error", error=str(e)), exc_info=True)
         sys.exit(1)
+    finally:
+        if export_scheduler:
+            export_scheduler.shutdown()
+        if export_service:
+            export_service.shutdown()
 
 
 if __name__ == "__main__":

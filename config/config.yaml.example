@@ -7,14 +7,23 @@ source_chats:
   - -100123456789  # Example group ID
   # - "@example_channel"  # Example channel
 
-# Target group/channel (where to forward messages)
-# Can be group ID, channel username, or private chat username
-target_chat: -100987654321
+# Target groups/channels (where to forward messages)
+# Can contain group IDs, channel usernames, or private chat usernames
+target_chats:
+  - -100987654321
 
 # UI language configuration
 # en_US: English (default)
 # zh_CN: Chinese
 language: en_US
+
+# Chat and group metadata export
+export:
+  # Must be persistent in Docker; the default is covered by the existing data volume.
+  root_dir: data/exports
+  timezone: Asia/Shanghai
+  # Range: 1-4. Telegram rate limits still apply when multiple jobs run.
+  concurrency: 2
 
 # Message filtering rules
 filters:
@@ -50,12 +59,12 @@ forwarding:
 ignore:
   # List of user IDs to ignore
   # Format: numeric ID, can be obtained via @userinfobot
-  user_ids:
+  user_ids: []
     # - 123456789
     # - 987654321
 
   # List of keywords to ignore
   # Messages containing any keyword will be ignored
-  keywords:
+  keywords: []
     # - "advertisement"
     # - "promotion"

@@ -5,7 +5,8 @@ Manages the startup, shutdown, and restart of Telegram Bot
 import asyncio
 import time
 import threading
-from typing import Optional
+from concurrent.futures import Future
+from typing import Any, Callable, Optional
 from src.config import Config
 from src.client import TelegramClientManager
 from src.filters import MessageFilter
@@ -123,7 +124,7 @@ class BotManager:
             self.is_running = True
 
             # Validate configuration
-            is_valid, error_msg = self.config.validate()
+            is_valid, error_msg = self.config.validate_connection()
             if not is_valid:
                 logger.error(t("log.bot.config_validation_failed", error=error_msg))
                 return
@@ -215,7 +216,32 @@ class BotManager:
         except Exception as e:
             logger.error(t("log.bot.main_error", error=str(e)), exc_info=True)
         finally:
+            self.is_connected = False
             self.is_running = False
+
+    def submit_telegram(
+        self,
+        callback: Callable[..., Any],
+        *args,
+    ) -> Future:
+        """Run an async Telegram callback on the client's owning event loop."""
+        with self._lock:
+            loop = self.loop
+            client_manager = self.client_manager
+            connected = self._is_connected
+
+        if self.config.session_type != "user":
+            raise RuntimeError(t("message.export.user_mode_required"))
+        if not connected or not loop or loop.is_closed() or not client_manager:
+            raise RuntimeError(t("message.export.telegram_not_connected"))
+        client = client_manager.get_client()
+        if client is None:
+            raise RuntimeError(t("message.export.telegram_not_connected"))
+
+        async def invoke():
+            return await callback(client, *args)
+
+        return asyncio.run_coroutine_threadsafe(invoke(), loop)
     
     async def _central_message_handler(self, event) -> None:
         """Central message handler: checks all rules, outputs log only once"""

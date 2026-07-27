@@ -132,6 +132,29 @@ class Config:
         """Interface language"""
         return os.getenv("LANGUAGE", "zh_CN")
 
+    # Export configuration
+    @property
+    def export_root_dir(self) -> str:
+        """Persistent root directory for generated exports."""
+        export = self.config_data.get("export", {})
+        return str(export.get("root_dir", "data/exports"))
+
+    @property
+    def export_timezone(self) -> str:
+        """Timezone used for export ranges and scheduled jobs."""
+        export = self.config_data.get("export", {})
+        return str(export.get("timezone") or os.getenv("TZ") or "Asia/Shanghai")
+
+    @property
+    def export_concurrency(self) -> int:
+        """Maximum number of concurrent export workers."""
+        export = self.config_data.get("export", {})
+        try:
+            value = int(export.get("concurrency", 2))
+        except (TypeError, ValueError):
+            value = 2
+        return max(1, min(value, 4))
+
     # Admin Bot configuration
     @property
     def admin_bot_token(self) -> Optional[str]:
@@ -241,13 +264,9 @@ class Config:
     
     def validate(self) -> tuple[bool, str]:
         """Validate if configuration is complete"""
-        # Validate API credentials
-        if not self.api_id or not self.api_hash:
-            return False, t("message.validation.api_missing")
-
-        # If in bot mode, Bot Token is required
-        if self.session_type == "bot" and not self.bot_token:
-            return False, t("message.validation.bot_token_required")
+        valid, message = self.validate_connection()
+        if not valid:
+            return valid, message
 
         # Validate rules
         rules = self.get_enabled_rules()
@@ -259,6 +278,17 @@ class Config:
                 return False, t("message.validation.no_source", rule=rule.name)
             if not rule.target_chats:
                 return False, t("message.validation.no_target", rule=rule.name)
+
+        return True, t("message.validation.passed")
+
+    def validate_connection(self) -> tuple[bool, str]:
+        """Validate credentials required to connect, independent of forwarding rules."""
+        if not self.api_id or not self.api_hash:
+            return False, t("message.validation.api_missing")
+
+        # If in bot mode, Bot Token is required
+        if self.session_type == "bot" and not self.bot_token:
+            return False, t("message.validation.bot_token_required")
 
         return True, t("message.validation.passed")
     
