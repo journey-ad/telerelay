@@ -389,7 +389,6 @@ class ExportService:
             formats,
             directory,
             None,
-            True,
         )
         return state.id
 
@@ -413,7 +412,6 @@ class ExportService:
         formats: Sequence[str],
         directory: Path,
         min_message_id: Optional[int],
-        create_empty: bool,
     ) -> None:
         cancel_event = self._cancel_events[job_id]
         run_type = "scheduled" if task_id else "messages"
@@ -469,15 +467,6 @@ class ExportService:
                 "range_end": _date_text(end_at),
                 "timezone": str(output_timezone),
             }
-            if create_empty:
-                writers = create_writer_set(
-                    directory / stem,
-                    "messages",
-                    formats,
-                    metadata,
-                    self._html_labels(),
-                )
-
             records = self.source.iter_message_records(
                 chat_id=chat_id,
                 chat_title=chat_title,
@@ -753,7 +742,6 @@ class ExportService:
                 task.formats,
                 directory,
                 task.last_message_id,
-                False,
             )
             return state.id
         except Exception:
@@ -833,6 +821,12 @@ class ExportService:
             "reply_summary",
             "reply_missing",
             "reply_count",
+            "open_thread",
+            "thread_loading_title",
+            "thread_loading",
+            "thread_title",
+            "thread_summary",
+            "back_to_messages",
             "load_error",
             "archive_readme",
         )

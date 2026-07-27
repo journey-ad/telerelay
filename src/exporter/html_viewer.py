@@ -42,19 +42,49 @@ def prepare_archive(
         for index, record in enumerate(copied)
         if record.get("message_id") is not None
     }
-    replies: Dict[str, int] = {}
-    for record in copied:
+    children: Dict[int, List[int]] = {}
+    parents: Dict[int, int] = {}
+    for child_index, record in enumerate(copied):
         reply_id = record.get("reply_to_message_id")
         if reply_id is not None:
-            key = str(reply_id)
-            replies[key] = replies.get(key, 0) + 1
+            parent_index = locations.get(str(reply_id))
+            if parent_index is not None and parent_index != child_index:
+                children.setdefault(parent_index, []).append(child_index)
+                parents[child_index] = parent_index
+
+    descendant_counts = [0] * len(copied)
+    remaining_children = [len(children.get(index, [])) for index in range(len(copied))]
+    ready = [index for index, count in enumerate(remaining_children) if count == 0]
+    cursor = 0
+    while cursor < len(ready):
+        index = ready[cursor]
+        cursor += 1
+        parent_index = parents.get(index)
+        if parent_index is None:
+            continue
+        descendant_counts[parent_index] += 1 + descendant_counts[index]
+        remaining_children[parent_index] -= 1
+        if remaining_children[parent_index] == 0:
+            ready.append(parent_index)
+
+    # Telegram replies are acyclic. For malformed cycles, expose direct children
+    # without allowing a corrupt record to block archive creation.
+    for index, remaining in enumerate(remaining_children):
+        if remaining:
+            descendant_counts[index] = max(
+                descendant_counts[index],
+                len(children.get(index, [])),
+            )
 
     unknown = labels.get("unknown_sender", "Unknown sender")
     for index, record in enumerate(copied):
         archive_data: Dict[str, Any] = {
             "index": index,
-            "reply_count": replies.get(str(record.get("message_id")), 0),
+            "reply_count": descendant_counts[index],
         }
+        child_indices = children.get(index, [])
+        if child_indices:
+            archive_data["children"] = child_indices
         reply_id = record.get("reply_to_message_id")
         if reply_id is not None:
             target_index = locations.get(str(reply_id))
@@ -137,13 +167,15 @@ h1{margin:0;font-size:22px;line-height:1.2;letter-spacing:0}.meta,.summary,.stat
 .filters{display:grid;grid-template-columns:minmax(220px,2fr) repeat(2,minmax(140px,1fr)) auto auto;gap:8px;align-items:end;padding:14px 0;border-bottom:1px solid var(--line)}
 .field{display:grid;gap:4px;min-width:0}.field>span{color:var(--muted);font-size:11px;font-weight:700}.field input,.field select{width:100%;height:34px;padding:5px 8px;min-width:0}.command{height:34px;padding:5px 12px;font-weight:700}.command.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .scan{display:none;grid-template-columns:1fr auto;align-items:center;gap:10px;padding:8px 0;color:var(--muted);font-size:12px}.scan.active{display:grid}.scan progress{width:100%;height:6px;accent-color:var(--accent)}
+.thread-bar{display:none;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--line)}.thread-bar.active{display:flex}.thread-title{font-weight:700}.thread-summary{margin-left:8px;color:var(--muted);font-size:12px}.thread-active .filters{display:none}
+body.thread-active .message{padding-left:12px;padding-right:12px}
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px}.pager{display:flex;align-items:center;gap:7px;white-space:nowrap}.pager .field{display:flex;align-items:center;gap:6px}.pager select{height:30px;padding:3px 6px}.icon-button{width:32px;height:30px;padding:0;font-size:18px;line-height:1}.page-status{min-width:74px;text-align:center;font-variant-numeric:tabular-nums}
 .bottom-toolbar{margin-top:14px;border-top:1px solid var(--line)}
 .date-heading{position:sticky;top:0;z-index:1;margin:14px 0 6px;padding:5px 0;background:var(--bg);color:var(--muted);font-size:12px;font-weight:700;border-bottom:1px solid var(--line)}
 .message{scroll-margin-top:34px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;margin:0 0 6px}.message.flash{outline:2px solid var(--accent);outline-offset:1px}
 .message-head{display:flex;align-items:baseline;flex-wrap:wrap;gap:5px 9px}.sender{font-weight:700}.time,.message-link,.detail,.reply-count{color:var(--muted);font-size:12px}.message-link{text-decoration:none}.message-link:hover{text-decoration:underline}.detail{border:1px solid var(--line);border-radius:3px;padding:0 4px}
-.content{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.reply{display:block;width:100%;margin:7px 0 2px;padding:6px 8px;text-align:left;background:var(--reply);border:0;border-left:3px solid var(--accent);border-radius:0}.reply:hover{filter:brightness(.98)}.reply.missing{cursor:default;border-left-color:var(--muted)}
-.reply-title{display:block;color:var(--accent);font-size:12px;font-weight:700}.reply-preview{display:block;margin-top:2px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reply-count{display:inline-block;margin-top:6px}.empty{padding:42px 12px;text-align:center;color:var(--muted);border-top:1px solid var(--line)}.error{color:var(--danger)}
+.content{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.content a{color:var(--accent)}.reply{display:block;width:100%;margin:7px 0 2px;padding:6px 8px;text-align:left;background:var(--reply);border:0;border-left:3px solid var(--accent);border-radius:0}.reply:hover{filter:brightness(.98)}.reply.missing{cursor:default;border-left-color:var(--muted)}
+.reply-title{display:block;color:var(--accent);font-size:12px;font-weight:700}.reply-preview{display:block;margin-top:2px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.reply-count{display:inline-block;margin-top:6px;color:var(--muted);font-size:12px}.thread-link{padding:0;border:0;background:transparent;color:var(--accent);font-weight:700;text-decoration:underline;text-underline-offset:2px}.empty{padding:42px 12px;text-align:center;color:var(--muted);border-top:1px solid var(--line)}.error{color:var(--danger)}
 body.theme-telegram{--bg:#e8edf1;--paper:#fff;--ink:#1e2a32;--muted:#6c7b85;--line:#d4dde3;--accent:#168acd;--reply:#edf8fe;--radius:7px}.theme-telegram .message{max-width:860px}
 body.theme-ledger{--bg:#fff;--paper:#fff;--ink:#161616;--muted:#666;--line:#bdbdbd;--accent:#14532d;--reply:#f2f7f3;--radius:0}.theme-ledger .message{border-width:0 0 1px;padding-left:2px;padding-right:2px}
 body.theme-paper{--bg:#f3efe5;--paper:#fffdf7;--ink:#27241f;--muted:#766f62;--line:#d7cdbd;--accent:#8b3f2f;--reply:#f7eee7;--radius:3px;--font:Georgia,"Times New Roman",serif}
@@ -154,7 +186,7 @@ body.theme-soft{--bg:#eef0f2;--paper:#fafbfc;--ink:#283038;--muted:#717b84;--lin
 body.theme-terminal{color-scheme:dark;--bg:#111512;--paper:#151b17;--ink:#d7e7da;--muted:#839a87;--line:#314236;--accent:#65c477;--reply:#19261c;--danger:#ff8d8d;--radius:0;--font:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 body.theme-editorial{--bg:#f7f7f5;--paper:#fff;--ink:#1c1c1b;--muted:#777773;--line:#d8d8d2;--accent:#304f75;--reply:#eef2f6;--radius:1px;--font:Georgia,"Times New Roman",serif}.theme-editorial h1{font-size:26px}.theme-editorial .message{padding-top:13px;padding-bottom:13px}
 @media(max-width:820px){.archive-header{align-items:flex-start;flex-direction:column;gap:7px}.summary{text-align:left}.filters{grid-template-columns:1fr 1fr}.filters .search-field{grid-column:1/-1}.toolbar{align-items:flex-start;flex-direction:column;padding:10px 0}.pager{width:100%;justify-content:flex-end}}
-@media(max-width:520px){.shell{width:calc(100% - 14px);margin-top:10px}.filters{grid-template-columns:1fr}.filters .search-field{grid-column:auto}.message{padding:9px}.pager{justify-content:space-between}.pager .field>span{display:none}.date-heading{top:0}}
+@media(max-width:520px){.shell{width:calc(100% - 14px);margin-top:10px}.filters{grid-template-columns:1fr}.filters .search-field{grid-column:auto}.message{padding:9px}.pager{justify-content:space-between}.pager .field>span{display:none}.date-heading{top:0}.thread-bar{align-items:flex-start;flex-direction:column;gap:8px}.thread-bar .command{width:100%}}
 """.strip()
 
 
@@ -170,6 +202,8 @@ _VIEWER_SCRIPT = r"""
   let currentPage = 1;
   let filterToken = 0;
   let renderToken = 0;
+  let threadToken = 0;
+  let threadState = null;
 
   const byId = (id) => document.getElementById(id);
   const text = (key, fallback) => labels[key] || fallback;
@@ -187,6 +221,32 @@ _VIEWER_SCRIPT = r"""
     const raw = String(value || "");
     return raw.length >= 19 ? raw.slice(11, 19) : raw;
   };
+
+  function renderContent(value) {
+    const content = make("div", "content");
+    const raw = String(value || "");
+    if (!window.linkify || typeof window.linkify.find !== "function") {
+      content.textContent = raw;
+      return content;
+    }
+    try {
+      let cursor = 0;
+      for (const match of window.linkify.find(raw)) {
+        if (!match.isLink || match.start < cursor || match.end <= match.start) continue;
+        content.appendChild(document.createTextNode(raw.slice(cursor, match.start)));
+        const anchor = make("a", "", match.value);
+        anchor.href = match.href;
+        anchor.target = "_blank";
+        anchor.rel = "noopener noreferrer";
+        content.appendChild(anchor);
+        cursor = match.end;
+      }
+      content.appendChild(document.createTextNode(raw.slice(cursor)));
+    } catch (error) {
+      content.textContent = raw;
+    }
+    return content;
+  }
 
   function cacheChunk(id, records) {
     cache.delete(id);
@@ -317,7 +377,10 @@ _VIEWER_SCRIPT = r"""
     article.dataset.globalIndex = String(record._archive.index);
     const head = make("div", "message-head");
     head.appendChild(make("span", "sender", record.sender_name || record.sender_id || text("unknown_sender", "Unknown sender")));
-    const timestamp = make("time", "time", timeOf(record.date));
+    const timestampText = threadState
+      ? String(record.date || "").slice(0, 19).replace("T", " ")
+      : timeOf(record.date);
+    const timestamp = make("time", "time", timestampText);
     timestamp.dateTime = record.date || "";
     head.appendChild(timestamp);
     const link = make("a", "message-link", `#${record.message_id}`);
@@ -328,9 +391,18 @@ _VIEWER_SCRIPT = r"""
     article.appendChild(head);
     const reply = renderReply(record);
     if (reply) article.appendChild(reply);
-    article.appendChild(make("div", "content", record.content || ""));
+    article.appendChild(renderContent(record.content));
     if (record._archive.reply_count) {
-      article.appendChild(make("span", "reply-count", format(text("reply_count", "{count} replies"), {count: record._archive.reply_count})));
+      const countText = format(text("reply_count", "{count} replies"), {count: record._archive.reply_count});
+      if (threadState) {
+        article.appendChild(make("span", "reply-count", countText));
+      } else {
+        const threadLink = make("button", "reply-count thread-link", countText);
+        threadLink.type = "button";
+        threadLink.dataset.threadIndex = String(record._archive.index);
+        threadLink.title = text("open_thread", "Open reply list");
+        article.appendChild(threadLink);
+      }
     }
     return article;
   }
@@ -348,7 +420,7 @@ _VIEWER_SCRIPT = r"""
       let previousDay = null;
       for (const record of records) {
         const day = dayOf(record);
-        if (day && day !== previousDay) {
+        if (!threadState && day && day !== previousDay) {
           fragment.appendChild(make("div", "date-heading", day));
           previousDay = day;
         }
@@ -399,6 +471,7 @@ _VIEWER_SCRIPT = r"""
   }
 
   async function applyFilters() {
+    if (threadState) return;
     const query = byId("search").value.trim().toLocaleLowerCase();
     const from = byId("date-from").value;
     const to = byId("date-to").value;
@@ -446,7 +519,99 @@ _VIEWER_SCRIPT = r"""
     await renderPage();
   }
 
+  async function openThread(rootIndex) {
+    if (threadState) return;
+    const token = ++threadToken;
+    filterToken += 1;
+    threadState = {
+      matches,
+      currentPage,
+      pageSize: byId("page-size").value,
+      scrollY: window.scrollY
+    };
+    document.body.classList.add("thread-active");
+    byId("thread-bar").classList.add("active");
+    byId("thread-title").textContent = text("thread_loading_title", "Reply list");
+    byId("thread-summary").textContent = format(text("thread_loading", "Loading replies · {count} found"), {count: 0});
+    byId("messages").replaceChildren(make("div", "empty", text("loading", "Loading...")));
+    try {
+      const discovered = new Map();
+      const seen = new Set([rootIndex]);
+      let frontier = [rootIndex];
+      while (frontier.length) {
+        if (token !== threadToken) return;
+        const records = await recordsAt(frontier);
+        const next = [];
+        for (let position = 0; position < records.length; position += 1) {
+          const index = frontier[position];
+          const record = records[position];
+          discovered.set(index, record);
+          for (const childIndex of record._archive.children || []) {
+            if (seen.has(childIndex)) continue;
+            seen.add(childIndex);
+            next.push(childIndex);
+          }
+        }
+        frontier = next;
+        byId("thread-summary").textContent = format(
+          text("thread_loading", "Loading replies · {count} found"),
+          {count: seen.size}
+        );
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
+      if (token !== threadToken) return;
+      const ordered = [];
+      const visited = new Set();
+      const visit = (index) => {
+        if (visited.has(index)) return;
+        visited.add(index);
+        ordered.push(index);
+        const record = discovered.get(index);
+        for (const childIndex of (record && record._archive.children) || []) visit(childIndex);
+      };
+      visit(rootIndex);
+      const root = discovered.get(rootIndex);
+      matches = ordered;
+      currentPage = 1;
+      byId("thread-title").textContent = format(
+        text("thread_title", "Reply list for #{id}"),
+        {id: root.message_id}
+      );
+      byId("thread-summary").textContent = format(
+        text("thread_summary", "{count} messages"),
+        {count: ordered.length}
+      );
+      await renderPage();
+      window.scrollTo(0, 0);
+    } catch (error) {
+      if (token !== threadToken) return;
+      byId("messages").replaceChildren(make("div", "empty error", error.message || String(error)));
+    }
+  }
+
+  async function closeThread() {
+    if (!threadState) return;
+    const previous = threadState;
+    threadToken += 1;
+    threadState = null;
+    document.body.classList.remove("thread-active");
+    byId("thread-bar").classList.remove("active");
+    byId("page-size").value = previous.pageSize;
+    matches = previous.matches;
+    currentPage = previous.currentPage;
+    await renderPage();
+    window.requestAnimationFrame(() => window.scrollTo(0, previous.scrollY));
+  }
+
   async function jumpTo(index) {
+    if (threadState) {
+      const position = matches.indexOf(index);
+      if (position >= 0) {
+        currentPage = Math.floor(position / pageSize()) + 1;
+        await renderPage(index);
+      }
+      return;
+    }
     filterToken += 1;
     matches = null;
     byId("search").value = "";
@@ -468,9 +633,14 @@ _VIEWER_SCRIPT = r"""
     byId("date-to-label").textContent = text("date_to", "To");
     byId("apply-filters").textContent = text("apply_filters", "Apply");
     byId("reset-filters").textContent = text("reset_filters", "Reset");
+    byId("close-thread").textContent = text("back_to_messages", "Back to messages");
     byId("page-size-label").textContent = text("page_size", "Per page");
-    byId("previous-page").title = byId("previous-page").ariaLabel = text("previous_page", "Previous page");
-    byId("next-page").title = byId("next-page").ariaLabel = text("next_page", "Next page");
+    for (const id of ["previous-page", "previous-page-bottom"]) {
+      byId(id).title = byId(id).ariaLabel = text("previous_page", "Previous page");
+    }
+    for (const id of ["next-page", "next-page-bottom"]) {
+      byId(id).title = byId(id).ariaLabel = text("next_page", "Next page");
+    }
     const size = byId("page-size");
     for (const value of manifest.page_sizes) size.appendChild(new Option(String(value), String(value), false, value === manifest.default_page_size));
     byId("apply-filters").addEventListener("click", applyFilters);
@@ -486,7 +656,13 @@ _VIEWER_SCRIPT = r"""
     const nextPage = () => { if (currentPage < pageCount()) { currentPage += 1; renderPage(); window.scrollTo(0, 0); } };
     for (const id of ["previous-page", "previous-page-bottom"]) byId(id).addEventListener("click", previousPage);
     for (const id of ["next-page", "next-page-bottom"]) byId(id).addEventListener("click", nextPage);
+    byId("close-thread").addEventListener("click", closeThread);
     byId("messages").addEventListener("click", (event) => {
+      const thread = event.target.closest("[data-thread-index]");
+      if (thread) {
+        openThread(Number(thread.dataset.threadIndex));
+        return;
+      }
       const reply = event.target.closest("[data-reply-index]");
       if (reply) jumpTo(Number(reply.dataset.replyIndex));
     });
@@ -541,6 +717,10 @@ def render_index_html(
     <button class="command" id="reset-filters" type="button"></button>
   </section>
   <div class="scan" id="scan"><progress id="scan-progress"></progress><span id="scan-label"></span></div>
+  <section class="thread-bar" id="thread-bar">
+    <div><span class="thread-title" id="thread-title"></span><span class="thread-summary" id="thread-summary"></span></div>
+    <button class="command" id="close-thread" type="button"></button>
+  </section>
   <nav class="toolbar" aria-label="Pagination">
     <p class="status" id="status"></p>
     <div class="pager">
@@ -560,6 +740,7 @@ def render_index_html(
     </div>
   </nav>
 </div>
+<script src="https://unpkg.com/linkifyjs@4.3.3/dist/linkify.min.js"></script>
 {bootstrap}
 <script>{_VIEWER_SCRIPT}</script>
 </body>
