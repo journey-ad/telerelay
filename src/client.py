@@ -2,22 +2,24 @@
 Telegram Client Management Module
 Encapsulates Telethon client, handles connection and session management
 """
-import asyncio
 from pathlib import Path
-from typing import Optional, Callable
+from typing import TYPE_CHECKING, Callable, Optional
 from urllib.parse import urlparse
+
 from telethon import TelegramClient, events
 from telethon.errors import (
-    SessionPasswordNeededError,
-    FloodWaitError,
-    PhoneNumberInvalidError,
+    PasswordHashInvalidError,
     PhoneCodeInvalidError,
-    PasswordHashInvalidError
+    PhoneNumberInvalidError,
 )
 from telethon.tl.types import User
+
 from src.config import Config
-from src.logger import get_logger
 from src.i18n import t
+from src.logger import get_logger
+
+if TYPE_CHECKING:
+    from src.auth_manager import AuthManager
 
 logger = get_logger()
 
@@ -216,9 +218,6 @@ class TelegramClientManager:
         async def handler(event):
             try:
                 await callback(event)
-            except FloodWaitError as e:
-                logger.warning(t("log.client.flood_wait", seconds=e.seconds))
-                await asyncio.sleep(e.seconds)
             except Exception as e:
                 logger.error(t("log.client.message_error", error=str(e)), exc_info=True)
 

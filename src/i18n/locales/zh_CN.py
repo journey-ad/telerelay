@@ -43,6 +43,17 @@ TRANSLATIONS = {
             "restart_failed": "无法停止 Bot，重启失败",
         },
 
+        "forward_queue": {
+            "enqueued": "消息已持久化入队 - 队列项 {item_id}, 规则 {rule}, 来源 {chat_id}/{message_id}",
+            "duplicate": "消息已存在于持久队列 - 队列项 {item_id}, 规则 {rule}, 来源 {chat_id}/{message_id}",
+            "restored": "持久转发队列已恢复：重新排队 {recovered} 项，清理完成记录 {purged} 项",
+            "paused": "触发 FloodWait，整个转发队列暂停 {seconds:.1f} 秒；当前队列项 {item_id}",
+            "retry": "队列项 {item_id} 处理失败，{seconds:.1f} 秒后重试：{error}",
+            "failed": "队列项 {item_id} 在 {attempts} 次尝试后失败：{error}",
+            "loop_error": "持久转发队列循环异常，将自动恢复：{error}",
+            "recovery_failed": "持久转发队列恢复 processing 状态失败",
+        },
+
         # log.client.* - client.py 的日志
         "client": {
             "proxy_unsupported": "不支持的代理类型: {type}",

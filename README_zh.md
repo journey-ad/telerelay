@@ -154,6 +154,8 @@ export:
 
 `root_dir` 是服务端导出根目录，Web 界面中只能填写它下面的相对子目录。Docker 默认挂载整个 `data/`，因此导出文件和任务数据库 `data/exports.db` 都会持久保留。
 
+实时转发队列保存在 `data/forward_queue.db`，支持重启恢复。
+
 ## 🎮 使用说明
 
 ### 认证模式对比
@@ -241,7 +243,7 @@ export:
 - 如果使用多规则配置，检查规则是否已启用
 
 **触发速率限制 (FloodWait)？**
-- 程序会自动处理并等待
+- 程序会暂停整个转发队列，等待结束后自动继续
 - 可增加 `forwarding.delay` 延迟时间
 
 **无法转发受限制频道的内容？**
@@ -322,6 +324,7 @@ telerelay/
    - 备份会话文件（`data/`）
    - 备份配置文件
    - 备份 `data/exports.db` 和 `data/exports/`；恢复时两者应一起迁移
+   - 备份 `data/forward_queue.db`
 
 ## 📝 许可证
 

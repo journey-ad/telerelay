@@ -3,13 +3,15 @@ Configuration loading and validation module
 Supports loading configuration from .env and config.yaml
 """
 import os
-import yaml
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
+
+import yaml
 from dotenv import load_dotenv
+
+from src.i18n import t
 from src.logger import get_logger
 from src.rule import ForwardingRule, load_rules_from_config
-from src.i18n import t
 
 logger = get_logger()
 
@@ -253,6 +255,66 @@ class Config:
         """Forwarding delay (seconds)"""
         forwarding = self.config_data.get("forwarding", {})
         return float(forwarding.get("delay", 0.5))
+
+    # Persistent forwarding queue configuration
+    @property
+    def forward_queue_db_path(self) -> str:
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        return str(queue_config.get("db_path", "data/forward_queue.db"))
+
+    @property
+    def forward_queue_max_retries(self) -> int:
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        try:
+            value = int(queue_config.get("max_retries", 5))
+        except (TypeError, ValueError):
+            value = 5
+        return max(1, min(value, 100))
+
+    @property
+    def forward_queue_retry_base_seconds(self) -> float:
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        try:
+            value = float(queue_config.get("retry_base_seconds", 5))
+        except (TypeError, ValueError):
+            value = 5.0
+        return max(0.1, min(value, 3600.0))
+
+    @property
+    def forward_queue_flood_wait_buffer(self) -> float:
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        try:
+            value = float(queue_config.get("flood_wait_buffer", 1))
+        except (TypeError, ValueError):
+            value = 1.0
+        return max(0.0, min(value, 60.0))
+
+    @property
+    def forward_queue_poll_interval(self) -> float:
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        try:
+            value = float(queue_config.get("poll_interval", 1))
+        except (TypeError, ValueError):
+            value = 1.0
+        return max(0.05, min(value, 60.0))
+
+    @property
+    def forward_queue_media_group_settle_seconds(self) -> float:
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        try:
+            value = float(queue_config.get("media_group_settle_seconds", 1))
+        except (TypeError, ValueError):
+            value = 1.0
+        return max(0.1, min(value, 10.0))
+
+    @property
+    def forward_queue_completed_retention_days(self) -> int:
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        try:
+            value = int(queue_config.get("completed_retention_days", 7))
+        except (TypeError, ValueError):
+            value = 7
+        return max(1, min(value, 3650))
     
     def get_forwarding_rules(self) -> List[ForwardingRule]:
         """Get forwarding rules list"""

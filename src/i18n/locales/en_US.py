@@ -43,6 +43,17 @@ TRANSLATIONS = {
             "restart_failed": "Unable to stop Bot, restart failed",
         },
 
+        "forward_queue": {
+            "enqueued": "Message persisted to queue - item {item_id}, rule {rule}, source {chat_id}/{message_id}",
+            "duplicate": "Message already exists in persistent queue - item {item_id}, rule {rule}, source {chat_id}/{message_id}",
+            "restored": "Persistent forward queue restored: requeued {recovered}, purged {purged} completed item(s)",
+            "paused": "FloodWait triggered; entire forward queue paused for {seconds:.1f}s at item {item_id}",
+            "retry": "Queue item {item_id} failed; retrying in {seconds:.1f}s: {error}",
+            "failed": "Queue item {item_id} failed after {attempts} attempt(s): {error}",
+            "loop_error": "Persistent forward queue loop failed and will recover: {error}",
+            "recovery_failed": "Failed to recover persistent forward queue processing state",
+        },
+
         # log.client.* - client.py logs
         "client": {
             "proxy_unsupported": "Unsupported proxy type: {type}",

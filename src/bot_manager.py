@@ -3,23 +3,34 @@ Bot Lifecycle Management Module
 Manages the startup, shutdown, and restart of Telegram Bot
 """
 import asyncio
-import time
 import threading
+import time
 from concurrent.futures import Future
-from typing import Any, Callable, Optional
-from src.config import Config
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
 from src.client import TelegramClientManager
-from src.filters import MessageFilter
-from src.forwarder import MessageForwarder
-from src.logger import get_logger
-from src.i18n import t
-from src.stats_db import get_stats_db
+from src.config import Config
 from src.constants import (
-    BOT_STOP_TIMEOUT,
-    BOT_RESTART_DELAY,
     BOT_MAIN_LOOP_INTERVAL,
-    UI_UPDATE_DEBOUNCE
+    BOT_RESTART_DELAY,
+    BOT_STOP_TIMEOUT,
+    UI_UPDATE_DEBOUNCE,
 )
+from src.filters import MessageFilter
+from src.forward_queue import (
+    ForwardQueue,
+    ForwardQueueItem,
+    ForwardQueueStore,
+    rule_fingerprint,
+)
+from src.forwarder import MessageForwarder
+from src.i18n import t
+from src.logger import get_logger
+from src.rule import ForwardingRule
+from src.stats_db import get_stats_db
+
+if TYPE_CHECKING:
+    from src.auth_manager import AuthManager
 
 logger = get_logger()
 
@@ -38,6 +49,11 @@ class BotManager:
         self.auth_manager = auth_manager
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
+        self.forwarders = []
+        self.rule_forwarder_map = {}
+        self._queue_forwarders = {}
+        self.forward_queue_store: Optional[ForwardQueueStore] = None
+        self.forward_queue: Optional[ForwardQueue] = None
         self.thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         # Thread-safe state management
@@ -163,35 +179,32 @@ class BotManager:
 
             # Create filter and forwarder for each enabled rule
             rules = self.config.get_enabled_rules()
-            self.forwarders = []  # Store all forwarders
-            self.rule_forwarder_map = {}  # Rule name -> (rule, filter, forwarder)
+            self.forwarders = []
+            self.rule_forwarder_map = {}
+            self._queue_forwarders = {}
             all_source_chats = set()  # Collect all source chats
 
             for rule in rules:
-                # Create filter
-                message_filter = MessageFilter(
-                    rule_name=rule.name,
-                    regex_patterns=rule.filter_regex_patterns,
-                    keywords=rule.filter_keywords,
-                    mode=rule.filter_mode,
-                    ignored_user_ids=rule.ignored_user_ids,
-                    ignored_keywords=rule.ignored_keywords,
-                    media_types=rule.filter_media_types,
-                    max_file_size=rule.filter_max_file_size,
-                    min_file_size=rule.filter_min_file_size,
-                )
-
-                # Create forwarder
-                forwarder = MessageForwarder(
-                    client=self.client_manager.get_client(),
-                    rule=rule,
-                    message_filter=message_filter,
-                    bot_manager=self,
-                )
+                message_filter, forwarder = self._create_forwarder(rule)
                 self.forwarders.append(forwarder)
                 self.rule_forwarder_map[rule.name] = (rule, message_filter, forwarder)
+                self._queue_forwarders[rule_fingerprint(rule.to_dict())] = forwarder
                 all_source_chats.update(rule.source_chats)
                 logger.info(t("log.bot.rule_registered", rule=rule.name, count=len(rule.source_chats)))
+
+            # Start the durable consumer before accepting new updates. Pending
+            # jobs use their stored rule snapshot, even if configuration changed.
+            self.forward_queue_store = ForwardQueueStore(self.config.forward_queue_db_path)
+            self.forward_queue = ForwardQueue(
+                self.forward_queue_store,
+                self._process_queue_item,
+                max_retries=self.config.forward_queue_max_retries,
+                retry_base_seconds=self.config.forward_queue_retry_base_seconds,
+                flood_wait_buffer=self.config.forward_queue_flood_wait_buffer,
+                poll_interval=self.config.forward_queue_poll_interval,
+                completed_retention_days=self.config.forward_queue_completed_retention_days,
+            )
+            await self.forward_queue.start()
 
             # Register single central message handler (handles all source chats)
             if all_source_chats:
@@ -209,15 +222,66 @@ class BotManager:
             while not self._stop_event.is_set():
                 await asyncio.sleep(BOT_MAIN_LOOP_INTERVAL)
 
-            # Disconnect
-            await self.client_manager.disconnect()
-            logger.info(t("log.bot.stopped"))
-            
         except Exception as e:
             logger.error(t("log.bot.main_error", error=str(e)), exc_info=True)
         finally:
+            if self.forward_queue:
+                await self.forward_queue.stop(timeout=max(1, BOT_STOP_TIMEOUT - 2))
+            if self.client_manager:
+                await self.client_manager.disconnect()
             self.is_connected = False
             self.is_running = False
+            logger.info(t("log.bot.stopped"))
+
+    def _create_forwarder(self, rule: ForwardingRule) -> tuple[MessageFilter, MessageForwarder]:
+        """Build forwarding dependencies for either a live or snapshotted rule."""
+        message_filter = MessageFilter(
+            rule_name=rule.name,
+            regex_patterns=rule.filter_regex_patterns,
+            keywords=rule.filter_keywords,
+            mode=rule.filter_mode,
+            ignored_user_ids=rule.ignored_user_ids,
+            ignored_keywords=rule.ignored_keywords,
+            media_types=rule.filter_media_types,
+            max_file_size=rule.filter_max_file_size,
+            min_file_size=rule.filter_min_file_size,
+        )
+        forwarder = MessageForwarder(
+            client=self.client_manager.get_client(),
+            rule=rule,
+            message_filter=message_filter,
+            bot_manager=self,
+        )
+        return message_filter, forwarder
+
+    async def _process_queue_item(self, item: ForwardQueueItem) -> float:
+        """Load the Telegram message and execute one durable queue item."""
+        if not self.client_manager or not self.forward_queue_store:
+            raise RuntimeError("Telegram client or forward queue is not initialized")
+        client = self.client_manager.get_client()
+        if client is None:
+            raise RuntimeError("Telegram client is not connected")
+
+        forwarder = self._queue_forwarders.get(item.rule_fingerprint)
+        if forwarder is None:
+            rule = ForwardingRule.from_dict(item.rule_data)
+            _, forwarder = self._create_forwarder(rule)
+            self._queue_forwarders[item.rule_fingerprint] = forwarder
+
+        message = await client.get_messages(item.source_chat_id, ids=item.source_message_id)
+        if message is None:
+            raise RuntimeError(
+                f"Source message {item.source_chat_id}/{item.source_message_id} is no longer available"
+            )
+
+        await forwarder.forward_message(
+            message,
+            item.sender_id,
+            skip_dedup=item.attempt_count > 1 or item.next_target_index > 0,
+            start_target_index=item.next_target_index,
+            on_target_success=lambda index: self.forward_queue_store.update_target_index(item.id, index),
+        )
+        return max(0.0, float(forwarder.rule.delay))
 
     def submit_telegram(
         self,
@@ -244,17 +308,18 @@ class BotManager:
         return asyncio.run_coroutine_threadsafe(invoke(), loop)
     
     async def _central_message_handler(self, event) -> None:
-        """Central message handler: checks all rules, outputs log only once"""
+        """Match and persist an update without performing Telegram sends."""
         from src.utils import get_media_description
 
         message = event.message
         chat_id = event.chat_id
         sender_id = event.sender_id
 
-        # Build source label (prioritize Telethon entity cache, usually no extra request)
-        chat = await event.get_chat()
+        # Use entities already attached to the update. The ingestion path must
+        # not add Telegram API calls that could block durable enqueueing.
+        chat = getattr(event, "chat", None) or getattr(message, "chat", None)
         chat_title = getattr(chat, 'title', None) or str(chat_id)
-        sender = await event.get_sender()
+        sender = getattr(event, "sender", None) or getattr(message, "sender", None)
         if sender:
             sender_name = ' '.join(filter(None, [
                 getattr(sender, 'first_name', None),
@@ -298,9 +363,29 @@ class BotManager:
                 forwarder._stats_db.increment_daily(forwarder.rule.name, is_forwarded=False)
             return
 
-        # Forward to all matching rules
+        if not self.forward_queue:
+            raise RuntimeError("Forward queue is not running")
+
+        # Persist all matching rules. Media group events share one durable key
+        # and extend a short settle window instead of creating duplicate jobs.
         for rule, forwarder in matched_rules:
-            await forwarder.handle_message(event)
+            item, inserted = self.forward_queue.enqueue(
+                rule_data=rule.to_dict(),
+                source_chat_id=chat_id,
+                source_message_id=message.id,
+                sender_id=sender_id,
+                grouped_id=message.grouped_id,
+                settle_seconds=self.config.forward_queue_media_group_settle_seconds,
+            )
+            logger.info(
+                t(
+                    "log.forward_queue.enqueued" if inserted else "log.forward_queue.duplicate",
+                    item_id=item.id,
+                    rule=rule.name,
+                    chat_id=chat_id,
+                    message_id=message.id,
+                )
+            )
     
     def trigger_ui_update(self):
         """Trigger UI update (called by forwarder after forwarding)"""
@@ -394,6 +479,15 @@ class BotManager:
                     total_forwarded += stats.get("forwarded", 0)
                     total_filtered += stats.get("filtered", 0)
 
+            queue_status = {"counts": {}, "paused_until": 0, "pause_reason": None}
+            if self.forward_queue_store:
+                paused_until, pause_reason = self.forward_queue_store.get_pause()
+                queue_status = {
+                    "counts": self.forward_queue_store.counts(),
+                    "paused_until": paused_until,
+                    "pause_reason": pause_reason,
+                }
+
             return {
                 "is_running": self._is_running,
                 "is_connected": self.client_manager.is_connected if self.client_manager else False,
@@ -401,7 +495,8 @@ class BotManager:
                     "forwarded": total_forwarded,
                     "filtered": total_filtered,
                     "total": total_forwarded + total_filtered,
-                }
+                },
+                "queue": queue_status,
             }
 
     def reset_stats(self) -> None:

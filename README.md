@@ -154,6 +154,8 @@ export:
 
 `root_dir` is the server-side export root. The Web UI only accepts relative subdirectories below it. Docker already mounts the complete `data/` directory, so exports and the task database at `data/exports.db` persist across container recreation.
 
+The forwarding queue is stored in `data/forward_queue.db` and resumes after restart.
+
 ## 🎮 Usage Guide
 
 ### Authentication Mode Comparison
@@ -238,7 +240,7 @@ Check:
 - If using multi-rule configuration, check if rules are enabled
 
 **Triggered rate limit (FloodWait)?**
-- Program will automatically handle and wait
+- The entire forwarding queue pauses and resumes automatically
 - Can increase `forwarding.delay` time
 
 **Can't forward restricted channel content?**
@@ -319,6 +321,7 @@ telerelay/
    - Backup session files (`data/`)
    - Backup configuration files
    - Backup `data/exports.db` together with `data/exports/`
+   - Backup `data/forward_queue.db`
 
 ## 📝 License
 

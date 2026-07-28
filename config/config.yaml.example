@@ -25,6 +25,21 @@ export:
   # Range: 1-4. Telegram rate limits still apply when multiple jobs run.
   concurrency: 2
 
+# Persistent real-time forwarding queue
+forward_queue:
+  # Keep this path under data/ so Docker restarts preserve pending messages.
+  db_path: data/forward_queue.db
+  # Non-rate-limit errors use bounded exponential retries.
+  max_retries: 5
+  retry_base_seconds: 5
+  # Extra safety margin added to Telegram's requested FloodWait duration.
+  flood_wait_buffer: 1
+  poll_interval: 1
+  # Merge separate Telegram updates belonging to the same media album.
+  media_group_settle_seconds: 1
+  # Completed tombstones prevent duplicate updates from being re-enqueued.
+  completed_retention_days: 7
+
 # Message filtering rules
 filters:
   # Regex pattern list (any match passes)

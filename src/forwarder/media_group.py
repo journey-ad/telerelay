@@ -1,14 +1,17 @@
 """
 Media group handling module
 """
-import time
 import asyncio
+import time
 from typing import List
+
 from telethon import TelegramClient
+from telethon.errors import FloodWaitError
 from telethon.tl.types import Message
+
 from src.filters import MessageFilter
-from src.logger import get_logger
 from src.i18n import t
+from src.logger import get_logger
 
 logger = get_logger()
 
@@ -46,6 +49,8 @@ class MediaGroupHandler:
             logger.debug(t("log.forward.media_group.collected", group_id=message.grouped_id, count=len(messages)))
             return messages
 
+        except FloodWaitError:
+            raise
         except Exception as e:
             logger.warning(t("log.forward.media_group.fetch_failed", error=e))
             return [message]

@@ -3,20 +3,28 @@ Message forwarding core module
 """
 import asyncio
 import copy
-from typing import List
+from typing import Callable, List, Optional
+
 from telethon import TelegramClient
-from telethon.tl.types import Message, MessageEntityTextUrl, MessageEntityBlockquote, MessageMediaWebPage
-from telethon.errors import FloodWaitError, ChatForwardsRestrictedError
-from src.rule import ForwardingRule
-from src.filters import MessageFilter, get_media_type
-from src.logger import get_logger
-from src.utils import get_media_description
+from telethon.errors import ChatForwardsRestrictedError
+from telethon.tl.types import (
+    Message,
+    MessageEntityBlockquote,
+    MessageEntityTextUrl,
+    MessageMediaWebPage,
+)
+
 from src.constants import FORWARD_PREVIEW_LENGTH
-from src.stats_db import get_stats_db
 from src.dedup import DeduplicateCache
+from src.filters import MessageFilter, get_media_type
 from src.i18n import t
-from .media_group import MediaGroupHandler
+from src.logger import get_logger
+from src.rule import ForwardingRule
+from src.stats_db import get_stats_db
+from src.utils import get_media_description
+
 from .downloader import MediaDownloader
+from .media_group import MediaGroupHandler
 
 logger = get_logger()
 
@@ -53,7 +61,7 @@ class MessageForwarder:
         self._dedup = DeduplicateCache(window=rule.deduplicate_window) if rule.deduplicate else None
 
     async def handle_message(self, event) -> None:
-        """Handle new message event (called by bot_manager central handler)"""
+        """Compatibility wrapper; live updates are normally handled by the queue."""
         message: Message = event.message
 
         # Debug serialized message
@@ -64,38 +72,34 @@ class MessageForwarder:
         except Exception:
             pass
 
-        try:
-            await self.forward_message(message, event.sender_id)
+        await self.forward_message(message, event.sender_id)
 
-            if self.rule.delay > 0:
-                await asyncio.sleep(self.rule.delay)
+    async def forward_message(
+        self,
+        message: Message,
+        sender_id: int,
+        skip_dedup: bool = False,
+        start_target_index: int = 0,
+        on_target_success: Optional[Callable[[int], None]] = None,
+    ) -> bool:
+        """Forward a message, resuming from a durable target checkpoint.
 
-        except FloodWaitError as e:
-            logger.warning(t("log.forward.flood_wait", seconds=e.seconds))
-            await asyncio.sleep(e.seconds)
-            await self.forward_message(message, event.sender_id, skip_dedup=True)
-        except Exception as e:
-            logger.error(t("log.forward.error", error=e), exc_info=True)
-
-    async def forward_message(self, message: Message, sender_id: int, skip_dedup: bool = False) -> None:
-        """Forward message to all targets"""
+        FloodWait and target errors intentionally propagate to the persistent
+        queue, which owns retry and global pause policy.
+        """
         targets = self.rule.target_chats
         if not targets:
-            logger.error(t("log.forward.no_target"))
-            return
+            raise RuntimeError(t("log.forward.no_target"))
 
         # 1. Preprocessing: get messages, deduplicate, filter
         messages = await self.media_group.get_messages(message)
         is_media_group = len(messages) > 1
 
-        if is_media_group and self.media_group.should_skip(message.grouped_id):
-            return
-
         if is_media_group and not self.media_group.should_forward(messages, self.filter, sender_id):
             self.filtered_count += 1
             self._stats_db.increment_filtered(self.rule.name)
             self._stats_db.increment_daily(self.rule.name, is_forwarded=False)
-            return
+            return False
 
         # Deduplication check
         if self._dedup and not skip_dedup:
@@ -105,7 +109,7 @@ class MessageForwarder:
                 self._stats_db.increment_filtered(self.rule.name)
                 self._stats_db.increment_daily(self.rule.name, is_forwarded=False)
                 logger.info(t("log.forward.deduplicated", preview=(text_to_check[:50] or "[media]")))
-                return
+                return False
 
         # 2. Prepare resources: check if download is needed
         is_noforwards = getattr(message.chat, 'noforwards', False) if message.chat else False
@@ -113,74 +117,81 @@ class MessageForwarder:
 
         if need_download:
             async with _force_forward_semaphore:
-                await self._do_forward(messages, message, need_download, is_noforwards)
+                await self._do_forward(
+                    messages,
+                    message,
+                    need_download,
+                    is_noforwards,
+                    start_target_index,
+                    on_target_success,
+                )
         else:
-            await self._do_forward(messages, message, need_download, is_noforwards)
+            await self._do_forward(
+                messages,
+                message,
+                need_download,
+                is_noforwards,
+                start_target_index,
+                on_target_success,
+            )
+        return True
 
     async def _do_forward(
-        self, messages: List[Message], message: Message, need_download: bool, is_noforwards: bool
+        self,
+        messages: List[Message],
+        message: Message,
+        need_download: bool,
+        is_noforwards: bool,
+        start_target_index: int = 0,
+        on_target_success: Optional[Callable[[int], None]] = None,
     ) -> None:
         """Execute forwarding with optional download, cleanup guaranteed by try/finally"""
         targets = self.rule.target_chats
         downloaded_files = []
         session_dir = None
         try:
+            if start_target_index >= len(targets):
+                self._log_result(message, messages, len(targets), len(targets))
+                return
+
             if need_download:
                 downloaded_files, session_dir = await self.downloader.download(messages)
                 if not downloaded_files:
-                    logger.error(t("log.forward.download_failed"))
-                    return
+                    raise RuntimeError(t("log.forward.download_failed"))
 
             # Execute forwarding: loop through all targets
             source_data = self._get_source_data(message) if self.rule.hide_sender else None
             source_text = self._build_source_text(message) if not self.rule.hide_sender else ""
-            success_count = 0
-
-            for i, target in enumerate(targets):
+            for i in range(max(0, start_target_index), len(targets)):
+                target = targets[i]
                 try:
                     if downloaded_files:
                         await self._send_files(downloaded_files, messages, target, source_data, source_text)
                     else:
                         await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
 
-                    success_count += 1
-
-                    # Delay between multiple targets
-                    if self.rule.delay > 0 and i < len(targets) - 1:
-                        await asyncio.sleep(self.rule.delay)
-
-                except FloodWaitError as e:
-                    logger.warning(t("log.forward.flood_wait", seconds=e.seconds))
-                    await asyncio.sleep(e.seconds)
-                    try:
-                        if downloaded_files:
-                            await self._send_files(downloaded_files, messages, target, source_data, source_text)
-                        else:
-                            await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
-                        success_count += 1
-                        if self.rule.delay > 0 and i < len(targets) - 1:
-                            await asyncio.sleep(self.rule.delay)
-                    except Exception as e2:
-                        logger.error(t("log.forward.target_failed", target=target, error=e2))
                 except ChatForwardsRestrictedError:
                     # Forwarding restricted, fallback to download and resend
                     logger.warning(t("log.forward.restricted_fallback"))
-                    try:
-                        if not downloaded_files:
-                            downloaded_files, session_dir = await self.downloader.download(messages)
-                        if downloaded_files:
-                            await self._send_files(downloaded_files, messages, target, source_data, source_text)
-                            success_count += 1
-                    except Exception as e2:
-                        logger.error(t("log.forward.fallback_failed", target=target, error=e2))
-                except Exception as e:
-                    logger.error(t("log.forward.target_failed", target=target, error=e))
+                    if not downloaded_files:
+                        downloaded_files, session_dir = await self.downloader.download(messages)
+                    if not downloaded_files:
+                        raise RuntimeError(t("log.forward.download_failed"))
+                    await self._send_files(downloaded_files, messages, target, source_data, source_text)
+
+                if on_target_success:
+                    on_target_success(i + 1)
+
+                # Delay between multiple targets. The queue applies the final
+                # per-rule delay only after the item has been committed.
+                if self.rule.delay > 0 and i < len(targets) - 1:
+                    await asyncio.sleep(self.rule.delay)
         finally:
             if session_dir:
                 MediaDownloader.cleanup(session_dir)
 
         # Statistics and logging
-        self._log_result(message, messages, success_count, len(targets))
+        self._log_result(message, messages, len(targets), len(targets))
 
     # ===== Forwarding strategies =====
 
@@ -203,8 +214,6 @@ class MessageForwarder:
 
     async def _forward_copy(self, messages: List[Message], target, source_data: dict, source_text: str) -> None:
         """Copy message by referencing media ID (without preserving 'forwarded from' label)"""
-        has_media = any(msg.media for msg in messages)
-        
         if len(messages) == 1:
             msg = messages[0]
             text = msg.raw_text or ""
