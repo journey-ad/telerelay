@@ -59,7 +59,7 @@ TRANSLATIONS = {
         "button_action": {
             "user_mode_required": "Message button handling requires Telegram User mode; all rules were skipped",
             "registered": "✓ Button rules registered - rules={rules}, chats={chats}",
-            "clicked": "✓ Button handled - rule={rule}, button={button}, message={chat_id}/{message_id}, content={content}",
+            "clicked": "✓ Button handled - rule={rule}, buttons=[{buttons}], count={count}, message={chat_id}/{message_id}, content={content}",
             "failed": "Button handling failed - Message: {chat_id}/{message_id}, Error: {error}",
         },
 
@@ -325,6 +325,7 @@ TRANSLATIONS = {
             "button_action_texts": "Button Text Patterns",
             "button_action_match_mode": "Text Match Mode",
             "button_action_delay": "Click Delay (seconds)",
+            "button_action_click_all_matches": "Click All Matching Buttons",
             # Stats tab
             "rule_stats": "📋 Per-Rule Statistics",
             "daily_trend": "📈 Daily Forwarding Trend",
@@ -436,7 +437,7 @@ TRANSLATIONS = {
         # ui.markdown.* - markdown text
         "markdown": {
             "ignore_warning": "⚠️ Higher priority than filter rules, matched messages will be ignored directly",
-            "button_action_guide": "Available only in **Telegram User mode**. When a message arrives from a configured chat, the first matching callback button is clicked; each message is handled at most once. URL, payment, phone, location, and Mini App buttons are never clicked.",
+            "button_action_guide": "Available only in **Telegram User mode**. The first matching callback button is clicked by default; each rule can instead click all matching buttons. Each message is handled at most once. URL, payment, phone, location, and Mini App buttons are never clicked.",
             "auth_guide": """### Telegram User Mode Authentication
 
 **For first-time use or when session expires, follow these steps:**

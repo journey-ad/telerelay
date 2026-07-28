@@ -430,7 +430,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_button_action_success_log_contains_message_content(self):
         class FakeEngine:
             async def handle(self, event):
-                return "button-rule", "Confirm"
+                return "button-rule", ["Confirm"]
 
         manager = BotManager(SimpleNamespace())
         manager.button_action_engine = FakeEngine()
@@ -455,7 +455,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_button_action_success_log_contains_media_description(self):
         class FakeEngine:
             async def handle(self, event):
-                return "button-rule", "Confirm"
+                return "button-rule", ["Confirm", "Continue"]
 
         manager = BotManager(SimpleNamespace())
         manager.button_action_engine = FakeEngine()
@@ -470,7 +470,10 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         ):
             await manager._button_action_handler(event)
 
-        self.assertIn("[video]", log_info.call_args.args[0])
+        success_log = log_info.call_args.args[0]
+        self.assertIn("[video]", success_log)
+        self.assertIn("Confirm, Continue", success_log)
+        self.assertIn("2", success_log)
 
     async def test_target_labels_are_resolved_once_and_cached(self):
         class FakeClient:

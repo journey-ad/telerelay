@@ -12,7 +12,7 @@ from telethon.tl.types import KeyboardButtonCallback
 
 @dataclass
 class ButtonActionRule:
-    """A rule that clicks one matching callback button in an incoming message."""
+    """A rule that clicks matching callback buttons in an incoming message."""
 
     name: str
     enabled: bool = False
@@ -20,6 +20,7 @@ class ButtonActionRule:
     button_texts: list[str] = field(default_factory=list)
     match_mode: str = "exact"
     delay: float = 0.0
+    click_all_matches: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ButtonActionRule":
@@ -41,6 +42,7 @@ class ButtonActionRule:
             in {"exact", "contains", "regex"}
             else "exact",
             delay=delay,
+            click_all_matches=bool(data.get("click_all_matches", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -51,6 +53,7 @@ class ButtonActionRule:
             "button_texts": self.button_texts,
             "match_mode": self.match_mode,
             "delay": self.delay,
+            "click_all_matches": self.click_all_matches,
         }
 
 
@@ -134,38 +137,59 @@ class ButtonActionEngine:
         self._processed.add(key)
 
     def find_match(self, event: Any) -> tuple[ButtonActionRule, str, bytes] | None:
+        """Return the first match for callers that only need one button."""
+        match = self.find_matches(event)
+        if match is None:
+            return None
+        rule, buttons = match
+        button_text, button_data = buttons[0]
+        return rule, button_text, button_data
+
+    def find_matches(
+        self, event: Any
+    ) -> tuple[ButtonActionRule, list[tuple[str, bytes]]] | None:
+        """Return buttons selected by the first matching enabled rule."""
         message = getattr(event, "message", None)
         if message is None:
             return None
         for rule in self.rules:
             if not rule.enabled or not chat_matches(event, rule.source_chats):
                 continue
+            matches = []
             for button_text, button_data in iter_callback_buttons(message):
                 if any(
                     button_text_matches(button_text, text, rule.match_mode)
                     for text in rule.button_texts
                 ):
-                    return rule, button_text, button_data
+                    matches.append((button_text, button_data))
+                    if not rule.click_all_matches:
+                        break
+            if matches:
+                return rule, matches
         return None
 
-    async def handle(self, event: Any) -> tuple[str, str] | None:
-        """Click the first matching callback button and return rule/button text."""
+    async def handle(self, event: Any) -> tuple[str, list[str]] | None:
+        """Click buttons selected by the first matching rule."""
         message = getattr(event, "message", None)
         key = (getattr(event, "chat_id", None), getattr(message, "id", None))
         if message is None or self._already_processed(key) or key in self._processing:
             return None
 
-        match = self.find_match(event)
+        match = self.find_matches(event)
         if match is None:
             return None
 
-        rule, button_text, button_data = match
+        rule, buttons = match
+        clicked_texts = []
         self._processing.add(key)
         try:
             if rule.delay:
                 await asyncio.sleep(rule.delay)
-            await message.click(data=button_data)
-            self._mark_processed(key)
-            return rule.name, button_text
+            for button_text, button_data in buttons:
+                await message.click(data=button_data)
+                clicked_texts.append(button_text)
+            return rule.name, clicked_texts
         finally:
+            if clicked_texts:
+                self._mark_processed(key)
             self._processing.discard(key)

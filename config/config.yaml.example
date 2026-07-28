@@ -41,8 +41,8 @@ forward_queue:
   completed_retention_days: 7
 
 # Message callback-button handling (Telegram User mode only)
-# Rules are independent from forwarding rules. The first matching callback
-# button is clicked, and each incoming message is handled at most once.
+# Rules are independent from forwarding rules. Each incoming message is
+# handled at most once.
 button_action_rules:
   - name: Example confirmation
     enabled: false
@@ -53,6 +53,8 @@ button_action_rules:
       - "^Claim .* reward$"
     # exact | contains | regex
     match_mode: exact
+    # Click every matching callback button in message order (default: first only)
+    click_all_matches: false
     # Wait after receiving the message before clicking (0-30 seconds)
     delay: 0
 

@@ -457,7 +457,7 @@ class BotManager:
         return f"{title} ({chat_id})/{message_id}"
 
     async def _button_action_handler(self, event) -> None:
-        """Click the first callback button matched by an independent rule."""
+        """Click callback buttons selected by an independent rule."""
         from src.utils import get_media_description
 
         if not self.button_action_engine:
@@ -465,7 +465,7 @@ class BotManager:
         try:
             result = await self.button_action_engine.handle(event)
             if result:
-                rule_name, button_text = result
+                rule_name, button_texts = result
                 message = event.message
                 raw_content = message.text or get_media_description(message)
                 raw_content = raw_content.replace('\n', ' ')
@@ -476,7 +476,8 @@ class BotManager:
                     t(
                         "log.button_action.clicked",
                         rule=rule_name,
-                        button=button_text,
+                        buttons=", ".join(button_texts),
+                        count=len(button_texts),
                         chat_id=event.chat_id,
                         message_id=message.id,
                         content=content,

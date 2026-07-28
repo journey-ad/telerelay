@@ -51,6 +51,7 @@ class ConfigHandler:
             "button_texts": "\n".join(rule.button_texts),
             "match_mode": rule.match_mode,
             "delay": rule.delay,
+            "click_all_matches": rule.click_all_matches,
         }
 
     @staticmethod
@@ -61,6 +62,7 @@ class ConfigHandler:
             "button_texts": "",
             "match_mode": "exact",
             "delay": 0.0,
+            "click_all_matches": False,
         }
 
     def load_rule(self, index: int = 0) -> dict:
@@ -211,6 +213,7 @@ class ConfigHandler:
         button_texts: str,
         match_mode: str,
         delay: float,
+        click_all_matches: bool = False,
     ) -> str:
         """Save one independent message-button interaction rule."""
         try:
@@ -260,6 +263,7 @@ class ConfigHandler:
                     "button_texts": text_list,
                     "match_mode": match_mode,
                     "delay": max(0.0, min(float(delay or 0.0), 30.0)),
+                    "click_all_matches": bool(click_all_matches),
                 }
             )
             self.config.update({"button_action_rules": all_rules})

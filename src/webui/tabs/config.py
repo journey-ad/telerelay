@@ -45,6 +45,7 @@ class ConfigTab:
             "button_texts": self.button_action_texts,
             "match_mode": self.button_action_match_mode,
             "delay": self.button_action_delay,
+            "click_all_matches": self.button_action_click_all_matches,
         }
 
     def _build_forwarding_area(self, rule_names) -> None:
@@ -229,6 +230,10 @@ class ConfigTab:
             value="exact",
             label=t("ui.label.button_action_match_mode"),
             info=t("ui.info.button_action_match_mode"),
+        )
+        self.button_action_click_all_matches = gr.Checkbox(
+            label=t("ui.label.button_action_click_all_matches"),
+            value=False,
         )
         self.button_action_delay = gr.Slider(
             minimum=0,

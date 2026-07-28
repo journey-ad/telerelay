@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from telethon.tl.types import (
     KeyboardButtonCallback,
@@ -94,9 +94,106 @@ class ButtonActionEngineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        self.assertEqual(await engine.handle(event), ("签到", "立即签到"))
+        self.assertEqual(await engine.handle(event), ("签到", ["立即签到"]))
         self.assertIsNone(await engine.handle(event))
         self.assertEqual(message.clicked_data, [b"check-in"])
+
+    async def test_clicks_all_matching_callbacks_when_enabled(self):
+        message = FakeMessage(
+            43,
+            [
+                KeyboardButtonCallback(text="忽略", data=b"ignore"),
+                KeyboardButtonCallback(text="立即签到", data=b"check-in"),
+                KeyboardButtonCallback(text="确认签到", data=b"confirm"),
+                KeyboardButtonUrl(text="签到说明", url="https://example.com"),
+            ],
+            chat=SimpleNamespace(username="daily_bot"),
+        )
+        event = SimpleNamespace(chat_id=123, chat=message.chat, message=message)
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="签到",
+                    enabled=True,
+                    source_chats=["@daily_bot"],
+                    button_texts=["签到"],
+                    match_mode="contains",
+                    click_all_matches=True,
+                )
+            ]
+        )
+
+        self.assertEqual(
+            await engine.handle(event),
+            ("签到", ["立即签到", "确认签到"]),
+        )
+        self.assertIsNone(await engine.handle(event))
+        self.assertEqual(message.clicked_data, [b"check-in", b"confirm"])
+
+    async def test_partial_multi_click_failure_marks_message_processed(self):
+        message = FakeMessage(
+            44,
+            [
+                KeyboardButtonCallback(text="确认一", data=b"first"),
+                KeyboardButtonCallback(text="确认二", data=b"second"),
+            ],
+            chat=SimpleNamespace(username="example_bot"),
+        )
+
+        async def fail_second(*, data):
+            if data == b"second":
+                raise RuntimeError("second click failed")
+            message.clicked_data.append(data)
+
+        message.click = fail_second
+        event = SimpleNamespace(chat_id=9, chat=message.chat, message=message)
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="确认",
+                    enabled=True,
+                    source_chats=[9],
+                    button_texts=["确认"],
+                    match_mode="contains",
+                    click_all_matches=True,
+                )
+            ]
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "second click failed"):
+            await engine.handle(event)
+        self.assertIsNone(await engine.handle(event))
+        self.assertEqual(message.clicked_data, [b"first"])
+
+    async def test_multi_click_applies_delay_once_before_batch(self):
+        message = FakeMessage(
+            45,
+            [
+                KeyboardButtonCallback(text="确认一", data=b"first"),
+                KeyboardButtonCallback(text="确认二", data=b"second"),
+            ],
+            chat=SimpleNamespace(username="example_bot"),
+        )
+        event = SimpleNamespace(chat_id=9, chat=message.chat, message=message)
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="确认",
+                    enabled=True,
+                    source_chats=[9],
+                    button_texts=["确认"],
+                    match_mode="contains",
+                    delay=0.5,
+                    click_all_matches=True,
+                )
+            ]
+        )
+
+        with patch("src.button_actions.asyncio.sleep", new_callable=AsyncMock) as sleep:
+            await engine.handle(event)
+
+        sleep.assert_awaited_once_with(0.5)
+        self.assertEqual(message.clicked_data, [b"first", b"second"])
 
     async def test_concurrent_duplicate_updates_click_only_once(self):
         message = FakeMessage(
@@ -124,7 +221,7 @@ class ButtonActionEngineTests(unittest.IsolatedAsyncioTestCase):
         )
 
         results = await asyncio.gather(engine.handle(event), engine.handle(event))
-        self.assertEqual(results.count(("确认", "确认")), 1)
+        self.assertEqual(results.count(("确认", ["确认"])), 1)
         self.assertEqual(message.clicked_data, [b"confirm"])
 
 
@@ -148,6 +245,7 @@ class ButtonActionConfigTests(unittest.TestCase):
                 "^确认.*$\n立即签到",
                 "regex",
                 0.5,
+                True,
             )
 
             self.assertIn("✅", result)
@@ -156,6 +254,20 @@ class ButtonActionConfigTests(unittest.TestCase):
             self.assertEqual(rules[0].source_chats, ["@example_bot", -100123])
             self.assertEqual(rules[0].button_texts, ["^确认.*$", "立即签到"])
             self.assertEqual(rules[0].match_mode, "regex")
+            self.assertTrue(rules[0].click_all_matches)
+
+    def test_old_config_defaults_to_first_matching_button(self):
+        rule = ButtonActionRule.from_dict(
+            {
+                "name": "legacy",
+                "enabled": True,
+                "source_chats": [1],
+                "button_texts": ["确认"],
+            }
+        )
+
+        self.assertFalse(rule.click_all_matches)
+        self.assertFalse(rule.to_dict()["click_all_matches"])
 
     def test_config_handler_rejects_invalid_regex(self):
         with (
