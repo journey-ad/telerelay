@@ -41,16 +41,16 @@ class Config:
         env_path = Path(self.env_file)
         if env_path.exists():
             load_dotenv(env_path)
-            logger.info(t("log.config.env_loaded", path=env_path))
+            logger.debug(t("log.config.env_loaded", path=env_path))
         else:
-            logger.warning(t("log.config.env_not_found", path=env_path))
+            logger.debug(t("log.config.env_not_found", path=env_path))
 
         # Load YAML configuration
         config_path = Path(self.config_file)
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 self.config_data = yaml.safe_load(f) or {}
-            logger.info(t("log.config.yaml_loaded", path=config_path))
+            logger.debug(t("log.config.yaml_loaded", path=config_path))
         else:
             logger.warning(t("log.config.yaml_not_found", path=config_path))
             self.config_data = {}

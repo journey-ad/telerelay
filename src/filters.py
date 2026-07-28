@@ -122,7 +122,7 @@ class MessageFilter:
             except re.error as e:
                 logger.error(t("log.filter.regex_invalid", pattern=pattern, error=str(e)))
 
-        logger.info(
+        logger.debug(
             t("log.filter.initialized",
               mode=self.mode,
               regex_count=len(self.compiled_patterns),

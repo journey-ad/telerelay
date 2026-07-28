@@ -46,7 +46,7 @@ class BotControlHandler:
             # Start Bot (User mode will automatically trigger authentication process)
             success = self.bot_manager.start()
             if success:
-                logger.info(t("log.bot.started", count=1) + t("misc.via_webui"))
+                logger.debug(t("log.bot.started", count=1) + t("misc.via_webui"))
                 if self.config.session_type == "user":
                     # Check if session file exists
                     from pathlib import Path
@@ -72,7 +72,7 @@ class BotControlHandler:
 
             success = self.bot_manager.stop()
             if success:
-                logger.info(t("log.bot.stop_success") + t("misc.via_webui"))
+                logger.debug(t("log.bot.stop_success") + t("misc.via_webui"))
                 return format_message(t("message.bot.stop_success"), "success")
             else:
                 return format_message(t("message.bot.stop_failed"), "error")
@@ -90,7 +90,7 @@ class BotControlHandler:
             success = self.bot_manager.restart()
 
             if success:
-                logger.info(t("log.bot.started", count=1) + t("misc.via_webui_restart"))
+                logger.debug(t("log.bot.started", count=1) + t("misc.via_webui_restart"))
                 return format_message(t("message.bot.restart_success"), "success")
             else:
                 return format_message(t("message.bot.restart_failed"), "error")

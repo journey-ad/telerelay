@@ -5,6 +5,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from telethon.errors import FloodWaitError
 
@@ -115,6 +116,33 @@ class ForwardQueueStoreTests(unittest.TestCase):
             )
             self.assertFalse(inserted)
             self.assertEqual(duplicate.status, "completed")
+
+    def test_active_count_only_includes_unfinished_items(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            first, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=41,
+                sender_id=7,
+                grouped_id=None,
+            )
+            second, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=42,
+                sender_id=7,
+                grouped_id=None,
+            )
+
+            self.assertEqual(store.active_count(), 2)
+            store.claim_next()
+            self.assertEqual(store.active_count(), 2)
+            store.mark_completed(first.id)
+            self.assertEqual(store.active_count(), 1)
+            store.claim_next()
+            store.mark_failed(second.id, "test")
+            self.assertEqual(store.active_count(), 0)
 
 
 class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
@@ -283,10 +311,15 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         class FakeQueue:
             def __init__(self):
                 self.calls = []
+                self.depth_calls = 0
 
             def enqueue(self, **kwargs):
                 self.calls.append(kwargs)
-                return SimpleNamespace(id=91), True
+                return SimpleNamespace(source_message_id=kwargs["source_message_id"]), True
+
+            def active_count(self):
+                self.depth_calls += 1
+                return len(self.calls)
 
         class FakeFilter:
             def should_forward(self, message, sender_id):
@@ -319,13 +352,233 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             rule.name: (rule, FakeFilter(), SimpleNamespace())
         }
 
-        await manager._central_message_handler(Event())
+        with patch("src.bot_manager.logger.info") as log_info:
+            await manager._central_message_handler(Event())
 
         self.assertEqual(len(manager.forward_queue.calls), 1)
+        self.assertEqual(manager.forward_queue.depth_calls, 1)
         queued = manager.forward_queue.calls[0]
         self.assertEqual(queued["source_chat_id"], -1001)
         self.assertEqual(queued["source_message_id"], 42)
         self.assertEqual(queued["rule_data"]["name"], rule.name)
+        entry_log = log_info.call_args.args[0]
+        self.assertIn("queue-rule", entry_log)
+        self.assertIn("Source (-1001)/42", entry_log)
+        self.assertNotIn("item", entry_log.lower())
+        self.assertNotIn("队列项", entry_log)
+
+    async def test_media_group_members_log_one_info_and_debug_merges(self):
+        class FakeConfig:
+            forward_queue_media_group_settle_seconds = 1
+
+        class FakeQueue:
+            def __init__(self):
+                self.calls = []
+
+            def enqueue(self, **kwargs):
+                self.calls.append(kwargs)
+                return SimpleNamespace(source_message_id=42), len(self.calls) == 1
+
+            def active_count(self):
+                return 1
+
+        class Event:
+            chat_id = -1001
+            sender_id = 7
+            chat = SimpleNamespace(title="Source")
+            sender = SimpleNamespace(first_name="Sender", last_name=None)
+
+            def __init__(self, message_id):
+                self.message = SimpleNamespace(
+                    id=message_id,
+                    text="album",
+                    grouped_id=999,
+                    chat=self.chat,
+                    sender=self.sender,
+                    media=SimpleNamespace(),
+                )
+
+        rule = ForwardingRule.from_dict(rule_data())
+        manager = BotManager(FakeConfig())
+        manager.forward_queue = FakeQueue()
+        manager.rule_forwarder_map = {
+            rule.name: (rule, SimpleNamespace(), SimpleNamespace())
+        }
+
+        with (
+            patch("src.bot_manager.logger.info") as log_info,
+            patch("src.bot_manager.logger.debug") as log_debug,
+        ):
+            await manager._central_message_handler(Event(42))
+            await manager._central_message_handler(Event(43))
+
+        self.assertEqual(log_info.call_count, 1)
+        enqueued_log = log_info.call_args.args[0]
+        self.assertIn("Source (-1001)/42", enqueued_log)
+        self.assertNotIn("999", enqueued_log)
+        self.assertNotIn("anchor", enqueued_log.lower())
+        self.assertNotIn("锚点", enqueued_log)
+        merged_log = log_debug.call_args.args[0]
+        self.assertIn("/43", merged_log)
+        self.assertNotIn("999", merged_log)
+        self.assertNotIn("/42", merged_log)
+        self.assertNotIn("anchor", merged_log.lower())
+        self.assertNotIn("锚点", merged_log)
+        self.assertNotIn("item", merged_log.lower())
+        self.assertNotIn("队列项", merged_log)
+
+    async def test_button_action_success_log_contains_message_content(self):
+        class FakeEngine:
+            async def handle(self, event):
+                return "button-rule", "Confirm"
+
+        manager = BotManager(SimpleNamespace())
+        manager.button_action_engine = FakeEngine()
+        event = SimpleNamespace(
+            chat_id=-1001,
+            message=SimpleNamespace(
+                id=42,
+                text="first line\nsecond line",
+                media=None,
+            ),
+        )
+
+        with patch("src.bot_manager.logger.info") as log_info:
+            await manager._button_action_handler(event)
+
+        success_log = log_info.call_args.args[0]
+        self.assertIn("button-rule", success_log)
+        self.assertIn("Confirm", success_log)
+        self.assertIn("-1001/42", success_log)
+        self.assertIn("first line second line", success_log)
+
+    async def test_button_action_success_log_contains_media_description(self):
+        class FakeEngine:
+            async def handle(self, event):
+                return "button-rule", "Confirm"
+
+        manager = BotManager(SimpleNamespace())
+        manager.button_action_engine = FakeEngine()
+        event = SimpleNamespace(
+            chat_id=-1001,
+            message=SimpleNamespace(id=43, text=None, media=SimpleNamespace()),
+        )
+
+        with (
+            patch("src.bot_manager.logger.info") as log_info,
+            patch("src.utils.get_media_description", return_value="[video]"),
+        ):
+            await manager._button_action_handler(event)
+
+        self.assertIn("[video]", log_info.call_args.args[0])
+
+    async def test_target_labels_are_resolved_once_and_cached(self):
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            async def get_entity(self, target):
+                self.calls.append(target)
+                return SimpleNamespace()
+
+        client = FakeClient()
+        shared_cache = {}
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.client = client
+        forwarder._target_label_cache = shared_cache
+
+        with (
+            patch("src.forwarder.forwarder.utils.get_display_name", return_value="Target Chat"),
+            patch("src.forwarder.forwarder.utils.get_peer_id", return_value=-100200),
+        ):
+            first = await forwarder._resolve_target_labels(["@target"])
+            second = await forwarder._resolve_target_labels(["@target"])
+
+        self.assertEqual(first, ["Target Chat (-100200)"])
+        self.assertEqual(second, first)
+        self.assertEqual(client.calls, ["@target"])
+
+    def test_forward_summary_contains_business_context_without_queue_item_id(self):
+        class FakeStats:
+            def increment_forwarded(self, rule_name):
+                pass
+
+            def increment_daily(self, rule_name, is_forwarded):
+                pass
+
+            def insert_history(self, **kwargs):
+                pass
+
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.rule = SimpleNamespace(name="queue-rule", target_chats=[-100200])
+        forwarder.forwarded_count = 0
+        forwarder._stats_db = FakeStats()
+        message = SimpleNamespace(
+            id=42,
+            text="hello",
+            chat_id=-1001,
+            chat=SimpleNamespace(title="Source Chat", username=None),
+            sender_id=7,
+            sender=None,
+            media=None,
+            grouped_id=None,
+        )
+
+        with patch("src.forwarder.forwarder.logger.info") as log_info:
+            forwarder._log_result(
+                message,
+                [message],
+                success=1,
+                total=1,
+                target_labels=["Target Chat (-100200)"],
+            )
+
+        summary = log_info.call_args.args[0]
+        self.assertIn("queue-rule", summary)
+        self.assertIn("Source Chat (-1001)/42", summary)
+        self.assertIn("Target Chat (-100200)", summary)
+        self.assertNotIn("item", summary.lower())
+        self.assertNotIn("队列项", summary)
+
+    def test_media_group_summary_contains_count_without_grouped_id(self):
+        class FakeStats:
+            def increment_forwarded(self, rule_name):
+                pass
+
+            def increment_daily(self, rule_name, is_forwarded):
+                pass
+
+            def insert_history(self, **kwargs):
+                pass
+
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.rule = SimpleNamespace(name="queue-rule", target_chats=[-100200])
+        forwarder.forwarded_count = 0
+        forwarder._stats_db = FakeStats()
+        message = SimpleNamespace(
+            id=42,
+            text="album",
+            chat_id=-1001,
+            chat=SimpleNamespace(title="Source Chat", username=None),
+            sender_id=7,
+            sender=None,
+            media=SimpleNamespace(),
+            grouped_id=999,
+        )
+
+        with patch("src.forwarder.forwarder.logger.info") as log_info:
+            forwarder._log_result(
+                message,
+                [message, SimpleNamespace(id=43)],
+                success=1,
+                total=1,
+                target_labels=["Target Chat (-100200)"],
+            )
+
+        summary = log_info.call_args.args[0]
+        self.assertIn("2", summary)
+        self.assertNotIn("999", summary)
+        self.assertNotIn("grouped_id", summary)
 
     async def test_forwarder_resumes_at_failed_target_checkpoint(self):
         forwarder = MessageForwarder.__new__(MessageForwarder)

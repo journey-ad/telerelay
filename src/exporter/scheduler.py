@@ -57,7 +57,7 @@ class ExportScheduler:
             if not task.enabled:
                 self._remove_job(job_id)
                 self.store.update_task(task.id, next_run_at=None)
-                logger.info(
+                logger.debug(
                     t(
                         "log.export.task_unscheduled",
                         task_id=task.id,
@@ -80,7 +80,7 @@ class ExportScheduler:
                 task.id,
                 next_run_at=(next_run.isoformat(timespec="seconds") if next_run else None),
             )
-            logger.info(
+            logger.debug(
                 t(
                     "log.export.task_scheduled",
                     task_id=task.id,
@@ -94,13 +94,13 @@ class ExportScheduler:
             )
 
     def _execute_task(self, task_id: int) -> None:
-        logger.info(t("log.export.task_triggered", task_id=task_id))
+        logger.debug(t("log.export.task_triggered", task_id=task_id))
         try:
             job_id = self.service.start_task_export(task_id)
             if job_id is None:
                 logger.warning(t("log.export.task_overlap", task_id=task_id))
             else:
-                logger.info(
+                logger.debug(
                     t(
                         "log.export.task_job_started",
                         task_id=task_id,
@@ -165,4 +165,4 @@ class ExportScheduler:
             if self._started:
                 self._scheduler.shutdown(wait=False)
                 self._started = False
-                logger.info(t("log.export.scheduler_stopped"))
+                logger.debug(t("log.export.scheduler_stopped"))

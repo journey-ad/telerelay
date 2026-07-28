@@ -136,7 +136,7 @@ class TelegramClientManager:
                     # If session exists, set "connecting" state; otherwise state will be set in callback
                     if has_session:
                         self.auth_manager.set_state("connecting", "")
-                        logger.info(t("log.client.session_detected"))
+                        logger.debug(t("log.client.session_detected"))
 
                     # Use callback for authentication
                     await self.client.start(
@@ -195,7 +195,7 @@ class TelegramClientManager:
         if self.client:
             await self.client.disconnect()
             self.is_connected = False
-            logger.info(t("log.client.disconnected"))
+            logger.debug(t("log.client.disconnected"))
     
     def add_message_handler(
         self,
@@ -223,12 +223,12 @@ class TelegramClientManager:
             except Exception as e:
                 logger.error(t("log.client.message_error", error=str(e)), exc_info=True)
 
-        logger.info(t("log.client.handler_registered", count=len(chats) if chats else t("misc.all_media_types")))
+        logger.debug(t("log.client.handler_registered", count=len(chats) if chats else t("misc.all_media_types")))
     
     async def run_until_disconnected(self) -> None:
         """Run client until disconnected"""
         if self.client:
-            logger.info(t("log.client.running"))
+            logger.debug(t("log.client.running"))
             await self.client.run_until_disconnected()
     
     def get_client(self) -> Optional[TelegramClient]:
@@ -252,7 +252,7 @@ class TelegramClientManager:
             for session_file in session_files:
                 if os.path.exists(session_file):
                     os.remove(session_file)
-                    logger.info(t("log.client.session_deleted", file=session_file))
+                    logger.debug(t("log.client.session_deleted", file=session_file))
 
             logger.info(t("log.client.session_cleared"))
         except Exception as e:

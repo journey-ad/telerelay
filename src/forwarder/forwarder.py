@@ -5,7 +5,7 @@ import asyncio
 import copy
 from typing import Callable, List, Optional
 
-from telethon import TelegramClient
+from telethon import TelegramClient, utils
 from telethon.errors import ChatForwardsRestrictedError
 from telethon.tl.types import (
     Message,
@@ -41,11 +41,15 @@ class MessageForwarder:
         rule: ForwardingRule,
         message_filter: MessageFilter,
         bot_manager=None,
+        target_label_cache: Optional[dict[str, str]] = None,
     ):
         self.client = client
         self.rule = rule
         self.filter = message_filter
         self.bot_manager = bot_manager
+        self._target_label_cache = (
+            target_label_cache if target_label_cache is not None else {}
+        )
 
         # Statistics (persistent via SQLite)
         self._stats_db = get_stats_db()
@@ -63,15 +67,6 @@ class MessageForwarder:
     async def handle_message(self, event) -> None:
         """Compatibility wrapper; live updates are normally handled by the queue."""
         message: Message = event.message
-
-        # Debug serialized message
-        try:
-            if hasattr(message, 'to_dict'):
-                # Avoid overly large outputs via pretty print if possible, but keep it simple
-                logger.debug(f"[DEBUG] Intercepted message: {message.to_dict()}")
-        except Exception:
-            pass
-
         await self.forward_message(message, event.sender_id)
 
     async def forward_message(
@@ -108,8 +103,10 @@ class MessageForwarder:
                 self.filtered_count += 1
                 self._stats_db.increment_filtered(self.rule.name)
                 self._stats_db.increment_daily(self.rule.name, is_forwarded=False)
-                logger.info(t("log.forward.deduplicated", preview=(text_to_check[:50] or "[media]")))
+                logger.debug(t("log.forward.deduplicated", preview=(text_to_check[:50] or "[media]")))
                 return False
+
+        target_labels = await self._resolve_target_labels(targets)
 
         # 2. Prepare resources: check if download is needed
         is_noforwards = getattr(message.chat, 'noforwards', False) if message.chat else False
@@ -124,6 +121,7 @@ class MessageForwarder:
                     is_noforwards,
                     start_target_index,
                     on_target_success,
+                    target_labels,
                 )
         else:
             await self._do_forward(
@@ -133,6 +131,7 @@ class MessageForwarder:
                 is_noforwards,
                 start_target_index,
                 on_target_success,
+                target_labels,
             )
         return True
 
@@ -144,6 +143,7 @@ class MessageForwarder:
         is_noforwards: bool,
         start_target_index: int = 0,
         on_target_success: Optional[Callable[[int], None]] = None,
+        target_labels: Optional[List[str]] = None,
     ) -> None:
         """Execute forwarding with optional download, cleanup guaranteed by try/finally"""
         targets = self.rule.target_chats
@@ -151,7 +151,13 @@ class MessageForwarder:
         session_dir = None
         try:
             if start_target_index >= len(targets):
-                self._log_result(message, messages, len(targets), len(targets))
+                self._log_result(
+                    message,
+                    messages,
+                    len(targets),
+                    len(targets),
+                    target_labels,
+                )
                 return
 
             if need_download:
@@ -172,7 +178,7 @@ class MessageForwarder:
 
                 except ChatForwardsRestrictedError:
                     # Forwarding restricted, fallback to download and resend
-                    logger.warning(t("log.forward.restricted_fallback"))
+                    logger.debug(t("log.forward.restricted_fallback"))
                     if not downloaded_files:
                         downloaded_files, session_dir = await self.downloader.download(messages)
                     if not downloaded_files:
@@ -191,7 +197,13 @@ class MessageForwarder:
                 MediaDownloader.cleanup(session_dir)
 
         # Statistics and logging
-        self._log_result(message, messages, len(targets), len(targets))
+        self._log_result(
+            message,
+            messages,
+            len(targets),
+            len(targets),
+            target_labels,
+        )
 
     # ===== Forwarding strategies =====
 
@@ -207,7 +219,7 @@ class MessageForwarder:
         elif self.rule.preserve_format:
             # Preserve format → direct forward
             await self.client.forward_messages(target, messages)
-            logger.info(t("log.forward.direct_success", target=target))
+            logger.debug(t("log.forward.direct_success", target=target))
         else:
             # Don't preserve format → copy with reference
             await self._forward_copy(messages, target, None, source_text)
@@ -255,7 +267,7 @@ class MessageForwarder:
                 formatting_entities=entities,
             )
             
-        logger.info(t("log.forward.copy_success", target=target))
+        logger.debug(t("log.forward.copy_success", target=target))
 
     async def _send_files(
         self, file_paths: List[str], messages: List[Message], target, source_data: dict, source_text: str
@@ -277,7 +289,7 @@ class MessageForwarder:
                 formatting_entities=entities,
                 link_preview=False if source_data else None
             )
-            logger.info(t("log.forward.text_sent", target=target))
+            logger.debug(t("log.forward.text_sent", target=target))
             return
 
         first = messages[0]
@@ -292,7 +304,7 @@ class MessageForwarder:
         elif source_text:
             text, entities = self._prepend_source(text, source_text, entities)
 
-        logger.info(t("log.forward.uploading", target=target))
+        logger.debug(t("log.forward.uploading", target=target))
         await self.client.send_file(
             target,
             file=file_passed,
@@ -300,7 +312,37 @@ class MessageForwarder:
             formatting_entities=entities,
         )
             
-        logger.info(t("log.forward.force_success", target=target))
+        logger.debug(t("log.forward.force_success", target=target))
+
+    async def _resolve_target_labels(self, targets: List[object]) -> List[str]:
+        """Resolve readable target names once and share them across forwarders."""
+        labels = []
+        for target in targets:
+            cache_key = f"{type(target).__name__}:{target}"
+            cached = self._target_label_cache.get(cache_key)
+            if cached is not None:
+                labels.append(cached)
+                continue
+
+            fallback = str(target)
+            try:
+                entity = await self.client.get_entity(target)
+                name = utils.get_display_name(entity).strip()
+                peer_id = int(utils.get_peer_id(entity))
+                label = f"{name} ({peer_id})" if name and name != str(peer_id) else str(peer_id)
+            except Exception as exc:
+                label = fallback
+                logger.debug(
+                    t(
+                        "log.forward.target_resolve_failed",
+                        target=fallback,
+                        error=exc,
+                    )
+                )
+
+            self._target_label_cache[cache_key] = label
+            labels.append(label)
+        return labels
 
     # ===== Helper methods =====
 
@@ -458,7 +500,14 @@ class MessageForwarder:
 
         return new_text, shifted_entities
 
-    def _log_result(self, message: Message, messages: List[Message], success: int, total: int) -> None:
+    def _log_result(
+        self,
+        message: Message,
+        messages: List[Message],
+        success: int,
+        total: int,
+        target_labels: Optional[List[str]] = None,
+    ) -> None:
         """Log forwarding result"""
         preview = (message.text or get_media_description(message))[:FORWARD_PREVIEW_LENGTH]
         is_media_group = len(messages) > 1
@@ -489,15 +538,35 @@ class MessageForwarder:
                     media_type=get_media_type(message) if message.media else "text",
                 )
             except Exception as e:
-                logger.debug(f"Failed to insert history: {e}")
+                logger.debug(t("log.forward.history_failed", error=e))
 
-            group_info = t("misc.media_group_info", count=len(messages)) if is_media_group else ""
-            group_id_info = f" gid={message.grouped_id}" if is_media_group else ""
+            chat = getattr(message, "chat", None)
+            source_name = (
+                getattr(chat, "title", None)
+                or getattr(chat, "username", None)
+                or str(message.chat_id)
+            )
+            source = (
+                f"{source_name} ({message.chat_id})/{message.id}"
+                if str(source_name) != str(message.chat_id)
+                else f"{message.chat_id}/{message.id}"
+            )
+            group_info = (
+                t(
+                    "misc.media_group_info",
+                    count=len(messages),
+                )
+                if is_media_group
+                else ""
+            )
+            targets = target_labels or [str(target) for target in self.rule.target_chats]
             logger.info(
                 t("log.forward.success",
+                  rule=self.rule.name,
+                  source=source,
                   group_info=group_info,
+                  targets=", ".join(targets) or "-",
                   preview=preview,
-                  group_id_info=group_id_info,
                   success=success,
                   total=total)
             )

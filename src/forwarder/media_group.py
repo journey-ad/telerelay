@@ -46,7 +46,7 @@ class MediaGroupHandler:
                 return [message]
 
             messages.sort(key=lambda m: m.id)
-            logger.debug(t("log.forward.media_group.collected", group_id=message.grouped_id, count=len(messages)))
+            logger.debug(t("log.forward.media_group.collected", count=len(messages)))
             return messages
 
         except FloodWaitError:
@@ -61,7 +61,7 @@ class MediaGroupHandler:
 
         if grouped_id in self._processed_groups:
             if now - self._processed_groups[grouped_id] < MEDIA_GROUP_CACHE_TTL:
-                logger.debug(t("log.forward.media_group.duplicate", group_id=grouped_id))
+                logger.debug(t("log.forward.media_group.duplicate"))
                 return True
 
         # Record and cleanup expired cache
@@ -83,5 +83,5 @@ class MediaGroupHandler:
         if any(message_filter.should_forward(msg, sender_id=sender_id) for msg in messages):
             return True
 
-        logger.debug(t("log.forward.media_group.filtered", group_id=messages[0].grouped_id))
+        logger.debug(t("log.forward.media_group.filtered"))
         return False

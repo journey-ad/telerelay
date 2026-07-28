@@ -741,7 +741,7 @@ class AdminBotManager:
                     ),
                 )
             )
-            logger.info(t("log.admin_bot.menu_button_set"))
+            logger.debug(t("log.admin_bot.menu_button_set"))
         except Exception as e:
             logger.warning(t("log.admin_bot.menu_button_failed", error=str(e)))
 

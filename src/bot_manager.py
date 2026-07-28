@@ -53,6 +53,7 @@ class BotManager:
         self.forwarders = []
         self.rule_forwarder_map = {}
         self._queue_forwarders = {}
+        self._target_label_cache: dict[str, str] = {}
         self.button_action_engine: Optional[ButtonActionEngine] = None
         self.forward_queue_store: Optional[ForwardQueueStore] = None
         self.forward_queue: Optional[ForwardQueue] = None
@@ -108,7 +109,7 @@ class BotManager:
             self._stop_event.clear()
             self.thread = threading.Thread(target=self._run_bot, daemon=True)
             self.thread.start()
-            logger.info(t("log.bot.thread_created"))
+            logger.debug(t("log.bot.thread_created"))
             return True
         except Exception as e:
             logger.error(t("log.bot.start_failed", error=str(e)))
@@ -184,6 +185,7 @@ class BotManager:
             self.forwarders = []
             self.rule_forwarder_map = {}
             self._queue_forwarders = {}
+            self._target_label_cache = {}
             all_source_chats = set()  # Collect all source chats
 
             for rule in rules:
@@ -192,7 +194,7 @@ class BotManager:
                 self.rule_forwarder_map[rule.name] = (rule, message_filter, forwarder)
                 self._queue_forwarders[rule_fingerprint(rule.to_dict())] = forwarder
                 all_source_chats.update(rule.source_chats)
-                logger.info(t("log.bot.rule_registered", rule=rule.name, count=len(rule.source_chats)))
+                logger.debug(t("log.bot.rule_registered", rule=rule.name, count=len(rule.source_chats)))
 
             # Start the durable consumer before accepting new updates. Pending
             # jobs use their stored rule snapshot, even if configuration changed.
@@ -238,7 +240,7 @@ class BotManager:
                         chats=button_source_chats,
                         incoming=True,
                     )
-                    logger.info(
+                    logger.debug(
                         t(
                             "log.button_action.registered",
                             rules=len(valid_button_rules),
@@ -284,6 +286,7 @@ class BotManager:
             rule=rule,
             message_filter=message_filter,
             bot_manager=self,
+            target_label_cache=self._target_label_cache,
         )
         return message_filter, forwarder
 
@@ -367,10 +370,10 @@ class BotManager:
         message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
 
         # Output "message received" log
-        logger.info(t("log.bot.message_received",
-                      chat=chat_title, chat_id=chat_id,
-                      sender=sender_name, sender_id=sender_id,
-                      preview=message_preview))
+        logger.debug(t("log.bot.message_received",
+                       chat=chat_title, chat_id=chat_id,
+                       sender=sender_name, sender_id=sender_id,
+                       preview=message_preview))
 
         # Find all rules matching this message
         matched_rules = []
@@ -387,8 +390,7 @@ class BotManager:
 
         if not matched_rules:
             rules_str = ', '.join(name for name, _ in filtered_by) if filtered_by else t("misc.no_match_rules")
-            group_tag = f" gid={message.grouped_id}" if message.grouped_id else ""
-            logger.debug(t("log.bot.message_filtered", rules=rules_str, group_tag=group_tag))
+            logger.debug(t("log.bot.message_filtered", rules=rules_str))
             # Update filter count for each rule
             for _, forwarder in filtered_by:
                 forwarder.filtered_count += 1
@@ -402,7 +404,7 @@ class BotManager:
         # Persist all matching rules. Media group events share one durable key
         # and extend a short settle window instead of creating duplicate jobs.
         for rule, forwarder in matched_rules:
-            item, inserted = self.forward_queue.enqueue(
+            _, inserted = self.forward_queue.enqueue(
                 rule_data=rule.to_dict(),
                 source_chat_id=chat_id,
                 source_message_id=message.id,
@@ -410,31 +412,74 @@ class BotManager:
                 grouped_id=message.grouped_id,
                 settle_seconds=self.config.forward_queue_media_group_settle_seconds,
             )
-            logger.info(
-                t(
-                    "log.forward_queue.enqueued" if inserted else "log.forward_queue.duplicate",
-                    item_id=item.id,
-                    rule=rule.name,
-                    chat_id=chat_id,
-                    message_id=message.id,
+            source = self._message_source_label(chat_title, chat_id, message.id)
+            if message.grouped_id:
+                queue_depth = self.forward_queue.active_count()
+                log_key = (
+                    "log.forward_queue.media_group_enqueued"
+                    if inserted
+                    else "log.forward_queue.media_group_merged"
                 )
-            )
+                log_method = logger.info if inserted else logger.debug
+                log_method(
+                    t(
+                        log_key,
+                        rule=rule.name,
+                        source=source,
+                        queue_depth=queue_depth,
+                    )
+                )
+            else:
+                if inserted:
+                    queue_depth = self.forward_queue.active_count()
+                    logger.info(
+                        t(
+                            "log.forward_queue.enqueued",
+                            rule=rule.name,
+                            source=source,
+                            queue_depth=queue_depth,
+                        )
+                    )
+                else:
+                    logger.debug(
+                        t(
+                            "log.forward_queue.duplicate",
+                            rule=rule.name,
+                            source=source,
+                        )
+                    )
+
+    @staticmethod
+    def _message_source_label(chat_title: Any, chat_id: int, message_id: int) -> str:
+        title = str(chat_title or chat_id)
+        if title == str(chat_id):
+            return f"{chat_id}/{message_id}"
+        return f"{title} ({chat_id})/{message_id}"
 
     async def _button_action_handler(self, event) -> None:
         """Click the first callback button matched by an independent rule."""
+        from src.utils import get_media_description
+
         if not self.button_action_engine:
             return
         try:
             result = await self.button_action_engine.handle(event)
             if result:
                 rule_name, button_text = result
+                message = event.message
+                raw_content = message.text or get_media_description(message)
+                raw_content = raw_content.replace('\n', ' ')
+                content = (
+                    f"{raw_content[:50]}..." if len(raw_content) > 50 else raw_content
+                )
                 logger.info(
                     t(
                         "log.button_action.clicked",
                         rule=rule_name,
                         button=button_text,
                         chat_id=event.chat_id,
-                        message_id=event.message.id,
+                        message_id=message.id,
+                        content=content,
                     )
                 )
         except Exception as exc:
@@ -487,7 +532,7 @@ class BotManager:
             return False
         
         try:
-            logger.info(t("log.bot.stopping"))
+            logger.debug(t("log.bot.stopping"))
             self._stop_event.set()
             
             # Wait for thread to end (max 10 seconds)
@@ -495,7 +540,7 @@ class BotManager:
                 self.thread.join(timeout=BOT_STOP_TIMEOUT)
             
             self.is_running = False
-            logger.info(t("log.bot.stop_success"))
+            logger.debug(t("log.bot.stop_success"))
             return True
 
         except Exception as e:
@@ -509,7 +554,7 @@ class BotManager:
         Returns:
             Whether successfully restarted
         """
-        logger.info(t("log.bot.restarting"))
+        logger.debug(t("log.bot.restarting"))
 
         if self.is_running:
             if not self.stop():

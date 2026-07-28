@@ -110,7 +110,7 @@ class AuthHandler:
             success = self.bot_manager.start()
 
             if success:
-                logger.info(t("log.auth.submitted", name=t("log.auth.auth_flow")))
+                logger.debug(t("log.auth.submitted", name=t("log.auth.auth_flow")))
                 return format_message(t("message.auth.started"), "success")
             else:
                 return format_message(t("message.auth.start_failed"), "error")
@@ -137,7 +137,7 @@ class AuthHandler:
             # Reset authentication state
             self.auth_manager.reset()
 
-            logger.info(t("log.auth.reset") + t("misc.session_cleared"))
+            logger.debug(t("log.auth.reset") + t("misc.session_cleared"))
             return format_message(t("message.auth.cancelled"), "info")
 
         except Exception as e:

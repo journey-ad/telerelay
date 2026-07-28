@@ -4,9 +4,6 @@ Uses content hash with sliding window to avoid forwarding duplicate messages
 """
 import hashlib
 import time
-from src.logger import get_logger
-
-logger = get_logger()
 
 
 class DeduplicateCache:
@@ -42,7 +39,6 @@ class DeduplicateCache:
         self._cache = {k: v for k, v in self._cache.items() if now - v < self.window}
 
         if h in self._cache:
-            logger.debug(f"Duplicate message detected (hash={h}), skipping")
             return True
 
         self._cache[h] = now

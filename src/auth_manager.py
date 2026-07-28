@@ -39,7 +39,7 @@ class AuthManager:
         # Timeout configuration
         self._input_timeout = input_timeout
 
-        logger.info(t("log.auth.initialized"))
+        logger.debug(t("log.auth.initialized"))
 
     def get_state(self) -> dict:
         """Get current authentication state
@@ -89,7 +89,7 @@ class AuthManager:
         """
         try:
             target_queue.put_nowait(value)
-            logger.info(t("log.auth.submitted", name=name))
+            logger.debug(t("log.auth.submitted", name=name))
             return True
         except queue.Full:
             logger.warning(t("log.auth.queue_full", name=name))
@@ -105,7 +105,7 @@ class AuthManager:
             self.set_state("error", t("message.auth.phone_format"))
             return False
         if self._submit_to_queue(self._phone_queue, phone, "phone"):
-            logger.info(t("log.auth.phone_masked", phone=phone[:5]))
+            logger.debug(t("log.auth.phone_masked", phone=phone[:5]))
             return True
         return False
 
@@ -141,7 +141,7 @@ class AuthManager:
         Raises:
             TimeoutError: Input timeout
         """
-        logger.info(t("log.auth.waiting", name=name))
+        logger.debug(t("log.auth.waiting", name=name))
         self.set_state(state)
 
         try:
@@ -149,7 +149,7 @@ class AuthManager:
             value = await loop.run_in_executor(
                 None, input_queue.get, True, self._input_timeout
             )
-            logger.info(t("log.auth.received", name=name))
+            logger.debug(t("log.auth.received", name=name))
             return value
         except queue.Empty:
             error_msg = t("log.auth.timeout", name=name, timeout=self._input_timeout)
@@ -164,7 +164,7 @@ class AuthManager:
     async def phone_callback(self) -> str:
         """Phone number callback (called by Telethon)"""
         value = await self._wait_for_input(self._phone_queue, "waiting_phone", "phone")
-        logger.info(t("log.auth.phone_masked", phone=value[:5]))
+        logger.debug(t("log.auth.phone_masked", phone=value[:5]))
         return value
 
     async def code_callback(self) -> str:
@@ -201,4 +201,4 @@ class AuthManager:
                 except queue.Empty:
                     break
 
-            logger.info(t("log.auth.reset"))
+            logger.debug(t("log.auth.reset"))

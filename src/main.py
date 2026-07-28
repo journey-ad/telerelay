@@ -29,9 +29,9 @@ def main():
         # Set language
         set_language(config.language)
 
-        logger.info("=" * 60)
+        logger.debug("=" * 60)
         logger.info(t("log.main.startup"))
-        logger.info("=" * 60)
+        logger.debug("=" * 60)
 
         # Reset log level
         setup_logger(level=config.log_level)
@@ -40,7 +40,7 @@ def main():
         auth_manager = None
         if config.session_type == "user":
             auth_manager = AuthManager(input_timeout=300)
-            logger.info(t("log.main.auth_manager_created"))
+            logger.debug(t("log.main.auth_manager_created"))
 
         # Create Bot manager
         bot_manager = BotManager(config, auth_manager)
@@ -56,7 +56,7 @@ def main():
         # Auto-login if session cache exists
         session_file = Path("data/telegram_session.session")
         if session_file.exists():
-            logger.info(t("log.main.session_detected"))
+            logger.debug(t("log.main.session_detected"))
             bot_manager.start()
 
         # Start Admin Bot if configured
@@ -78,7 +78,7 @@ def main():
 
         # Display access information
         logger.info(t("log.main.web_address", host=config.web_host, port=config.web_port))
-        logger.info("=" * 60)
+        logger.debug("=" * 60)
 
         # Prepare authentication configuration
         auth = None

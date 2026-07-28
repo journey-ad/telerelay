@@ -95,7 +95,7 @@ class ExportService:
         chats = self.source.list_chat_summaries()
         with self._lock:
             self._chat_cache = {chat.chat_id: chat for chat in chats}
-        logger.info(t("log.export.chats_loaded", count=len(chats)))
+        logger.debug(t("log.export.chats_loaded", count=len(chats)))
         return [(chat.label, str(chat.chat_id)) for chat in chats]
 
     def _chat_title(self, chat_id: int) -> str:
@@ -233,7 +233,7 @@ class ExportService:
             run_id=run_id,
             started_at=_date_text(_now_utc()),
         )
-        logger.info(
+        logger.debug(
             t("log.export.group_started", job_id=job_id, run_id=run_id)
         )
         writers = None
@@ -241,7 +241,7 @@ class ExportService:
             def update_progress(processed, total):
                 self._update_job(job_id, processed=processed, total=total)
                 if processed == 1 or processed % 25 == 0 or processed == total:
-                    logger.info(
+                    logger.debug(
                         t(
                             "log.export.group_progress",
                             job_id=job_id,
@@ -430,7 +430,7 @@ class ExportService:
             run_id=run_id,
             started_at=_date_text(_now_utc()),
         )
-        logger.info(
+        logger.debug(
             t(
                 "log.export.message_started",
                 kind=run_type,
@@ -493,7 +493,7 @@ class ExportService:
                 if count == 1 or count % 25 == 0:
                     self._update_job(job_id, processed=count)
                 if count == 1 or count % 2000 == 0:
-                    logger.info(
+                    logger.debug(
                         t(
                             "log.export.message_progress",
                             kind=run_type,

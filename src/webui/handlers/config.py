@@ -473,7 +473,7 @@ class ConfigHandler:
     def _maybe_restart(self, success_msg: str) -> str:
         """Restart if Bot is running"""
         if self.bot_manager.is_running:
-            logger.info(t("log.bot.restarting") + t("misc.config_updated"))
+            logger.debug(t("log.bot.restarting") + t("misc.config_updated"))
             if self.bot_manager.restart():
                 return format_message(t("message.config.rule_saved_restarted", msg=success_msg), "success")
             else:
@@ -483,7 +483,7 @@ class ConfigHandler:
     def _maybe_restart_button_action(self, success_msg: str) -> str:
         """Restart the Telegram client so button listeners use the new rules."""
         if self.bot_manager.is_running:
-            logger.info(t("log.bot.restarting") + t("misc.config_updated"))
+            logger.debug(t("log.bot.restarting") + t("misc.config_updated"))
             if self.bot_manager.restart():
                 return format_message(
                     t("message.config.button_action_saved_restarted", msg=success_msg),

@@ -30,7 +30,7 @@ class MediaDownloader:
         if os.path.exists(TEMP_DIR):
             try:
                 shutil.rmtree(TEMP_DIR)
-                logger.info(f"Purged temp directory: {TEMP_DIR}")
+                logger.debug(t("log.forward.downloader.cleanup", path=TEMP_DIR))
             except OSError as e:
                 logger.warning(f"Failed to purge temp directory: {e}")
 
@@ -58,18 +58,18 @@ class MediaDownloader:
         if not message.media:
             return None
 
-        logger.info(t("log.forward.downloader.downloading"))
+        logger.debug(t("log.forward.downloader.downloading"))
         path = await self.client.download_media(message, file=dest)
 
         if path:
             file_size_mb = os.path.getsize(path) / 1048576
-            logger.info(t("log.forward.downloader.complete", filename=os.path.basename(path), size=f"{file_size_mb:.1f}"))
+            logger.debug(t("log.forward.downloader.complete", filename=os.path.basename(path), size=f"{file_size_mb:.1f}"))
 
         return path
 
     async def _download_group(self, messages: List[Message], dest: str) -> List[str]:
         """Download all media from a media group"""
-        logger.info(t("log.forward.downloader.group_downloading", count=len(messages)))
+        logger.debug(t("log.forward.downloader.group_downloading", count=len(messages)))
         file_paths = []
 
         for i, msg in enumerate(messages):
@@ -80,7 +80,7 @@ class MediaDownloader:
                     logger.debug(t("log.forward.downloader.group_progress", current=i+1, total=len(messages), filename=os.path.basename(path)))
 
         if file_paths:
-            logger.info(t("log.forward.downloader.group_complete", count=len(file_paths)))
+            logger.debug(t("log.forward.downloader.group_complete", count=len(file_paths)))
 
         return file_paths
 

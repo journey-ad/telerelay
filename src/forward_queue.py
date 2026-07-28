@@ -396,6 +396,17 @@ class ForwardQueueStore:
             ).fetchall()
             return {row["status"]: row["count"] for row in rows}
 
+    def active_count(self) -> int:
+        """Return the number of unfinished jobs currently in the queue."""
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) FROM forward_queue
+                WHERE status IN ('pending', 'processing')
+                """
+            ).fetchone()
+            return int(row[0])
+
 
 class ForwardQueue:
     """Single FIFO consumer with durable queue-level backoff."""
@@ -430,6 +441,24 @@ class ForwardQueue:
         item = self.store.enqueue(**kwargs)
         self._wake.set()
         return item
+
+    def active_count(self) -> int:
+        return self.store.active_count()
+
+    @staticmethod
+    def _log_fields(item: ForwardQueueItem) -> dict[str, Any]:
+        targets = item.rule_data.get("target_chats", []) or []
+        target = (
+            targets[item.next_target_index]
+            if 0 <= item.next_target_index < len(targets)
+            else "-"
+        )
+        return {
+            "rule": item.rule_name,
+            "chat_id": item.source_chat_id,
+            "message_id": item.source_message_id,
+            "target": target,
+        }
 
     async def start(self) -> None:
         if self.running:
@@ -513,7 +542,13 @@ class ForwardQueue:
             seconds = max(1.0, float(getattr(exc, "seconds", 1))) + self.flood_wait_buffer
             paused = self.store.pause_for(seconds, str(exc))
             self.store.reschedule(item.id, available_at=paused, error=str(exc))
-            logger.warning(t("log.forward_queue.paused", seconds=seconds, item_id=item.id))
+            logger.warning(
+                t(
+                    "log.forward_queue.paused",
+                    seconds=seconds,
+                    **self._log_fields(item),
+                )
+            )
         except Exception as exc:
             failure_count = item.failure_count + 1
             if failure_count >= self.max_retries:
@@ -521,9 +556,9 @@ class ForwardQueue:
                 logger.error(
                     t(
                         "log.forward_queue.failed",
-                        item_id=item.id,
                         attempts=failure_count,
                         error=exc,
+                        **self._log_fields(item),
                     )
                 )
             else:
@@ -540,9 +575,9 @@ class ForwardQueue:
                 logger.warning(
                     t(
                         "log.forward_queue.retry",
-                        item_id=item.id,
                         seconds=delay,
                         error=exc,
+                        **self._log_fields(item),
                     )
                 )
         else:
