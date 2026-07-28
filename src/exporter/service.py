@@ -12,9 +12,11 @@ from src.i18n import t
 from src.logger import get_logger
 
 from .formatters import create_writer_set
+from .message_store import MessageArchiveStore
 from .models import (
+    GROUP_EXPORT_FORMATS,
+    MESSAGE_EXPORT_FORMATS,
     SCHEDULE_TYPES,
-    SUPPORTED_FORMATS,
     ExportJobSnapshot,
     ExportJobState,
     ExportTask,
@@ -64,6 +66,10 @@ class ExportService:
         self.source = source or TelegramExportSource(bot_manager)
         self.export_root = Path(config.export_root_dir)
         self.export_root.mkdir(parents=True, exist_ok=True)
+        self.message_db_root = Path(
+            getattr(config, "export_message_db_dir", "data/db")
+        )
+        self.message_db_root.mkdir(parents=True, exist_ok=True)
         self._executor = ThreadPoolExecutor(
             max_workers=max(1, int(config.export_concurrency)),
             thread_name_prefix="telerelay-export",
@@ -73,6 +79,7 @@ class ExportService:
         self._cancel_events: Dict[str, threading.Event] = {}
         self._active_task_ids = set()
         self._chat_cache = {}
+        self._message_stores: Dict[int, MessageArchiveStore] = {}
         self.scheduler = None
 
     def set_scheduler(self, scheduler) -> None:
@@ -104,18 +111,30 @@ class ExportService:
         return chat.title if chat else str(chat_id)
 
     @staticmethod
-    def normalize_formats(formats: Iterable[str]) -> Tuple[str, ...]:
+    def normalize_formats(
+        formats: Iterable[str],
+        supported: Sequence[str] = MESSAGE_EXPORT_FORMATS,
+    ) -> Tuple[str, ...]:
         if isinstance(formats, str):
             formats = [formats]
         normalized = tuple(
             fmt.lower().strip()
             for fmt in formats
-            if fmt and fmt.lower().strip() in SUPPORTED_FORMATS
+            if fmt and fmt.lower().strip() in supported
         )
         normalized = tuple(dict.fromkeys(normalized))
         if not normalized:
             raise ExportValidationError(t("message.export.format_required"))
         return normalized
+
+    def _message_store(self, chat_id: int) -> MessageArchiveStore:
+        chat_id = int(chat_id)
+        with self._lock:
+            store = self._message_stores.get(chat_id)
+            if store is None:
+                store = MessageArchiveStore(self.message_db_root, chat_id)
+                self._message_stores[chat_id] = store
+            return store
 
     @staticmethod
     def parse_datetime(value, timezone_name: str) -> datetime:
@@ -204,7 +223,7 @@ class ExportService:
         subdirectory: str = "groups",
     ) -> str:
         self._ensure_available()
-        normalized_formats = self.normalize_formats(formats)
+        normalized_formats = self.normalize_formats(formats, GROUP_EXPORT_FORMATS)
         directory = self._validated_directory(subdirectory)
         state = self._new_job("groups")
         logger.info(
@@ -447,8 +466,14 @@ class ExportService:
         writers = None
         count = 0
         last_message_id = min_message_id
-        output_timezone = ZoneInfo(self.config.export_timezone if not task_id else self.store.get_task(task_id).timezone)
         try:
+            task = self.store.get_task(task_id) if task_id else None
+            if task and task.last_message_id is not None:
+                last_message_id = task.last_message_id
+            output_timezone = ZoneInfo(
+                task.timezone if task else self.config.export_timezone
+            )
+            message_store = self._message_store(chat_id)
             stem = self._message_stem(
                 chat_title,
                 chat_id,
@@ -467,6 +492,12 @@ class ExportService:
                 "range_end": _date_text(end_at),
                 "timezone": str(output_timezone),
             }
+            incremental_formats = (
+                tuple(fmt for fmt in formats if fmt in {"json", "csv"})
+                if task
+                else ()
+            )
+            pending_records = []
             records = self.source.iter_message_records(
                 chat_id=chat_id,
                 chat_title=chat_title,
@@ -479,17 +510,26 @@ class ExportService:
             for record in records:
                 if cancel_event.is_set():
                     raise ExportCancelled(t("message.export.cancelled"))
-                if writers is None:
+                payload = record.to_dict()
+                pending_records.append(payload)
+                if len(pending_records) >= 250:
+                    message_store.upsert(pending_records)
+                    pending_records.clear()
+                if incremental_formats and writers is None:
                     writers = create_writer_set(
                         directory / stem,
                         "messages",
-                        formats,
+                        incremental_formats,
                         metadata,
                         self._html_labels(),
                     )
-                writers.add(record.to_dict())
+                if writers:
+                    writers.add(payload)
                 count += 1
-                last_message_id = record.message_id
+                last_message_id = max(
+                    int(last_message_id or record.message_id),
+                    int(record.message_id),
+                )
                 if count == 1 or count % 25 == 0:
                     self._update_job(job_id, processed=count)
                 if count == 1 or count % 2000 == 0:
@@ -504,13 +544,80 @@ class ExportService:
                         )
                     )
 
+            if pending_records:
+                message_store.upsert(pending_records)
+
             files = []
             if writers:
                 self._update_job(job_id, phase="writing_files")
-                files = [str(path.resolve()) for path in writers.finalize()]
+                files.extend(str(path.resolve()) for path in writers.finalize())
                 writers = None
 
+            if task:
+                if "html" in formats:
+                    archive_start = self.parse_datetime(
+                        task.initial_start_at,
+                        task.timezone,
+                    )
+                    archive_records = message_store.list_records(
+                        start_at=archive_start,
+                        end_at=end_at,
+                        output_timezone=output_timezone,
+                    )
+                    if archive_records:
+                        self._update_job(job_id, phase="writing_files")
+                        archive_metadata = dict(metadata)
+                        archive_metadata["range_start"] = _date_text(archive_start)
+                        writers = create_writer_set(
+                            directory / stem,
+                            "messages",
+                            ("html",),
+                            archive_metadata,
+                            self._html_labels(),
+                        )
+                        for record in archive_records:
+                            writers.add(record)
+                        files.extend(
+                            str(path.resolve()) for path in writers.finalize()
+                        )
+                        writers = None
+            else:
+                rebuild_formats = tuple(
+                    fmt for fmt in formats if fmt in {"json", "csv", "html"}
+                )
+                if rebuild_formats:
+                    archive_records = message_store.list_records(
+                        start_at=start_at,
+                        end_at=end_at,
+                        output_timezone=output_timezone,
+                    )
+                    if archive_records:
+                        self._update_job(job_id, phase="writing_files")
+                        writers = create_writer_set(
+                            directory / stem,
+                            "messages",
+                            rebuild_formats,
+                            metadata,
+                            self._html_labels(),
+                        )
+                        for record in archive_records:
+                            writers.add(record)
+                        files.extend(
+                            str(path.resolve()) for path in writers.finalize()
+                        )
+                        writers = None
+
+            if "sqlite" in formats and message_store.count():
+                database = message_store.backup_to(
+                    directory / message_store.path.name
+                )
+                files.append(str(database.resolve()))
+
             if task_id:
+                message_store.set_metadata(
+                    self._task_backfill_key(task_id),
+                    task.initial_start_at,
+                )
                 self.store.update_task(
                     task_id,
                     last_message_id=last_message_id,
@@ -616,6 +723,10 @@ class ExportService:
         task_tag = f"task{task_id}_" if task_id else ""
         return f"{task_tag}{title}_{chat_id}_{start_tag}_{end_tag}_{job_id[:8]}"
 
+    @staticmethod
+    def _task_backfill_key(task_id: int) -> str:
+        return f"task:{int(task_id)}:initial_start_at"
+
     def save_task(
         self,
         *,
@@ -712,10 +823,20 @@ class ExportService:
         try:
             timezone_value = ZoneInfo(task.timezone)
             end_at = datetime.now(timezone_value)
+            message_store = self._message_store(task.chat_id)
+            backfill_complete = (
+                message_store.get_metadata(self._task_backfill_key(task.id))
+                == task.initial_start_at
+            )
             start_at = self.parse_datetime(
-                task.last_success_at or task.initial_start_at,
+                (
+                    task.last_success_at
+                    if backfill_complete and task.last_success_at
+                    else task.initial_start_at
+                ),
                 task.timezone,
             )
+            min_message_id = task.last_message_id if backfill_complete else None
             directory = self._validated_directory(task.subdirectory)
             state = self._new_job("scheduled", task.id)
             logger.info(
@@ -741,7 +862,7 @@ class ExportService:
                 end_at,
                 task.formats,
                 directory,
-                task.last_message_id,
+                min_message_id,
             )
             return state.id
         except Exception:

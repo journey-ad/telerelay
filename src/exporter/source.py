@@ -1,6 +1,7 @@
 """Telethon-backed source for group metadata and message history."""
 
 import asyncio
+import base64
 import queue
 import threading
 from concurrent.futures import Future
@@ -78,6 +79,49 @@ def _warning(label: str, error: Exception) -> str:
     if len(detail) > 240:
         detail = detail[:237] + "..."
     return f"{label}: {type(error).__name__}" + (f" ({detail})" if detail else "")
+
+
+def _tl_data(value):
+    """Convert Telethon values into portable JSON-compatible data."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return _date_text(value)
+    if isinstance(value, bytes):
+        return {"_bytes_base64": base64.b64encode(value).decode("ascii")}
+    if isinstance(value, (list, tuple)):
+        return [_tl_data(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _tl_data(item) for key, item in value.items()}
+    if hasattr(value, "to_dict"):
+        return _tl_data(value.to_dict())
+    return str(value)
+
+
+def _peer_id(value) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(utils.get_peer_id(value))
+    except (AttributeError, TypeError, ValueError):
+        pass
+    for name in ("user_id", "chat_id", "channel_id"):
+        peer_id = getattr(value, name, None)
+        if peer_id is not None:
+            return int(peer_id)
+    return None
+
+
+def _sender_type(sender) -> Optional[str]:
+    if sender is None:
+        return None
+    if isinstance(sender, types.User) or hasattr(sender, "first_name"):
+        return "user"
+    if isinstance(sender, types.Chat):
+        return "group"
+    if isinstance(sender, types.Channel):
+        return "channel"
+    return type(sender).__name__.lower()
 
 
 class TelegramExportSource:
@@ -318,6 +362,18 @@ class TelegramExportSource:
         if edit_date and edit_date.tzinfo is None:
             edit_date = edit_date.replace(tzinfo=timezone.utc)
 
+        forward = getattr(message, "fwd_from", None)
+        forward_date = getattr(forward, "date", None)
+        if forward_date and forward_date.tzinfo is None:
+            forward_date = forward_date.replace(tzinfo=timezone.utc)
+        message_file = getattr(message, "file", None)
+        media_object = getattr(message, "document", None) or getattr(
+            message, "photo", None
+        )
+        replies = getattr(message, "replies", None)
+        reply_header = getattr(message, "reply_to", None)
+        action = getattr(message, "action", None)
+
         return MessageRecord(
             message_id=int(message.id),
             chat_id=int(chat_id),
@@ -336,6 +392,85 @@ class TelegramExportSource:
                 else None
             ),
             grouped_id=getattr(message, "grouped_id", None),
+            date_utc=message_date.astimezone(timezone.utc).isoformat(timespec="seconds"),
+            sender_type=_sender_type(sender),
+            sender_first_name=getattr(sender, "first_name", None) if sender else None,
+            sender_last_name=getattr(sender, "last_name", None) if sender else None,
+            sender_is_bot=(
+                bool(getattr(sender, "bot", False)) if sender is not None else None
+            ),
+            sender_phone=getattr(sender, "phone", None) if sender else None,
+            sender_is_verified=(
+                bool(getattr(sender, "verified", False))
+                if sender is not None
+                else None
+            ),
+            sender_is_premium=(
+                bool(getattr(sender, "premium", False))
+                if sender is not None
+                else None
+            ),
+            sender_is_scam=(
+                bool(getattr(sender, "scam", False)) if sender is not None else None
+            ),
+            sender_is_fake=(
+                bool(getattr(sender, "fake", False)) if sender is not None else None
+            ),
+            sender_is_contact=(
+                bool(getattr(sender, "contact", False))
+                if sender is not None
+                else None
+            ),
+            sender_is_mutual_contact=(
+                bool(getattr(sender, "mutual_contact", False))
+                if sender is not None
+                else None
+            ),
+            reply_to_top_id=getattr(reply_header, "reply_to_top_id", None),
+            edited_at_utc=(
+                edit_date.astimezone(timezone.utc).isoformat(timespec="seconds")
+                if edit_date
+                else None
+            ),
+            forward_from_id=_peer_id(getattr(forward, "from_id", None)),
+            forward_from_name=getattr(forward, "from_name", None),
+            forward_date=(
+                forward_date.astimezone(output_timezone).isoformat(timespec="seconds")
+                if forward_date
+                else None
+            ),
+            forward_date_utc=(
+                forward_date.astimezone(timezone.utc).isoformat(timespec="seconds")
+                if forward_date
+                else None
+            ),
+            via_bot_id=getattr(message, "via_bot_id", None),
+            post_author=getattr(message, "post_author", None),
+            views=getattr(message, "views", None),
+            forwards=getattr(message, "forwards", None),
+            replies_count=getattr(replies, "replies", None),
+            media_id=getattr(media_object, "id", None),
+            media_mime_type=getattr(message_file, "mime_type", None),
+            media_file_name=getattr(message_file, "name", None),
+            media_size=getattr(message_file, "size", None),
+            media_duration=getattr(message_file, "duration", None),
+            service_action=type(action).__name__ if action is not None else None,
+            is_outgoing=getattr(message, "out", None),
+            is_mentioned=getattr(message, "mentioned", None),
+            is_media_unread=getattr(message, "media_unread", None),
+            is_silent=getattr(message, "silent", None),
+            is_post=getattr(message, "post", None),
+            is_from_scheduled=getattr(message, "from_scheduled", None),
+            is_pinned=getattr(message, "pinned", None),
+            is_forwarding_restricted=getattr(message, "noforwards", None),
+            entities=_tl_data(getattr(message, "entities", None)) or [],
+            reactions=_tl_data(getattr(message, "reactions", None)),
+            reply_markup=_tl_data(getattr(message, "reply_markup", None)),
+            restriction_reason=(
+                _tl_data(getattr(message, "restriction_reason", None)) or []
+            ),
+            sender_raw=_tl_data(sender) or {},
+            raw=_tl_data(message) or {},
         )
 
     @staticmethod

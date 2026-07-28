@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import gradio as gr
 
+from src.exporter.models import GROUP_EXPORT_FORMATS, MESSAGE_EXPORT_FORMATS
 from src.i18n import t
 
 
@@ -35,7 +36,7 @@ class ExportTab:
         with gr.Accordion(t("ui.accordion.export_groups"), open=True):
             with gr.Row():
                 self.group_formats = gr.CheckboxGroup(
-                    choices=["json", "csv", "html"],
+                    choices=list(GROUP_EXPORT_FORMATS),
                     value=["json", "html"],
                     label=t("ui.label.export_formats"),
                     scale=2,
@@ -92,8 +93,8 @@ class ExportTab:
                 self.message_all_history = self._all_history_checkbox()
             with gr.Row():
                 self.message_formats = gr.CheckboxGroup(
-                    choices=["json", "csv", "html"],
-                    value=["json", "html"],
+                    choices=list(MESSAGE_EXPORT_FORMATS),
+                    value=["json", "html", "sqlite"],
                     label=t("ui.label.export_formats"),
                     scale=2,
                 )
@@ -158,8 +159,8 @@ class ExportTab:
                 )
                 self.task_all_history = self._all_history_checkbox()
                 self.task_formats = gr.CheckboxGroup(
-                    choices=["json", "csv", "html"],
-                    value=["json", "html"],
+                    choices=list(MESSAGE_EXPORT_FORMATS),
+                    value=["json", "html", "sqlite"],
                     label=t("ui.label.export_formats"),
                 )
             with gr.Row():

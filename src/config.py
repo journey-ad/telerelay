@@ -143,6 +143,12 @@ class Config:
         return str(export.get("root_dir", "data/exports"))
 
     @property
+    def export_message_db_dir(self) -> str:
+        """Persistent directory for per-chat message archive databases."""
+        export = self.config_data.get("export", {})
+        return str(export.get("message_db_dir", "data/db"))
+
+    @property
     def export_timezone(self) -> str:
         """Timezone used for export ranges and scheduled jobs."""
         export = self.config_data.get("export", {})

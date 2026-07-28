@@ -149,11 +149,12 @@ ADMIN_CHAT_ID=
 ```yaml
 export:
   root_dir: data/exports
+  message_db_dir: data/db
   timezone: Asia/Shanghai
   concurrency: 2
 ```
 
-`root_dir` is the server-side export root. The Web UI only accepts relative subdirectories below it. Docker already mounts the complete `data/` directory, so exports and the task database at `data/exports.db` persist across container recreation.
+`root_dir` is the server-side export root. The Web UI only accepts relative subdirectories below it. Exported messages are also upserted into one canonical SQLite database per chat under `message_db_dir`, named `msg_export_{chat_id}.sqlite3`. Docker already mounts the complete `data/` directory, so exports, message databases, and the task database at `data/exports.db` persist across container recreation.
 
 The forwarding queue is stored in `data/forward_queue.db` and resumes after restart.
 
@@ -210,8 +211,8 @@ The forwarding queue is stored in `data/forward_queue.db` and resumes after rest
 
 #### Export Data Tab (User Mode Only)
 - **Group List**: Export information about accessible groups and channels
-- **Message History**: Export a group and time range as JSON, CSV, or offline HTML; HTML supports search, date filters, pagination, and reply lists
-- **Scheduled Exports**: Run incremental exports hourly, daily, or weekly, with run history and result downloads
+- **Message History**: Export a group and time range as JSON, CSV, SQLite, or offline HTML; HTML supports search, date filters, pagination, and reply lists
+- **Scheduled Exports**: Run incremental exports hourly, daily, or weekly; messages accumulate in per-chat SQLite databases and scheduled HTML is rebuilt as one cumulative archive
 
 This feature requires a Telegram user session and is unavailable in Bot Token mode.
 
@@ -322,7 +323,7 @@ telerelay/
 3. **Regular Backups**
    - Backup session files (`data/`)
    - Backup configuration files
-   - Backup `data/exports.db` together with `data/exports/`
+   - Backup `data/exports.db`, `data/exports/`, and `data/db/` together
    - Backup `data/forward_queue.db`
 
 ## 📝 License

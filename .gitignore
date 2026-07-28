@@ -21,6 +21,7 @@ config/config.yaml
 data/*.session
 data/*.session-journal
 data/*.db
+data/db/*.sqlite3
 
 # Log files
 logs/*.log

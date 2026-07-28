@@ -8,6 +8,7 @@ from .models import (
     ExportTask,
     MessageRecord,
 )
+from .message_store import MessageArchiveStore
 
 __all__ = [
     "AdministratorRecord",
@@ -16,4 +17,5 @@ __all__ = [
     "ExportJobSnapshot",
     "ExportTask",
     "MessageRecord",
+    "MessageArchiveStore",
 ]

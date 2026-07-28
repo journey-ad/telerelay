@@ -43,6 +43,69 @@ MESSAGE_FIELDS = (
     "reply_to_message_id",
     "edited_at",
     "grouped_id",
+    "date_utc",
+    "sender_type",
+    "sender_first_name",
+    "sender_last_name",
+    "sender_is_bot",
+    "sender_phone",
+    "sender_is_verified",
+    "sender_is_premium",
+    "sender_is_scam",
+    "sender_is_fake",
+    "sender_is_contact",
+    "sender_is_mutual_contact",
+    "reply_to_top_id",
+    "edited_at_utc",
+    "forward_from_id",
+    "forward_from_name",
+    "forward_date",
+    "forward_date_utc",
+    "via_bot_id",
+    "post_author",
+    "views",
+    "forwards",
+    "replies_count",
+    "media_id",
+    "media_mime_type",
+    "media_file_name",
+    "media_size",
+    "media_duration",
+    "service_action",
+    "is_outgoing",
+    "is_mentioned",
+    "is_media_unread",
+    "is_silent",
+    "is_post",
+    "is_from_scheduled",
+    "is_pinned",
+    "is_forwarding_restricted",
+    "entities",
+    "reactions",
+    "reply_markup",
+    "restriction_reason",
+)
+
+HTML_MESSAGE_FIELDS = (
+    "message_id",
+    "chat_id",
+    "chat_title",
+    "date",
+    "sender_id",
+    "sender_name",
+    "sender_username",
+    "text",
+    "media_type",
+    "content",
+    "reply_to_message_id",
+    "edited_at",
+    "grouped_id",
+    "forward_from_id",
+    "forward_from_name",
+    "post_author",
+    "views",
+    "forwards",
+    "replies_count",
 )
 
 
@@ -284,7 +347,13 @@ class _HtmlArchiveWriter:
         self._closed = False
 
     def add(self, record: Mapping[str, Any]) -> None:
-        self._records.append(dict(record))
+        self._records.append(
+            {
+                field: record.get(field)
+                for field in HTML_MESSAGE_FIELDS
+                if field in record
+            }
+        )
 
     def finalize(self) -> Path:
         if self._closed:

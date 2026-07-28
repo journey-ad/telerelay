@@ -21,6 +21,8 @@ language: en_US
 export:
   # Must be persistent in Docker; the default is covered by the existing data volume.
   root_dir: data/exports
+  # Canonical per-chat message archives: msg_export_{chat_id}.sqlite3.
+  message_db_dir: data/db
   timezone: Asia/Shanghai
   # Range: 1-4. Telegram rate limits still apply when multiple jobs run.
   concurrency: 2

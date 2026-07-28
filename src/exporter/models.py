@@ -4,7 +4,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
-SUPPORTED_FORMATS: Tuple[str, ...] = ("json", "csv", "html")
+GROUP_EXPORT_FORMATS: Tuple[str, ...] = ("json", "csv", "html")
+MESSAGE_EXPORT_FORMATS: Tuple[str, ...] = ("json", "csv", "html", "sqlite")
+SUPPORTED_FORMATS: Tuple[str, ...] = MESSAGE_EXPORT_FORMATS
 SCHEDULE_TYPES: Tuple[str, ...] = ("hourly", "daily", "weekly")
 JOB_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
@@ -74,6 +76,49 @@ class MessageRecord:
     reply_to_message_id: Optional[int]
     edited_at: Optional[str]
     grouped_id: Optional[int]
+    date_utc: Optional[str] = None
+    sender_type: Optional[str] = None
+    sender_first_name: Optional[str] = None
+    sender_last_name: Optional[str] = None
+    sender_is_bot: Optional[bool] = None
+    sender_phone: Optional[str] = None
+    sender_is_verified: Optional[bool] = None
+    sender_is_premium: Optional[bool] = None
+    sender_is_scam: Optional[bool] = None
+    sender_is_fake: Optional[bool] = None
+    sender_is_contact: Optional[bool] = None
+    sender_is_mutual_contact: Optional[bool] = None
+    reply_to_top_id: Optional[int] = None
+    edited_at_utc: Optional[str] = None
+    forward_from_id: Optional[int] = None
+    forward_from_name: Optional[str] = None
+    forward_date: Optional[str] = None
+    forward_date_utc: Optional[str] = None
+    via_bot_id: Optional[int] = None
+    post_author: Optional[str] = None
+    views: Optional[int] = None
+    forwards: Optional[int] = None
+    replies_count: Optional[int] = None
+    media_id: Optional[int] = None
+    media_mime_type: Optional[str] = None
+    media_file_name: Optional[str] = None
+    media_size: Optional[int] = None
+    media_duration: Optional[float] = None
+    service_action: Optional[str] = None
+    is_outgoing: Optional[bool] = None
+    is_mentioned: Optional[bool] = None
+    is_media_unread: Optional[bool] = None
+    is_silent: Optional[bool] = None
+    is_post: Optional[bool] = None
+    is_from_scheduled: Optional[bool] = None
+    is_pinned: Optional[bool] = None
+    is_forwarding_restricted: Optional[bool] = None
+    entities: List[Dict[str, Any]] = field(default_factory=list)
+    reactions: Optional[Dict[str, Any]] = None
+    reply_markup: Optional[Dict[str, Any]] = None
+    restriction_reason: List[Dict[str, Any]] = field(default_factory=list)
+    sender_raw: Dict[str, Any] = field(default_factory=dict)
+    raw: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

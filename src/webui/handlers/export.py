@@ -203,7 +203,7 @@ class ExportHandler:
             "",
             None,
             now - timedelta(days=30),
-            ["json", "html"],
+            ["json", "html", "sqlite"],
             "scheduled",
             "daily",
             0,
