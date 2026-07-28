@@ -54,6 +54,13 @@ TRANSLATIONS = {
             "recovery_failed": "Failed to recover persistent forward queue processing state",
         },
 
+        "button_action": {
+            "user_mode_required": "Message button handling requires Telegram User mode; all rules were skipped",
+            "registered": "✓ Registered {rules} message button rule(s) across {chats} chat(s)",
+            "clicked": "✓ Button handled - Rule: {rule}, Button: {button}, Message: {chat_id}/{message_id}",
+            "failed": "Button handling failed - Message: {chat_id}/{message_id}, Error: {error}",
+        },
+
         # log.client.* - client.py logs
         "client": {
             "proxy_unsupported": "Unsupported proxy type: {type}",
@@ -236,6 +243,8 @@ TRANSLATIONS = {
             "tab_history": "📜 History",
             "tab_export": "📤 Export Data",
             "tab_backup": "💾 Backup",
+            "config_forwarding_rules": "Forwarding Rules",
+            "config_button_actions": "Message Button Handling",
         },
 
         # ui.button.* - buttons
@@ -272,6 +281,7 @@ TRANSLATIONS = {
             "toggle_task": "⏯ Pause/Resume",
             "delete_task": "🗑 Delete Task",
             "refresh_tasks": "🔄 Refresh Tasks",
+            "save_button_action": "💾 Save Button Rule",
         },
 
         # ui.label.* - labels
@@ -306,6 +316,11 @@ TRANSLATIONS = {
             "code": "Verification Code",
             "password": "Two-Step Verification Password",
             "error_info": "Error Info",
+            "current_button_action_rule": "📋 Current Button Rule",
+            "button_action_source_chats": "Bots / Chats to Monitor",
+            "button_action_texts": "Button Text Patterns",
+            "button_action_match_mode": "Text Match Mode",
+            "button_action_delay": "Click Delay (seconds)",
             # Stats tab
             "rule_stats": "📋 Per-Rule Statistics",
             "daily_trend": "📈 Daily Forwarding Trend",
@@ -368,6 +383,8 @@ TRANSLATIONS = {
             "search_keyword": "Search message content, source, or sender",
             "task_name": "Example: Daily project group export",
             "export_subdirectory": "Example: groups or scheduled/project",
+            "button_action_source_chats": "@example_bot\n-100123456789",
+            "button_action_texts": "Confirm\nCheck in now\n^Claim .* reward$",
         },
 
         # ui.info.* - info messages
@@ -394,6 +411,10 @@ TRANSLATIONS = {
             "schedule_minute": "Minute for hourly tasks; execution minute for daily/weekly tasks",
             "schedule_hour": "Execution hour for daily/weekly tasks",
             "schedule_weekday": "Weekly tasks only; 0 is Monday and 6 is Sunday",
+            "button_action_source_chats": "Monitor only these bots, groups, or channels; one ID or username per line",
+            "button_action_texts": "One pattern per line; in regex mode each line is a regular expression",
+            "button_action_match_mode": "exact: identical text | contains: contains text | regex: regular expression",
+            "button_action_delay": "Wait before clicking after receiving the message, from 0 to 30 seconds",
         },
 
         # ui.accordion.* - accordion titles
@@ -411,6 +432,7 @@ TRANSLATIONS = {
         # ui.markdown.* - markdown text
         "markdown": {
             "ignore_warning": "⚠️ Higher priority than filter rules, matched messages will be ignored directly",
+            "button_action_guide": "Available only in **Telegram User mode**. When a message arrives from a configured chat, the first matching callback button is clicked; each message is handled at most once. URL, payment, phone, location, and Mini App buttons are never clicked.",
             "auth_guide": """### Telegram User Mode Authentication
 
 **For first-time use or when session expires, follow these steps:**
@@ -437,6 +459,7 @@ TRANSLATIONS = {
             "connecting": "🟡 Connecting...",
             "error": "❌ Status Error",
             "default_rule": "Default Rule",
+            "default_button_action_rule": "Default Button Rule",
         },
 
         # ui.auth.* - authentication status
@@ -519,6 +542,22 @@ TRANSLATIONS = {
             "enabled": "enabled",
             "disabled": "disabled",
             "load_failed": "Failed to load rule: {error}",
+            "button_action_user_mode": "Message button handling is available only in Telegram User mode",
+            "button_action_source_required": "Configure at least one bot or chat before enabling this rule",
+            "button_action_text_required": "Configure at least one button text pattern before enabling this rule",
+            "button_action_regex_invalid": "Invalid button text regular expression \"{pattern}\": {error}",
+            "button_action_saved": "Button rule \"{rule}\" saved",
+            "button_action_saved_restarted": "{msg}, Bot restarted",
+            "button_action_saved_restart_failed": "{msg}, but restart failed",
+            "button_action_saved_next_start": "{msg}, will take effect on next start",
+            "button_action_save_failed": "Failed to save button rule: {error}",
+            "button_action_added": "Button rule \"{name}\" added",
+            "button_action_add_failed": "Failed to add button rule: {error}",
+            "button_action_deleted": "Button rule \"{name}\" deleted",
+            "button_action_delete_failed": "Failed to delete button rule: {error}",
+            "button_action_delete_last": "At least one button rule must be kept",
+            "button_action_renamed": "Renamed button rule \"{old_name}\" to \"{new_name}\"",
+            "button_action_rename_failed": "Failed to rename button rule: {error}",
         },
 
         # message.stats.* - statistics messages
@@ -688,6 +727,7 @@ TRANSLATIONS = {
         "unlimited": "Unlimited",
         "unknown": "Unknown",
         "rule_name_template": "Rule {count}",
+        "button_action_rule_name_template": "Button Rule {count}",
         "via_webui": " (via WebUI)",
         "via_webui_restart": " (via WebUI restart)",
         "config_updated": " (config updated)",

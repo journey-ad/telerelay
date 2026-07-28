@@ -8,6 +8,7 @@ import time
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from src.button_actions import ButtonActionEngine
 from src.client import TelegramClientManager
 from src.config import Config
 from src.constants import (
@@ -52,6 +53,7 @@ class BotManager:
         self.forwarders = []
         self.rule_forwarder_map = {}
         self._queue_forwarders = {}
+        self.button_action_engine: Optional[ButtonActionEngine] = None
         self.forward_queue_store: Optional[ForwardQueueStore] = None
         self.forward_queue: Optional[ForwardQueue] = None
         self.thread: Optional[threading.Thread] = None
@@ -212,6 +214,37 @@ class BotManager:
                     callback=self._central_message_handler,
                     chats=list(all_source_chats)
                 )
+
+            # Button interaction rules are independent from forwarding rules.
+            self.button_action_engine = None
+            button_action_rules = self.config.get_enabled_button_action_rules()
+            if button_action_rules and self.config.session_type != "user":
+                logger.warning(t("log.button_action.user_mode_required"))
+            elif button_action_rules:
+                valid_button_rules = [
+                    rule
+                    for rule in button_action_rules
+                    if rule.source_chats and rule.button_texts
+                ]
+                if valid_button_rules:
+                    self.button_action_engine = ButtonActionEngine(valid_button_rules)
+                    button_source_chats = list(dict.fromkeys(
+                        chat
+                        for rule in valid_button_rules
+                        for chat in rule.source_chats
+                    ))
+                    self.client_manager.add_message_handler(
+                        callback=self._button_action_handler,
+                        chats=button_source_chats,
+                        incoming=True,
+                    )
+                    logger.info(
+                        t(
+                            "log.button_action.registered",
+                            rules=len(valid_button_rules),
+                            chats=len(button_source_chats),
+                        )
+                    )
 
             # Backward compatibility: self.forwarder points to first forwarder
             self.forwarder = self.forwarders[0] if self.forwarders else None
@@ -385,6 +418,34 @@ class BotManager:
                     chat_id=chat_id,
                     message_id=message.id,
                 )
+            )
+
+    async def _button_action_handler(self, event) -> None:
+        """Click the first callback button matched by an independent rule."""
+        if not self.button_action_engine:
+            return
+        try:
+            result = await self.button_action_engine.handle(event)
+            if result:
+                rule_name, button_text = result
+                logger.info(
+                    t(
+                        "log.button_action.clicked",
+                        rule=rule_name,
+                        button=button_text,
+                        chat_id=event.chat_id,
+                        message_id=event.message.id,
+                    )
+                )
+        except Exception as exc:
+            logger.error(
+                t(
+                    "log.button_action.failed",
+                    chat_id=getattr(event, "chat_id", None),
+                    message_id=getattr(getattr(event, "message", None), "id", None),
+                    error=str(exc),
+                ),
+                exc_info=True,
             )
     
     def trigger_ui_update(self):

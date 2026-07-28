@@ -18,6 +18,7 @@ An intelligent Telegram message relay tool with smart filtering based on regex p
 
 - 🤖 **Smart Forwarding**: Automatically monitor specified Telegram groups/channels/accounts and forward messages to multiple targets
 - 📋 **Multi-Rule Management**: Support multiple independent forwarding rules, each with its own sources, targets, and filters
+- 🖱️ **Message Button Handling**: In User mode, monitor selected bots/chats and click callback buttons using exact, contains, or regex text matching
 - 🔍 **Powerful Filtering**: Support regex and keyword matching, whitelist/blacklist modes, media type and file size filtering
 - 🚫 **Ignore List**: Ignore specific messages by user ID and keywords
 - 💪 **Force Forward**: Bypass noforwards restrictions on channels/groups by downloading and re-uploading
@@ -195,12 +196,13 @@ The forwarding queue is stored in `data/forward_queue.db` and resumes after rest
 - **Status Display**: Running status, forwarded, filtered, total messages
 
 #### Configuration Tab
-- **Rule Management**: View, add, edit, delete, enable/disable forwarding rules
+- **Forwarding Rules**: View, add, edit, delete, enable/disable forwarding rules
 - **Source Groups**: Configure groups to monitor
 - **Target Groups**: Configure forwarding targets (supports multiple)
 - **Filter Rules**: Regex, keyword matching, media type and file size filtering
 - **Ignore List**: User ID and keyword blocking
 - **Forwarding Options**: Format preservation, source info, delay settings, force forward
+- **Message Button Handling**: Use independent rules to monitor selected bots/chats, match button text exactly, by containment, or with regex, and optionally delay the click; User mode only
 
 #### Logs Tab
 - **Real-time Logs**: View running logs

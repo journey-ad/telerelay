@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 from dotenv import load_dotenv
 
+from src.button_actions import ButtonActionRule, load_button_action_rules
 from src.i18n import t
 from src.logger import get_logger
 from src.rule import ForwardingRule, load_rules_from_config
@@ -323,6 +324,14 @@ class Config:
     def get_enabled_rules(self) -> List[ForwardingRule]:
         """Get enabled rules"""
         return [r for r in self.get_forwarding_rules() if r.enabled]
+
+    def get_button_action_rules(self) -> List[ButtonActionRule]:
+        """Get independent message-button interaction rules."""
+        return load_button_action_rules(self.config_data)
+
+    def get_enabled_button_action_rules(self) -> List[ButtonActionRule]:
+        """Get enabled message-button interaction rules."""
+        return [rule for rule in self.get_button_action_rules() if rule.enabled]
     
     def validate(self) -> tuple[bool, str]:
         """Validate if configuration is complete"""

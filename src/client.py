@@ -200,7 +200,8 @@ class TelegramClientManager:
     def add_message_handler(
         self,
         callback: Callable,
-        chats: list = None
+        chats: list = None,
+        incoming: Optional[bool] = None,
     ) -> None:
         """
         Add message handler
@@ -208,13 +209,14 @@ class TelegramClientManager:
         Args:
             callback: Message handling callback function
             chats: List of chat IDs to listen to
+            incoming: Restrict updates to incoming or outgoing messages when set
         """
         if not self.client:
             logger.error(t("log.client.client_not_initialized"))
             return
         
         # Register new message event handler
-        @self.client.on(events.NewMessage(chats=chats))
+        @self.client.on(events.NewMessage(chats=chats, incoming=incoming))
         async def handler(event):
             try:
                 await callback(event)

@@ -1,13 +1,17 @@
 """
 Configuration Handler - Multi-rule Management Support
 """
+import re
 from typing import List, Tuple
+
+from src.button_actions import ButtonActionRule
 from src.bot_manager import BotManager
 from src.config import Config
-from src.rule import ForwardingRule
-from src.logger import get_logger
 from src.i18n import t
-from ..utils import parse_chat_list, format_message
+from src.logger import get_logger
+from src.rule import ForwardingRule
+
+from ..utils import format_message, parse_chat_list
 
 logger = get_logger()
 
@@ -25,6 +29,39 @@ class ConfigHandler:
         if not rules:
             return [t("ui.status.default_rule")]
         return [rule.name for rule in rules]
+
+    def get_button_action_rule_names(self) -> List[str]:
+        """Get names for the independent message-button rules."""
+        rules = self.config.get_button_action_rules()
+        if not rules:
+            return [t("ui.status.default_button_action_rule")]
+        return [rule.name for rule in rules]
+
+    def load_button_action_rule(self, index: int = 0) -> dict:
+        """Load one message-button rule into the UI."""
+        rules = self.config.get_button_action_rules()
+        if not rules:
+            return self._default_button_action_rule_dict()
+        if index >= len(rules):
+            index = 0
+        rule = rules[index]
+        return {
+            "enabled": rule.enabled,
+            "source_chats": "\n".join(str(chat) for chat in rule.source_chats),
+            "button_texts": "\n".join(rule.button_texts),
+            "match_mode": rule.match_mode,
+            "delay": rule.delay,
+        }
+
+    @staticmethod
+    def _default_button_action_rule_dict() -> dict:
+        return {
+            "enabled": False,
+            "source_chats": "",
+            "button_texts": "",
+            "match_mode": "exact",
+            "delay": 0.0,
+        }
 
     def load_rule(self, index: int = 0) -> dict:
         """Load rule at specified index to UI"""
@@ -166,6 +203,174 @@ class ConfigHandler:
             logger.error(t("message.config.save_failed", error=str(e)), exc_info=True)
             return format_message(t("message.config.save_failed", error=str(e)), "error")
 
+    def save_button_action_rule(
+        self,
+        index: int,
+        enabled: bool,
+        source_chats: str,
+        button_texts: str,
+        match_mode: str,
+        delay: float,
+    ) -> str:
+        """Save one independent message-button interaction rule."""
+        try:
+            source_list = parse_chat_list(source_chats)
+            text_list = [line.strip() for line in button_texts.split("\n") if line.strip()]
+            match_mode = (
+                match_mode
+                if match_mode in {"exact", "contains", "regex"}
+                else "exact"
+            )
+
+            if enabled and self.config.session_type != "user":
+                return format_message(t("message.config.button_action_user_mode"), "error")
+            if enabled and not source_list:
+                return format_message(t("message.config.button_action_source_required"), "error")
+            if enabled and not text_list:
+                return format_message(t("message.config.button_action_text_required"), "error")
+            if match_mode == "regex":
+                for pattern in text_list:
+                    try:
+                        re.compile(pattern)
+                    except re.error as exc:
+                        return format_message(
+                            t(
+                                "message.config.button_action_regex_invalid",
+                                pattern=pattern,
+                                error=str(exc),
+                            ),
+                            "error",
+                        )
+
+            rules = self.config.get_button_action_rules()
+            if not rules:
+                rules = [
+                    ButtonActionRule(
+                        name=t("ui.status.default_button_action_rule")
+                    )
+                ]
+            if index >= len(rules):
+                index = 0
+
+            all_rules = [rule.to_dict() for rule in rules]
+            all_rules[index].update(
+                {
+                    "enabled": enabled,
+                    "source_chats": source_list,
+                    "button_texts": text_list,
+                    "match_mode": match_mode,
+                    "delay": max(0.0, min(float(delay or 0.0), 30.0)),
+                }
+            )
+            self.config.update({"button_action_rules": all_rules})
+            return self._maybe_restart_button_action(
+                t("message.config.button_action_saved", rule=rules[index].name)
+            )
+        except Exception as e:
+            logger.error(
+                t("message.config.button_action_save_failed", error=str(e)),
+                exc_info=True,
+            )
+            return format_message(
+                t("message.config.button_action_save_failed", error=str(e)), "error"
+            )
+
+    def add_button_action_rule(self, name: str) -> Tuple[str, List[str], int]:
+        """Add an independent message-button interaction rule."""
+        try:
+            rules = self.config.get_button_action_rules()
+            name = name.strip() if name else ""
+            if not name:
+                name = t("misc.button_action_rule_name_template", count=len(rules) + 1)
+            all_rules = [rule.to_dict() for rule in rules]
+            all_rules.append(ButtonActionRule(name=name).to_dict())
+            self.config.update({"button_action_rules": all_rules})
+            return (
+                format_message(t("message.config.button_action_added", name=name), "success"),
+                self.get_button_action_rule_names(),
+                len(all_rules) - 1,
+            )
+        except Exception as e:
+            logger.error(t("message.config.button_action_add_failed", error=str(e)), exc_info=True)
+            return (
+                format_message(t("message.config.button_action_add_failed", error=str(e)), "error"),
+                self.get_button_action_rule_names(),
+                0,
+            )
+
+    def delete_button_action_rule(self, index: int) -> Tuple[str, List[str], int]:
+        """Delete an independent message-button interaction rule."""
+        try:
+            rules = self.config.get_button_action_rules()
+            if len(rules) <= 1:
+                return (
+                    format_message(t("message.config.button_action_delete_last"), "error"),
+                    self.get_button_action_rule_names(),
+                    0,
+                )
+            if index >= len(rules):
+                return (
+                    format_message(t("message.config.invalid_index"), "error"),
+                    self.get_button_action_rule_names(),
+                    0,
+                )
+            deleted_name = rules[index].name
+            all_rules = [rule.to_dict() for i, rule in enumerate(rules) if i != index]
+            self.config.update({"button_action_rules": all_rules})
+            new_index = min(index, len(all_rules) - 1)
+            return (
+                format_message(
+                    t("message.config.button_action_deleted", name=deleted_name),
+                    "success",
+                ),
+                self.get_button_action_rule_names(),
+                new_index,
+            )
+        except Exception as e:
+            logger.error(t("message.config.button_action_delete_failed", error=str(e)), exc_info=True)
+            return (
+                format_message(t("message.config.button_action_delete_failed", error=str(e)), "error"),
+                self.get_button_action_rule_names(),
+                0,
+            )
+
+    def rename_button_action_rule(self, index: int, new_name: str) -> Tuple[str, List[str]]:
+        """Rename an independent message-button interaction rule."""
+        try:
+            new_name = new_name.strip()
+            if not new_name:
+                return (
+                    format_message(t("message.config.name_empty"), "error"),
+                    self.get_button_action_rule_names(),
+                )
+            rules = self.config.get_button_action_rules()
+            if index >= len(rules):
+                return (
+                    format_message(t("message.config.invalid_index"), "error"),
+                    self.get_button_action_rule_names(),
+                )
+            old_name = rules[index].name
+            all_rules = [rule.to_dict() for rule in rules]
+            all_rules[index]["name"] = new_name
+            self.config.update({"button_action_rules": all_rules})
+            return (
+                format_message(
+                    t(
+                        "message.config.button_action_renamed",
+                        old_name=old_name,
+                        new_name=new_name,
+                    ),
+                    "success",
+                ),
+                self.get_button_action_rule_names(),
+            )
+        except Exception as e:
+            logger.error(t("message.config.button_action_rename_failed", error=str(e)), exc_info=True)
+            return (
+                format_message(t("message.config.button_action_rename_failed", error=str(e)), "error"),
+                self.get_button_action_rule_names(),
+            )
+
     def add_rule(self, name: str) -> Tuple[str, List[str], int]:
         """Add new rule, returns (message, rule name list, new rule index)"""
         try:
@@ -275,6 +480,24 @@ class ConfigHandler:
                 return format_message(t("message.config.rule_saved_restart_failed", msg=success_msg), "success")
         return format_message(t("message.config.rule_saved_next_start", msg=success_msg), "success")
 
+    def _maybe_restart_button_action(self, success_msg: str) -> str:
+        """Restart the Telegram client so button listeners use the new rules."""
+        if self.bot_manager.is_running:
+            logger.info(t("log.bot.restarting") + t("misc.config_updated"))
+            if self.bot_manager.restart():
+                return format_message(
+                    t("message.config.button_action_saved_restarted", msg=success_msg),
+                    "success",
+                )
+            return format_message(
+                t("message.config.button_action_saved_restart_failed", msg=success_msg),
+                "success",
+            )
+        return format_message(
+            t("message.config.button_action_saved_next_start", msg=success_msg),
+            "success",
+        )
+
     # Compatible with old interface
     def load_config(self) -> dict:
         """Compatible with old interface: load first rule"""
@@ -283,4 +506,3 @@ class ConfigHandler:
     def save_config(self, *args, **kwargs) -> str:
         """Compatible with old interface: save first rule"""
         return self.save_rule(0, *args, **kwargs)
-

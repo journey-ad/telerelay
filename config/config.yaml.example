@@ -40,6 +40,22 @@ forward_queue:
   # Completed tombstones prevent duplicate updates from being re-enqueued.
   completed_retention_days: 7
 
+# Message callback-button handling (Telegram User mode only)
+# Rules are independent from forwarding rules. The first matching callback
+# button is clicked, and each incoming message is handled at most once.
+button_action_rules:
+  - name: Example confirmation
+    enabled: false
+    source_chats:
+      - "@example_bot"
+    button_texts:
+      - "Confirm"
+      - "^Claim .* reward$"
+    # exact | contains | regex
+    match_mode: exact
+    # Wait after receiving the message before clicking (0-30 seconds)
+    delay: 0
+
 # Message filtering rules
 filters:
   # Regex pattern list (any match passes)

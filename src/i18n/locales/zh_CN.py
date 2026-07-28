@@ -54,6 +54,13 @@ TRANSLATIONS = {
             "recovery_failed": "持久转发队列恢复 processing 状态失败",
         },
 
+        "button_action": {
+            "user_mode_required": "消息附加按钮处理仅支持 Telegram User 模式，已跳过全部规则",
+            "registered": "✓ 已注册 {rules} 条附加按钮处理规则，监听 {chats} 个会话",
+            "clicked": "✓ 按钮处理成功 - 规则: {rule}, 按钮: {button}, 消息: {chat_id}/{message_id}",
+            "failed": "按钮处理失败 - 消息: {chat_id}/{message_id}, 错误: {error}",
+        },
+
         # log.client.* - client.py 的日志
         "client": {
             "proxy_unsupported": "不支持的代理类型: {type}",
@@ -236,6 +243,8 @@ TRANSLATIONS = {
             "tab_history": "📜 历史记录",
             "tab_export": "📤 导出数据",
             "tab_backup": "💾 备份",
+            "config_forwarding_rules": "转发规则",
+            "config_button_actions": "消息附加按钮处理",
         },
 
         # ui.button.* - 按钮
@@ -272,6 +281,7 @@ TRANSLATIONS = {
             "toggle_task": "⏯ 暂停/恢复",
             "delete_task": "🗑 删除任务",
             "refresh_tasks": "🔄 刷新任务",
+            "save_button_action": "💾 保存按钮处理规则",
         },
 
         # ui.label.* - 标签
@@ -306,6 +316,11 @@ TRANSLATIONS = {
             "code": "验证码",
             "password": "两步验证密码",
             "error_info": "错误信息",
+            "current_button_action_rule": "📋 当前按钮处理规则",
+            "button_action_source_chats": "监听 Bot / 会话",
+            "button_action_texts": "按钮文字匹配项",
+            "button_action_match_mode": "文字匹配方式",
+            "button_action_delay": "点击延迟（秒）",
             # Stats tab
             "rule_stats": "📋 各规则统计",
             "daily_trend": "📈 每日转发趋势",
@@ -368,6 +383,8 @@ TRANSLATIONS = {
             "search_keyword": "输入关键词搜索消息内容、来源或发送者",
             "task_name": "例如：每日导出项目群",
             "export_subdirectory": "例如：groups 或 scheduled/project",
+            "button_action_source_chats": "@example_bot\n-100123456789",
+            "button_action_texts": "确认\n立即签到\n^领取.*奖励$",
         },
 
         # ui.info.* - 提示信息
@@ -394,6 +411,10 @@ TRANSLATIONS = {
             "schedule_minute": "每小时任务使用此分钟；每天/每周任务作为执行分钟",
             "schedule_hour": "每天/每周任务的执行小时",
             "schedule_weekday": "仅每周任务使用，0 表示星期一，6 表示星期日",
+            "button_action_source_chats": "仅监听这些 Bot、群组或频道，每行一个 ID 或用户名",
+            "button_action_texts": "每行一个匹配项；正则模式下每行是一条正则表达式",
+            "button_action_match_mode": "exact: 完全一致 | contains: 包含文字 | regex: 正则表达式",
+            "button_action_delay": "收到消息后等待再点击，范围 0–30 秒",
         },
 
         # ui.accordion.* - 折叠面板标题
@@ -411,6 +432,7 @@ TRANSLATIONS = {
         # ui.markdown.* - Markdown 文本
         "markdown": {
             "ignore_warning": "⚠️ 优先级高于过滤规则，匹配则直接忽略",
+            "button_action_guide": "仅在 **Telegram User 模式**下生效。收到指定会话的消息后，将点击第一个符合规则的回调按钮；每条消息最多处理一次。URL、支付、手机号、位置和 Mini App 按钮不会被点击。",
             "auth_guide": """### Telegram User 模式认证
 
 **首次使用或会话过期时，请按以下步骤操作：**
@@ -437,6 +459,7 @@ TRANSLATIONS = {
             "connecting": "🟡 连接中...",
             "error": "❌ 状态异常",
             "default_rule": "默认规则",
+            "default_button_action_rule": "默认按钮处理规则",
         },
 
         # ui.auth.* - 认证状态
@@ -519,6 +542,22 @@ TRANSLATIONS = {
             "enabled": "启用",
             "disabled": "禁用",
             "load_failed": "加载规则失败: {error}",
+            "button_action_user_mode": "消息附加按钮处理仅支持 Telegram User 模式",
+            "button_action_source_required": "启用规则时请至少配置一个监听 Bot 或会话",
+            "button_action_text_required": "启用规则时请至少配置一个按钮文字匹配项",
+            "button_action_regex_invalid": "无效的按钮文字正则表达式“{pattern}”: {error}",
+            "button_action_saved": "按钮处理规则“{rule}”已保存",
+            "button_action_saved_restarted": "{msg}，已重启 Bot",
+            "button_action_saved_restart_failed": "{msg}，但重启失败",
+            "button_action_saved_next_start": "{msg}，下次启动时生效",
+            "button_action_save_failed": "保存按钮处理规则失败: {error}",
+            "button_action_added": "已添加按钮处理规则“{name}”",
+            "button_action_add_failed": "添加按钮处理规则失败: {error}",
+            "button_action_deleted": "已删除按钮处理规则“{name}”",
+            "button_action_delete_failed": "删除按钮处理规则失败: {error}",
+            "button_action_delete_last": "至少需要保留一条按钮处理规则",
+            "button_action_renamed": "已将按钮处理规则“{old_name}”重命名为“{new_name}”",
+            "button_action_rename_failed": "重命名按钮处理规则失败: {error}",
         },
 
         # message.stats.* - 统计消息
@@ -688,6 +727,7 @@ TRANSLATIONS = {
         "unlimited": "不限",
         "unknown": "未知",
         "rule_name_template": "规则 {count}",
+        "button_action_rule_name_template": "按钮处理规则 {count}",
         "via_webui": " (通过 WebUI)",
         "via_webui_restart": " (通过 WebUI 重启)",
         "config_updated": " (配置已更新)",
