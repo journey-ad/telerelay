@@ -13,12 +13,6 @@ build/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
-frontend/vite.config.js
-frontend/vite.config.d.ts
-frontend-new/node_modules/
-frontend-new/dist/
-frontend-new/*.tsbuildinfo
-
 .history/
 
 # Configuration files
@@ -26,10 +20,7 @@ frontend-new/*.tsbuildinfo
 config/config.yaml
 
 # Telegram session files
-data/*.session
-data/*.session-journal
-data/*.db
-data/db/*.sqlite3
+data/
 
 # Log files
 logs/*.log

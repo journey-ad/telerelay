@@ -1,28 +1,41 @@
 {
-  "name": "telerelay-console",
+  "name": "telerelay-react-console",
   "private": true,
   "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc -b && vite build",
-    "typecheck": "vue-tsc -b",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/vue-query": "latest",
-    "echarts": "latest",
-    "naive-ui": "latest",
-    "pinia": "latest",
-    "vue": "latest",
-    "vue-i18n": "latest",
-    "vue-router": "latest"
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-switch": "^1.2.6",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@tanstack/react-query": "^5.83.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.18.2",
+    "recharts": "^3.1.0",
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
-    "@types/node": "latest",
-    "@vitejs/plugin-vue": "latest",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^24.1.0",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.7.0",
+    "prettier": "^3.6.2",
+    "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
-    "vite": "latest",
-    "vue-tsc": "latest"
+    "vite": "^7.0.6"
   }
 }
