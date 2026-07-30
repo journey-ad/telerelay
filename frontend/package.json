@@ -2,6 +2,11 @@
   "name": "telerelay-react-console",
   "private": true,
   "version": "2.0.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
