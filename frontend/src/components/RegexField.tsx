@@ -95,7 +95,7 @@ export function RegexField({
           type="button"
           disabled={validation.validating}
           className={cn(
-            'ml-2 text-[11px]',
+            'ml-2 text-[13px]',
             validation.validating
               ? 'text-slate-400'
               : validation.valid === true
@@ -126,7 +126,7 @@ export function RegexField({
           {validation.errors.map((error, index) => (
             <li
               key={`${index}:${error}`}
-              className="flex items-start gap-1.5 text-[11px] text-rose-700"
+              className="flex items-start gap-1.5 text-[13px] text-rose-700"
             >
               <AlertTriangle size={12} className="mt-px shrink-0" />
               {error}

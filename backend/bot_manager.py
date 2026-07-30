@@ -6,7 +6,7 @@ import asyncio
 import threading
 from concurrent.futures import Future
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from backend.button_actions import ButtonActionEngine
 from backend.client import TelegramClientManager
@@ -53,7 +53,6 @@ class BotManager:
         self.auth_manager = auth_manager
         self.session_name = Path(session_name) if session_name else Path("data/telegram_session")
         self.on_user_authenticated: Callable[[dict[str, Any]], None] | None = None
-        self.on_preview_message: Callable[[Any], Awaitable[None]] | None = None
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
         self.forwarders = []
@@ -161,9 +160,6 @@ class BotManager:
 
             # Mark as connected
             self.is_connected = True
-
-            if self.on_preview_message:
-                self.client_manager.add_message_handler(self.on_preview_message)
 
             # Create filter and forwarder for each enabled rule
             rules = self.config.get_enabled_rules()

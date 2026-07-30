@@ -84,7 +84,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
               key={String(chatId)}
               className={cn(
                 'inline-flex h-6.5 items-center gap-1 rounded border px-1.5',
-                'text-[12px]',
+                'text-xs',
                 unknown
                   ? 'border-slate-200 bg-slate-100 text-slate-500'
                   : 'border-blue-100 bg-blue-50 text-blue-700',
@@ -116,7 +116,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
             type="button"
             aria-label={t('chatInput.addChat')}
             className={cn(
-              'inline-flex h-7 items-center gap-1 rounded px-1.5 text-[12px]',
+              'inline-flex h-7 items-center gap-1 rounded px-1.5 text-xs',
               'text-slate-400 outline-none hover:bg-slate-100 hover:text-blue-600',
             )}
             onPointerDown={(event) => {
@@ -177,7 +177,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
                 type="button"
                 className={cn(
                   'flex w-full items-center gap-2 rounded px-2 py-1.5',
-                  'text-left text-[12px] text-blue-700 outline-none',
+                  'text-left text-xs text-blue-700 outline-none',
                   'hover:bg-blue-50 focus:bg-blue-50',
                 )}
                 onClick={addCustomChat}
@@ -189,7 +189,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
               </button>
             ) : null}
             {filtered.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[12px] text-slate-400">
+              <p className="px-2 py-3 text-center text-xs text-slate-400">
                 {t(
                   chats.isLoading
                     ? 'common.loadingWithDots'
@@ -209,13 +209,13 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
                     aria-pressed={selected}
                     className={cn(
                       'flex w-full items-center gap-2 rounded px-2 py-1.5',
-                      'text-left text-[12px] text-slate-600 transition-colors',
+                      'text-left text-xs text-slate-600 transition-colors',
                       'hover:bg-slate-50',
                     )}
                     onClick={() => toggleChat(chat.chat_id)}
                   >
                     <span className="min-w-0 flex-1 truncate">{chat.label}</span>
-                    <span className="shrink-0 text-[10px] text-slate-400">{chat.chat_id}</span>
+                    <span className="shrink-0 text-xs text-slate-400">{chat.chat_id}</span>
                     <span className="grid size-4 shrink-0 place-items-center text-blue-600">
                       {selected ? <Check size={13} strokeWidth={2.5} /> : null}
                     </span>

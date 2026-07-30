@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from backend.events import EventBus
 from backend.telegram_preview import TelegramPreviewError, TelegramPreviewService
 from telethon.tl import types
 
@@ -128,8 +127,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         manager = SimpleNamespace(get_client=lambda: self.client)
         bot = SimpleNamespace(is_connected=True, client_manager=manager)
         store = SimpleNamespace(active_account_id="work", data_dir=self.temp_dir.name)
-        self.events = EventBus()
-        self.service = TelegramPreviewService(bot, store, self.events)
+        self.service = TelegramPreviewService(bot, store)
 
     async def test_first_cache_key_creation_discards_plaintext_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -140,7 +138,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
             bot = SimpleNamespace(is_connected=True, client_manager=manager)
             store = SimpleNamespace(active_account_id="work", data_dir=temp_dir)
 
-            service = TelegramPreviewService(bot, store, self.events)
+            service = TelegramPreviewService(bot, store)
 
             self.assertFalse(service.cache_root.exists())
             self.assertEqual(len(service.cache_key_path.read_bytes()), service.CACHE_KEY_BYTES)
@@ -211,28 +209,6 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(raised.exception.code, "inactive_account")
-
-    async def test_live_event_contains_account_and_message_without_read_ack(self):
-        current = self.client.messages[101][-1]
-        event = SimpleNamespace(
-            message=current,
-            chat_id=101,
-            sender=current.sender,
-        )
-        queue = __import__("asyncio").Queue()
-        self.events._subscribers.add(queue)
-        self.addCleanup(self.events._subscribers.discard, queue)
-
-        await self.service.handle_new_message(event)
-
-        emitted = queue.get_nowait()
-        self.assertEqual(emitted["type"], "telegram-preview-message")
-        self.assertEqual(emitted["payload"]["account_id"], "work")
-        self.assertEqual(emitted["payload"]["message"]["id"], 3)
-        self.assertNotIn(
-            "send_read_acknowledge",
-            [name for name, _ in self.client.calls],
-        )
 
     async def test_inline_thumbnail_uses_embedded_telegram_bytes(self):
         media_message = self.client.messages[101][-1]

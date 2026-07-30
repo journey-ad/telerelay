@@ -62,7 +62,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: (session: SessionI
           >
             <KeyRound size={28} />
           </span>
-          <p className="mb-2 text-[11px] font-bold text-blue-200 uppercase">
+          <p className="mb-2 text-[13px] font-bold text-blue-200 uppercase">
             {t('login.heroEyebrow')}
           </p>
           <h1 className="mb-5 text-[38px] leading-[1.27] font-bold">{t('login.heroTitle')}</h1>
@@ -70,10 +70,10 @@ export function Login({ onAuthenticated }: { onAuthenticated: (session: SessionI
             {t('login.heroDescription')}
           </p>
         </div>
-        <div className="relative flex items-center gap-2.5 text-[11px] text-white/70">
+        <div className="relative flex items-center gap-2.5 text-[13px] text-white/70">
           <ShieldCheck size={17} />
           <span className="flex flex-col">
-            <strong className="mb-0.5 text-[12px] text-white">{t('login.localFirst')}</strong>
+            <strong className="mb-0.5 text-xs text-white">{t('login.localFirst')}</strong>
             {t('login.credentialsHint')}
           </span>
         </div>
@@ -88,7 +88,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: (session: SessionI
         <LanguageToggle className="absolute top-5 right-5 z-10" />
         <form className="w-full max-w-90" onSubmit={submit}>
           <div className="mb-7.5">
-            <p className="mb-2 text-[11px] font-bold text-blue-600 uppercase">
+            <p className="mb-2 text-[13px] font-bold text-blue-600 uppercase">
               {t('login.formEyebrow')}
             </p>
             <h2 className="mb-2 text-2xl font-bold text-slate-900">{t('login.title')}</h2>
@@ -138,7 +138,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: (session: SessionI
             <p
               className={cn(
                 'mb-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2.5',
-                'text-[11px] text-rose-700',
+                'text-[13px] text-rose-700',
               )}
             >
               {error}
@@ -147,7 +147,7 @@ export function Login({ onAuthenticated }: { onAuthenticated: (session: SessionI
           <Button className="mt-2 h-10.5 w-full" disabled={submitting} icon={ArrowRight}>
             {t(submitting ? 'login.verifying' : 'login.submit')}
           </Button>
-          <p className="mt-4 flex items-center justify-center gap-2 text-[10px] text-slate-400">
+          <p className="mt-4 flex items-center justify-center gap-2 text-xs text-slate-400">
             <span className="size-2 rounded-full bg-emerald-500 ring-3 ring-emerald-500/10" />
             {t('login.apiStatus')}
           </p>

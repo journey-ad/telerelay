@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 import { connectEvents } from '../api/events'
 import type { RelayEvent } from '../types'
 
-export function useEvents(onEvent?: (event: RelayEvent) => void) {
+interface UseEventsOptions {
+  maxRecent?: number
+  shouldStore?: (event: RelayEvent) => boolean
+}
+
+export function useEvents(onEvent?: (event: RelayEvent) => void, options: UseEventsOptions = {}) {
+  const { maxRecent = 0, shouldStore } = options
   const [connected, setConnected] = useState(false)
   const [recent, setRecent] = useState<RelayEvent[]>([])
 
@@ -24,14 +30,16 @@ export function useEvents(onEvent?: (event: RelayEvent) => void) {
         at: typeof envelope.at === 'string' ? envelope.at : new Date().toISOString(),
       }
       setConnected(true)
-      setRecent((current) => [event, ...current].slice(0, 80))
+      if (maxRecent > 0 && (!shouldStore || shouldStore(event))) {
+        setRecent((current) => [event, ...current].slice(0, maxRecent))
+      }
       onEvent?.(event)
     }
     connectEvents(handle, controller.signal).catch(() => {
       if (!controller.signal.aborted) setConnected(false)
     })
     return () => controller.abort()
-  }, [onEvent])
+  }, [maxRecent, onEvent, shouldStore])
 
   return { connected, recent }
 }

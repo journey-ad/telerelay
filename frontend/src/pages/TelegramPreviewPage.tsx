@@ -154,10 +154,10 @@ function Avatar({
       path={peerAvatarPath(accountId, peerId)}
       inlineSource={inlineSource}
       alt={t('telegramPreview.avatarAlt', { title })}
-      className={cn('grid shrink-0 place-items-center rounded-[6px] text-white', className)}
+      className={cn('grid shrink-0 place-items-center rounded-md text-white', className)}
       style={{ backgroundColor: hashColor(String(peerId ?? title)) }}
       fallback={
-        <span className="grid size-full place-items-center text-[12px] font-bold">
+        <span className="grid size-full place-items-center text-xs font-bold">
           {title ? initials(title) : kind ? <ChatGlyph kind={kind} /> : 'TG'}
         </span>
       }
@@ -198,10 +198,10 @@ function DialogRow({
       />
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-1.5">
-          <strong className="truncate text-[13px] text-slate-800">{dialog.title}</strong>
+          <strong className="truncate text-sm text-slate-700">{dialog.title}</strong>
           {dialog.verified ? <CheckCircle2 size={12} className="shrink-0 text-blue-500" /> : null}
         </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-slate-400">
+        <span className="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-400">
           {dialog.last_message?.outgoing ? (
             <span className="text-blue-500">{t('telegramPreview.you')}</span>
           ) : null}
@@ -211,15 +211,15 @@ function DialogRow({
         </span>
       </span>
       <span className="flex h-full min-w-8 flex-col items-end justify-center gap-1.5">
-        <time className="text-[10px] text-slate-400">
+        <time className="text-xs text-slate-400">
           {previewTime(dialog.last_message?.date, locale)}
         </time>
         {dialog.unread_count ? (
-          <span className="grid min-w-4.5 place-items-center rounded-full bg-blue-600 px-1 text-[10px] font-bold leading-4.5 text-white">
+          <span className="grid min-w-4.5 place-items-center rounded-full bg-blue-600 px-1 text-xs font-bold leading-4.5 text-white">
             {dialog.unread_count > 99 ? '99+' : dialog.unread_count}
           </span>
         ) : dialog.pinned ? (
-          <span className="text-[10px] text-slate-300">{t('telegramPreview.pinned')}</span>
+          <span className="text-xs text-slate-300">{t('telegramPreview.pinned')}</span>
         ) : null}
       </span>
     </button>
@@ -295,10 +295,10 @@ function MediaPreview({
         <File size={17} />
       </span>
       <span className="min-w-0">
-        <strong className="block truncate text-[12px] text-slate-700">
+        <strong className="block truncate text-xs text-slate-700">
           {media.file_name || media.type}
         </strong>
-        <small className="mt-0.5 block text-[10px] text-slate-400">
+        <small className="mt-0.5 block text-xs text-slate-400">
           {[media.type, fileSize(media.size)].filter(Boolean).join(' · ')}
         </small>
       </span>
@@ -325,14 +325,14 @@ function PollPreview({
   return (
     <div className="w-80 max-w-full rounded-[5px] border border-slate-200 bg-white/80 p-3">
       <div className="flex items-start justify-between gap-3">
-        <strong className="min-w-0 text-[13px] leading-4.5 text-slate-800">{poll.question}</strong>
+        <strong className="min-w-0 text-[13px] leading-4.5 text-slate-700">{poll.question}</strong>
         {poll.closed ? (
-          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500">
+          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
             {t('telegramPreview.poll.closed')}
           </span>
         ) : null}
       </div>
-      <span className="mt-1 block text-[10px] text-slate-400">
+      <span className="mt-1 block text-xs text-slate-400">
         {t(
           poll.quiz
             ? 'telegramPreview.poll.quiz'
@@ -348,7 +348,7 @@ function PollPreview({
             : 0
           return (
             <div key={`${index}-${option.text}`}>
-              <div className="flex items-start justify-between gap-3 text-[11px]">
+              <div className="flex items-start justify-between gap-3 text-[13px]">
                 <span
                   className={cn(
                     'min-w-0 break-words',
@@ -364,7 +364,7 @@ function PollPreview({
                   {option.correct ? t('telegramPreview.poll.correct') : ''}
                 </span>
                 {poll.results_visible ? (
-                  <span className="shrink-0 text-[10px] text-slate-400">
+                  <span className="shrink-0 text-xs text-slate-400">
                     {t('telegramPreview.poll.votes', {
                       percentage,
                       value: formatNumber(option.voters),
@@ -391,7 +391,7 @@ function PollPreview({
           )
         })}
       </div>
-      <div className="mt-2.5 border-t border-slate-100 pt-2 text-[10px] text-slate-400">
+      <div className="mt-2.5 border-t border-slate-100 pt-2 text-xs text-slate-400">
         {poll.results_visible
           ? t('telegramPreview.poll.participants', {
               value: formatNumber(poll.total_voters),
@@ -403,7 +403,7 @@ function PollPreview({
             : t('telegramPreview.poll.resultsHidden')}
       </div>
       {poll.solution ? (
-        <p className="mt-2 rounded bg-emerald-50 p-2 text-[10px] leading-4 text-emerald-700">
+        <p className="mt-2 rounded bg-emerald-50 p-2 text-xs leading-4 text-emerald-700">
           {poll.solution}
         </p>
       ) : null}
@@ -456,7 +456,7 @@ function MessageBubble({
       <>
         {showDay ? <DayDivider value={message.date} /> : null}
         <div id={`message-${message.id}`} className="my-2 flex justify-center">
-          <span className="rounded bg-slate-200/80 px-2.5 py-1 text-[10px] text-slate-500">
+          <span className="rounded bg-slate-200/80 px-2.5 py-1 text-xs text-slate-500">
             {message.text || t('telegramPreview.serviceUpdated')}
           </span>
         </div>
@@ -481,17 +481,17 @@ function MessageBubble({
         ) : null}
         <div
           className={cn(
-            'min-w-0 max-w-155 rounded-[6px] border px-2.5 py-2 shadow-xs',
+            'min-w-0 max-w-155 rounded-md border px-2.5 py-2 shadow-xs',
             outgoing
-              ? 'border-emerald-200 bg-emerald-50 text-slate-800'
-              : 'border-slate-200 bg-white text-slate-800',
+              ? 'border-emerald-200 bg-emerald-50 text-slate-700'
+              : 'border-slate-200 bg-white text-slate-700',
           )}
         >
           {!outgoing && message.sender.name ? (
-            <strong className="mb-1 block text-[11px] text-blue-600">{message.sender.name}</strong>
+            <strong className="mb-1 block text-[13px] text-blue-600">{message.sender.name}</strong>
           ) : null}
           {message.forward ? (
-            <div className="mb-1.5 border-l-2 border-blue-400 pl-2 text-[10px] text-blue-600">
+            <div className="mb-1.5 border-l-2 border-blue-400 pl-2 text-xs text-blue-600">
               {t('telegramPreview.forwardedFrom', { name: message.forward.from_name })}
             </div>
           ) : null}
@@ -502,18 +502,20 @@ function MessageBubble({
             >
               <span className="min-w-0">
                 {message.reply_to.sender_name ? (
-                  <strong className="block truncate text-[10px] text-blue-600">
+                  <strong className="block truncate text-xs text-blue-600">
                     {message.reply_to.sender_name}
                   </strong>
                 ) : null}
-                <span className="block truncate text-[10px] text-slate-500">
+                <span className="block truncate text-xs text-slate-500">
                   {message.reply_to.text}
                 </span>
               </span>
               {loadingReplyId === message.reply_to.message_id ? (
                 <LoaderCircle size={12} className="animate-spin text-blue-500" />
               ) : unavailableReplyId === message.reply_to.message_id ? (
-                <span className="text-[9px] text-rose-500">{t('telegramPreview.unavailable')}</span>
+                <span className="text-[11px] text-rose-500">
+                  {t('telegramPreview.unavailable')}
+                </span>
               ) : null}
             </button>
           ) : null}
@@ -538,7 +540,7 @@ function MessageBubble({
             </div>
           ) : null}
           {textMessage ? (
-            <p className="m-0 whitespace-pre-wrap break-words text-[13px] leading-4.5">
+            <p className="m-0 whitespace-pre-wrap wrap-break-word text-[13px] leading-4.5">
               {textMessage}
             </p>
           ) : null}
@@ -548,7 +550,7 @@ function MessageBubble({
                 <span
                   key={reaction.label}
                   className={cn(
-                    'rounded-full border px-1.5 py-0.5 text-[10px]',
+                    'rounded-full border px-1.5 py-0.5 text-xs',
                     reaction.chosen
                       ? 'border-blue-200 bg-blue-50 text-blue-700'
                       : 'border-slate-200 bg-white/70 text-slate-500',
@@ -559,7 +561,7 @@ function MessageBubble({
               ))}
             </div>
           ) : null}
-          <span className="mt-1 flex items-center justify-end gap-1.5 text-[9px] text-slate-400">
+          <span className="mt-1 flex items-center justify-end gap-1.5 text-[11px] text-slate-400">
             {message.edited_at ? <span>{t('telegramPreview.edited')}</span> : null}
             {message.views ? (
               <span>{t('telegramPreview.views', { value: formatNumber(message.views) })}</span>
@@ -576,7 +578,7 @@ function DayDivider({ value }: { value?: string | null }) {
   const { t, i18n } = useTranslation()
   const locale = i18n.resolvedLanguage ?? 'zh-CN'
   return (
-    <div className="flex items-center gap-3 py-1.5 text-[10px] text-slate-400">
+    <div className="flex items-center gap-3 py-1.5 text-xs text-slate-400">
       <span className="h-px flex-1 bg-slate-200" />
       <time>
         {messageDay(
@@ -594,7 +596,7 @@ function DayDivider({ value }: { value?: string | null }) {
 
 function Loading({ label }: { label: string }) {
   return (
-    <div className="flex min-h-28 items-center justify-center gap-2 text-[11px] text-slate-400">
+    <div className="flex min-h-28 items-center justify-center gap-2 text-[13px] text-slate-400">
       <LoaderCircle size={15} className="animate-spin" />
       {label}
     </div>
@@ -604,7 +606,7 @@ function Loading({ label }: { label: string }) {
 function ToolButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
     <button
-      className="h-8 rounded-[5px] border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700"
+      className="h-8 rounded-[5px] border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700"
       onClick={onClick}
     >
       {children}
@@ -729,6 +731,10 @@ export function TelegramPreviewPage() {
   function selectDialog(dialog: TelegramPreviewDialog) {
     replyRequestId.current += 1
     stickToBottom.current = true
+    void queryClient.invalidateQueries({
+      queryKey: ['telegram-preview', 'messages', accountId, dialog.id, ''],
+      exact: true,
+    })
     setSelected(dialog)
     setSearchInput('')
     setMessageQuery('')
@@ -801,7 +807,7 @@ export function TelegramPreviewPage() {
       <section
         className={cn(
           'grid min-h-0 flex-1 grid-cols-[310px_minmax(0,1fr)] overflow-hidden',
-          'rounded-[6px] border border-slate-200 bg-white shadow-sm',
+          'rounded-md border border-slate-200 bg-white shadow-sm',
           'max-md:grid-cols-1',
         )}
       >
@@ -817,7 +823,7 @@ export function TelegramPreviewPage() {
                 <button
                   key={value}
                   className={cn(
-                    'flex h-8 items-center justify-center gap-1.5 rounded-[4px] border-0 text-[11px] font-semibold',
+                    'flex h-8 items-center justify-center gap-1.5 rounded-[4px] border-0 text-[13px] font-semibold',
                     folder === value
                       ? 'bg-white text-slate-700 shadow-sm'
                       : 'bg-transparent text-slate-400',
@@ -835,7 +841,7 @@ export function TelegramPreviewPage() {
             <label className="mt-2.5 flex h-8.5 items-center gap-2 rounded-[5px] border border-slate-200 px-2.5 text-slate-400 focus-within:border-blue-300">
               <Search size={14} />
               <input
-                className="min-w-0 flex-1 border-0 bg-transparent text-[11px] text-slate-700 outline-none"
+                className="min-w-0 flex-1 border-0 bg-transparent text-[13px] text-slate-700 outline-none"
                 value={dialogFilter}
                 onChange={(event) => setDialogFilter(event.target.value)}
                 placeholder={t('telegramPreview.filterChats')}
@@ -891,7 +897,7 @@ export function TelegramPreviewPage() {
           </div>
           {dialogs.hasNextPage ? (
             <button
-              className="h-10 shrink-0 border-0 border-t border-slate-200 bg-white text-[11px] text-blue-600 hover:bg-blue-50"
+              className="h-10 shrink-0 border-0 border-t border-slate-200 bg-white text-[13px] text-blue-600 hover:bg-blue-50"
               onClick={() => void dialogs.fetchNextPage()}
               disabled={dialogs.isFetchingNextPage}
             >
@@ -928,10 +934,10 @@ export function TelegramPreviewPage() {
                   className="size-9"
                 />
                 <div className="min-w-0 flex-1">
-                  <strong className="block truncate text-[13px] text-slate-800">
+                  <strong className="block truncate text-sm text-slate-700">
                     {selected.title}
                   </strong>
-                  <span className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
+                  <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
                     <ChatGlyph kind={selected.kind} size={11} />
                     {t(`telegramPreview.kinds.${selected.kind}`)}
                     {selected.username ? ` · @${selected.username}` : ''}
@@ -943,7 +949,7 @@ export function TelegramPreviewPage() {
                 >
                   <Search size={13} className="shrink-0 text-slate-400" />
                   <input
-                    className="min-w-0 flex-1 border-0 bg-transparent text-[11px] text-slate-700 outline-none"
+                    className="min-w-0 flex-1 border-0 bg-transparent text-[13px] text-slate-700 outline-none"
                     value={searchInput}
                     onChange={(event) => setSearchInput(event.target.value)}
                     placeholder={t('telegramPreview.searchCurrent')}
@@ -965,7 +971,7 @@ export function TelegramPreviewPage() {
                 </form>
               </header>
               {messageQuery ? (
-                <div className="flex h-8 shrink-0 items-center justify-between border-b border-blue-100 bg-blue-50 px-3.5 text-[10px] text-blue-700">
+                <div className="flex h-8 shrink-0 items-center justify-between border-b border-blue-100 bg-blue-50 px-3.5 text-xs text-blue-700">
                   <span>{t('telegramPreview.searchResults', { query: messageQuery })}</span>
                   <span>{t('telegramPreview.loadedCount', { count: allMessages.length })}</span>
                 </div>
@@ -1063,10 +1069,10 @@ export function TelegramPreviewPage() {
           ) : (
             <div className="grid h-full place-items-center p-8">
               <div className="max-w-72 text-center">
-                <span className="mx-auto grid size-12 place-items-center rounded-[6px] border border-slate-200 bg-white text-blue-600 shadow-sm">
+                <span className="mx-auto grid size-12 place-items-center rounded-md border border-slate-200 bg-white text-blue-600 shadow-sm">
                   <MessagesSquare size={24} />
                 </span>
-                <strong className="mt-4 block text-[14px] text-slate-700">
+                <strong className="mt-4 block text-sm text-slate-700">
                   {t('telegramPreview.selectChat')}
                 </strong>
               </div>

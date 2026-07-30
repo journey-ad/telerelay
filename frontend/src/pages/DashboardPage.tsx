@@ -17,7 +17,7 @@ import {
   TimerReset,
   Trophy,
 } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Area,
@@ -34,7 +34,7 @@ import {
 import { json, request } from '../api/client'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
-import type { BotStatus, Stats } from '../types'
+import type { BotStatus, RelayEvent, Stats } from '../types'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 
@@ -59,6 +59,50 @@ const chartTooltipStyle = {
   borderRadius: 6,
   boxShadow: '0 12px 32px rgba(22, 63, 116, .12)',
   fontSize: 11,
+}
+const liveEventLimit = 12
+const eventTypeKeys = {
+  ready: 'dashboard.events.types.ready',
+  log: 'dashboard.events.types.log',
+  bot: 'dashboard.events.types.bot',
+  stats: 'dashboard.events.types.stats',
+  'telegram-account': 'dashboard.events.types.telegramAccount',
+  'telegram-auth': 'dashboard.events.types.telegramAuth',
+} as const
+const eventActionKeys = {
+  create: 'dashboard.events.actions.create',
+  activate: 'dashboard.events.actions.activate',
+  delete: 'dashboard.events.actions.delete',
+  start: 'dashboard.events.actions.start',
+  stop: 'dashboard.events.actions.stop',
+  restart: 'dashboard.events.actions.restart',
+  reset: 'dashboard.events.actions.reset',
+  phone: 'dashboard.events.actions.phone',
+  code: 'dashboard.events.actions.code',
+  password: 'dashboard.events.actions.password',
+} as const
+const dashboardEventTypes = new Set(['bot', 'stats', 'telegram-account', 'telegram-auth'])
+
+function eventTypeLabel(type: string, t: TFunction): string {
+  const key = eventTypeKeys[type as keyof typeof eventTypeKeys]
+  return key ? t(key) : t('dashboard.events.types.other')
+}
+
+function eventDetail(event: RelayEvent, t: TFunction): string {
+  const message = event.payload.message
+  if (['string', 'number', 'boolean'].includes(typeof message)) return String(message)
+
+  const action = event.payload.action ?? event.payload.submitted
+  if (typeof action === 'string') {
+    const key = eventActionKeys[action as keyof typeof eventActionKeys]
+    return key ? t(key) : action
+  }
+
+  return t('dashboard.statusUpdate')
+}
+
+function shouldStoreDashboardEvent(event: RelayEvent): boolean {
+  return dashboardEventTypes.has(event.type)
 }
 
 function localDateKey(date: Date): string {
@@ -151,18 +195,16 @@ export function DashboardPage() {
   const statusQuery = useQuery({
     queryKey: ['bot-status'],
     queryFn: () => request<BotStatus>('/api/v1/bot/status'),
-    refetchInterval: 4000,
   })
   const statsQuery = useQuery({
     queryKey: ['stats', reportPeriod],
     queryFn: () => request<Stats>(`/api/v1/stats?date_limit=${reportPeriod}`),
     refetchInterval: 15_000,
   })
-  const refreshLiveData = useCallback(() => {
-    void client.invalidateQueries({ queryKey: ['bot-status'] })
-    void client.invalidateQueries({ queryKey: ['stats'] })
-  }, [client])
-  const { recent, connected } = useEvents(refreshLiveData)
+  const { recent, connected } = useEvents(undefined, {
+    maxRecent: liveEventLimit,
+    shouldStore: shouldStoreDashboardEvent,
+  })
   const control = useMutation({
     mutationFn: (action: 'start' | 'stop' | 'restart') =>
       request(`/api/v1/bot/${action}`, json('POST')),
@@ -257,7 +299,7 @@ export function DashboardPage() {
         actions={
           <div
             className={cn(
-              'flex h-8.5 items-center gap-2 rounded-[5px] border px-3 text-[12px]',
+              'flex h-8.5 items-center gap-2 rounded-[5px] border px-3 text-xs',
               status.is_connected
                 ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
                 : 'border-slate-200 bg-white text-slate-500',
@@ -295,13 +337,13 @@ export function DashboardPage() {
             >
               <Icon size={19} />
             </div>
-            <span className="text-[12px] text-slate-500">{label}</span>
-            <strong className="font-display my-0.5 text-[23px] text-slate-800">
+            <span className="text-xs text-slate-500">{label}</span>
+            <strong className="font-display my-0.5 text-[23px] text-slate-700">
               {formatNumber(value)}
             </strong>
             <small
               className={cn(
-                'flex items-center gap-0.5 text-[10px]',
+                'flex items-center gap-0.5 text-xs',
                 trend === undefined
                   ? 'text-slate-400'
                   : trend > 0
@@ -336,7 +378,7 @@ export function DashboardPage() {
                   type="button"
                   key={option.value}
                   className={cn(
-                    'h-6.5 min-w-10 rounded border-0 px-2 text-[10px] font-semibold',
+                    'h-6.5 min-w-10 rounded border-0 px-2 text-xs font-semibold',
                     option.value === reportPeriod
                       ? 'bg-white text-blue-700 shadow-sm'
                       : 'bg-transparent text-slate-400 hover:text-slate-600',
@@ -415,7 +457,7 @@ export function DashboardPage() {
               detail={t('dashboard.noTrendDetail')}
             />
           )}
-          <div className="flex flex-wrap gap-4 px-3 pt-2 text-[11px] text-slate-500">
+          <div className="flex flex-wrap gap-4 px-3 pt-2 text-[13px] text-slate-500">
             <span className="flex items-center gap-1.5 before:h-0.5 before:w-4 before:bg-blue-600">
               {t('dashboard.forwarded')}
             </span>
@@ -444,18 +486,18 @@ export function DashboardPage() {
                 <Gauge size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[10px] text-slate-400">
+                <small className="text-xs text-slate-400">
                   {allTime
                     ? t('dashboard.cumulativeRange')
                     : t('dashboard.comparedToPrevious', { value: '' }).trim()}
                 </small>
-                <strong className="mt-0.5 text-[12px] text-slate-700">
+                <strong className="mt-0.5 text-xs text-slate-700">
                   {allTime ? t('dashboard.totalTraffic') : t('dashboard.totalTrafficChange')}
                 </strong>
               </span>
               <b
                 className={cn(
-                  'text-[14px]',
+                  'text-sm',
                   report.change === undefined
                     ? 'text-slate-700'
                     : report.change > 0
@@ -475,12 +517,12 @@ export function DashboardPage() {
                 <Activity size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[10px] text-slate-400">{t('dashboard.dailyAverage')}</small>
-                <strong className="mt-0.5 text-[12px] text-slate-700">
+                <small className="text-xs text-slate-400">{t('dashboard.dailyAverage')}</small>
+                <strong className="mt-0.5 text-xs text-slate-700">
                   {t('dashboard.processingSpeed')}
                 </strong>
               </span>
-              <b className="text-[14px] text-slate-700">
+              <b className="text-sm text-slate-700">
                 {formatNumber(Math.round(report.dailyAverage))}
               </b>
             </div>
@@ -489,30 +531,30 @@ export function DashboardPage() {
                 <Trophy size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[10px] text-slate-400">{t('dashboard.peakDate')}</small>
-                <strong className="mt-0.5 text-[12px] text-slate-700">
+                <small className="text-xs text-slate-400">{t('dashboard.peakDate')}</small>
+                <strong className="mt-0.5 text-xs text-slate-700">
                   {report.peak ? formatReportDate(report.peak.date, locale) : '-'}
                 </strong>
               </span>
-              <b className="text-[14px] text-slate-700">{formatNumber(report.peak?.total)}</b>
+              <b className="text-sm text-slate-700">{formatNumber(report.peak?.total)}</b>
             </div>
             <div className="grid grid-cols-[32px_1fr_auto] items-center gap-3 py-3">
               <span className="grid size-8 place-items-center rounded-[5px] bg-emerald-50 text-emerald-600">
                 <CalendarDays size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[10px] text-slate-400">{t('dashboard.activeDays')}</small>
-                <strong className="mt-0.5 text-[12px] text-slate-700">
+                <small className="text-xs text-slate-400">{t('dashboard.activeDays')}</small>
+                <strong className="mt-0.5 text-xs text-slate-700">
                   {t('dashboard.periodCoverage')}
                 </strong>
               </span>
-              <b className="text-[14px] text-slate-700">
+              <b className="text-sm text-slate-700">
                 {report.activeDays}/{report.durationDays}
               </b>
             </div>
           </div>
           <div className="mt-3 border-t border-slate-100 pt-3">
-            <div className="mb-2 flex justify-between text-[10px] text-slate-400">
+            <div className="mb-2 flex justify-between text-xs text-slate-400">
               <span>{t('dashboard.dailyIntensity')}</span>
               <span>{t('dashboard.lowToHigh')}</span>
             </div>
@@ -571,12 +613,10 @@ export function DashboardPage() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <strong className="font-display text-[20px] text-slate-800">
+                  <strong className="font-display text-[20px] text-slate-700">
                     {formatPercent(report.forwardRate)}
                   </strong>
-                  <small className="text-[10px] text-slate-400">
-                    {t('dashboard.forwardingRate')}
-                  </small>
+                  <small className="text-xs text-slate-400">{t('dashboard.forwardingRate')}</small>
                 </div>
               </div>
               <div className="divide-y divide-slate-100">
@@ -585,7 +625,7 @@ export function DashboardPage() {
                     className="flex items-center justify-between py-3 first:pt-0"
                     key={item.name}
                   >
-                    <span className="flex items-center gap-2 text-[11px] text-slate-500">
+                    <span className="flex items-center gap-2 text-[13px] text-slate-500">
                       <i className="size-2 rounded-sm" style={{ backgroundColor: item.color }} />
                       {item.name}
                     </span>
@@ -595,7 +635,7 @@ export function DashboardPage() {
                   </div>
                 ))}
                 <div className="flex items-center justify-between py-3">
-                  <span className="text-[11px] text-slate-500">
+                  <span className="text-[13px] text-slate-500">
                     {t('dashboard.cumulativeSamples')}
                   </span>
                   <strong className="text-[13px] text-slate-700">
@@ -638,7 +678,7 @@ export function DashboardPage() {
                 <strong className="mb-1 block text-[13px] text-slate-700">
                   {t(status.is_running ? 'dashboard.relayRunning' : 'dashboard.relayStopped')}
                 </strong>
-                <p className="m-0 text-[11px] leading-4 text-slate-500">
+                <p className="m-0 text-[13px] leading-4 text-slate-500">
                   {status.is_connected
                     ? t('dashboard.clientConnected')
                     : t('dashboard.clientWaiting')}
@@ -678,7 +718,7 @@ export function DashboardPage() {
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                'text-[11px] text-rose-700',
+                'text-[13px] text-rose-700',
               )}
             >
               {messageFrom(control.error)}
@@ -686,26 +726,26 @@ export function DashboardPage() {
           ) : null}
           <div className="mt-4 grid grid-cols-3 divide-x divide-slate-100 border-t border-slate-100 pt-4 max-sm:grid-cols-1 max-sm:divide-x-0 max-sm:divide-y">
             <div className="px-4 first:pl-0 max-sm:px-0 max-sm:py-2">
-              <small className="block text-[10px] text-slate-400">
+              <small className="block text-xs text-slate-400">
                 {t('dashboard.runtimeForwarded')}
               </small>
-              <strong className="mt-1 block text-[16px] text-slate-700">
+              <strong className="mt-1 block text-base text-slate-700">
                 {formatNumber(runtimeStats.forwarded)}
               </strong>
             </div>
             <div className="px-4 max-sm:px-0 max-sm:py-2">
-              <small className="block text-[10px] text-slate-400">
+              <small className="block text-xs text-slate-400">
                 {t('dashboard.runtimeFiltered')}
               </small>
-              <strong className="mt-1 block text-[16px] text-slate-700">
+              <strong className="mt-1 block text-base text-slate-700">
                 {formatNumber(runtimeStats.filtered)}
               </strong>
             </div>
             <div className="px-4 max-sm:px-0 max-sm:py-2">
-              <small className="block text-[10px] text-slate-400">
+              <small className="block text-xs text-slate-400">
                 {t('dashboard.persistentQueue')}
               </small>
-              <strong className="mt-1 block text-[16px] text-blue-600">
+              <strong className="mt-1 block text-base text-blue-600">
                 {formatNumber(activeQueue)}
               </strong>
             </div>
@@ -726,7 +766,7 @@ export function DashboardPage() {
           {rankedRules.length ? (
             <div className="overflow-x-auto">
               <div className="min-w-135">
-                <div className="grid grid-cols-[28px_minmax(130px,1fr)_minmax(160px,1.25fr)_70px_70px] gap-3 border-b border-slate-100 pb-2 text-[10px] font-bold text-slate-400 uppercase">
+                <div className="grid grid-cols-[28px_minmax(130px,1fr)_minmax(160px,1.25fr)_70px_70px] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
                   <span>#</span>
                   <span>{t('dashboard.rule')}</span>
                   <span>{t('dashboard.processed')}</span>
@@ -742,17 +782,17 @@ export function DashboardPage() {
                     >
                       <span
                         className={cn(
-                          'grid size-5 place-items-center rounded text-[10px] font-bold',
+                          'grid size-5 place-items-center rounded text-xs font-bold',
                           index < 3 ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500',
                         )}
                       >
                         {index + 1}
                       </span>
                       <div className="min-w-0">
-                        <strong className="block truncate text-[12px] text-slate-700">
+                        <strong className="block truncate text-xs text-slate-700">
                           {rule.rule_name}
                         </strong>
-                        <small className="mt-0.5 block text-[10px] text-slate-400">
+                        <small className="mt-0.5 block text-xs text-slate-400">
                           {t('dashboard.ruleBreakdown', {
                             forwarded: formatNumber(rule.forwarded),
                             filtered: formatNumber(rule.filtered),
@@ -765,10 +805,10 @@ export function DashboardPage() {
                           style={{ width: `${(rule.total / maxRuleTotal) * 100}%` }}
                         />
                       </div>
-                      <strong className="text-right text-[11px] text-slate-600">
+                      <strong className="text-right text-[13px] text-slate-600">
                         {formatPercent(rate)}
                       </strong>
-                      <strong className="text-right text-[12px] text-slate-700">
+                      <strong className="text-right text-xs text-slate-700">
                         {formatNumber(rule.total)}
                       </strong>
                     </div>
@@ -789,25 +829,25 @@ export function DashboardPage() {
             </span>
           }
         >
-          <div className="flex flex-col gap-3">
-            {recent.slice(0, 7).map((event) => (
+          <div className="flex max-h-72 flex-col gap-3 overflow-y-auto overscroll-contain pr-1">
+            {recent.map((event, index) => (
               <div
                 className={cn(
                   'grid grid-cols-[7px_1fr_auto] items-start gap-2 border-b',
                   'border-slate-100 pb-2.5 last:border-0',
                 )}
-                key={`${event.at}-${event.type}`}
+                key={`${event.at}-${event.type}-${index}`}
               >
                 <span className="mt-1 size-2 rounded-full border-2 border-blue-100 bg-blue-400" />
                 <div className="min-w-0">
-                  <strong className="text-[11px] text-slate-600 uppercase">{event.type}</strong>
-                  <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                    {String(
-                      event.payload.message ?? event.payload.action ?? t('dashboard.statusUpdate'),
-                    )}
+                  <strong className="text-[13px] text-slate-600 uppercase">
+                    {eventTypeLabel(event.type, t)}
+                  </strong>
+                  <p className="mt-0.5 truncate text-[13px] text-slate-500">
+                    {eventDetail(event, t)}
                   </p>
                 </div>
-                <time className="text-[10px] text-slate-400">
+                <time className="text-xs text-slate-400">
                   {new Date(event.at).toLocaleTimeString(locale, {
                     hour12: false,
                     hour: '2-digit',

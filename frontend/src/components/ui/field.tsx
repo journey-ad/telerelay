@@ -2,7 +2,7 @@ import { cn } from '../../utils/cn'
 
 export const fieldClass = cn(
   'flex min-w-0 flex-col gap-1.5',
-  '[&>span]:text-[11px] [&>span]:font-semibold [&>span]:text-slate-500',
+  '[&>span]:text-[13px] [&>span]:font-semibold [&>span]:text-slate-500',
   '[&>input]:h-9.5 [&>input]:w-full [&>input]:rounded-[5px] [&>input]:border',
   '[&>input]:border-slate-200 [&>input]:bg-white [&>input]:px-2.5',
   '[&>input]:text-[13px] [&>input]:text-slate-700 [&>input]:outline-none',
@@ -25,8 +25,8 @@ export const tableClass = cn(
   'w-full border-collapse',
   '[&_th]:h-10 [&_th]:whitespace-nowrap [&_th]:border-b [&_th]:border-slate-200',
   '[&_th]:bg-slate-50 [&_th]:px-4 [&_th]:text-left',
-  '[&_th]:text-[10px] [&_th]:font-bold [&_th]:text-slate-400 [&_th]:uppercase',
+  '[&_th]:text-xs [&_th]:font-bold [&_th]:text-slate-400 [&_th]:uppercase',
   '[&_td]:max-w-70 [&_td]:border-b [&_td]:border-slate-100 [&_td]:px-4 [&_td]:py-3',
-  '[&_td]:align-middle [&_td]:text-[12px] [&_td]:text-slate-600',
+  '[&_td]:align-middle [&_td]:text-xs [&_td]:text-slate-600',
   '[&_tbody_tr:last-child_td]:border-b-0 [&_tbody_tr:hover]:bg-slate-50/60',
 )

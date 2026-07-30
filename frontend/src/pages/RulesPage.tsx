@@ -173,7 +173,7 @@ export function RulesPage() {
             placeholder={t('rules.search')}
           />
         </div>
-        <span className="text-[11px] text-slate-400">
+        <span className="text-[13px] text-slate-400">
           {t('rules.summary', {
             enabled: rulesQuery.data?.filter((rule) => rule.enabled).length ?? 0,
             total: rulesQuery.data?.length ?? 0,
@@ -207,8 +207,8 @@ export function RulesPage() {
                         <Route size={17} />
                       </span>
                       <span className="flex min-w-0 flex-col">
-                        <strong className="text-[12px] text-slate-700">{rule.name}</strong>
-                        <small className="mt-1 text-[10px] text-slate-400">
+                        <strong className="text-xs text-slate-700">{rule.name}</strong>
+                        <small className="mt-1 text-xs text-slate-400">
                           {t('common.delaySeconds', { seconds: rule.forwarding.delay })}
                         </small>
                       </span>
@@ -223,7 +223,7 @@ export function RulesPage() {
                     <span className="block max-w-48 truncate">
                       {rule.source_chats.join(', ') || '-'}
                     </span>
-                    <small className="mt-1 block text-[10px] text-slate-400">
+                    <small className="mt-1 block text-xs text-slate-400">
                       {t('common.chatCount', { count: rule.source_chats.length })}
                     </small>
                   </td>
@@ -231,7 +231,7 @@ export function RulesPage() {
                     <span className="block max-w-48 truncate">
                       {rule.target_chats.join(', ') || '-'}
                     </span>
-                    <small className="mt-1 block text-[10px] text-slate-400">
+                    <small className="mt-1 block text-xs text-slate-400">
                       {t('common.chatCount', { count: rule.target_chats.length })}
                     </small>
                   </td>
@@ -239,7 +239,7 @@ export function RulesPage() {
                     <Badge>
                       {t(rule.filters.mode === 'whitelist' ? 'rules.allowlist' : 'rules.blocklist')}
                     </Badge>
-                    <small className="mt-1 block text-[10px] text-slate-400">
+                    <small className="mt-1 block text-xs text-slate-400">
                       {t('common.conditionCount', {
                         count: rule.filters.keywords.length + rule.filters.regex_patterns.length,
                       })}
@@ -361,7 +361,7 @@ export function RulesPage() {
             </label>
           </div>
           <div className="mt-5 border-t border-slate-100 pt-4">
-            <h3 className="mb-3 flex items-center gap-2 text-[12px] font-bold text-slate-600">
+            <h3 className="mb-3 flex items-center gap-2 text-xs font-bold text-slate-600">
               <Braces size={16} />
               {t('rules.behavior')}
             </h3>
@@ -402,7 +402,7 @@ export function RulesPage() {
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                'text-[11px] text-rose-700',
+                'text-[13px] text-rose-700',
               )}
             >
               {messageFrom(save.error)}

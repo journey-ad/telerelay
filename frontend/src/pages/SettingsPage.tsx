@@ -129,7 +129,7 @@ export function SettingsPage() {
                   <strong className="text-[13px] text-slate-700">
                     {t(authSuccess ? 'settings.authSuccess' : 'settings.authRequired')}
                   </strong>
-                  <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  <p className="mt-1 text-[13px] leading-4 text-slate-500">
                     {auth.data?.user_info ||
                       auth.data?.error ||
                       t('settings.currentMode', { mode: config.data?.runtime.session_type ?? '-' })}
@@ -178,7 +178,7 @@ export function SettingsPage() {
                   <strong className="text-[13px] text-slate-700">
                     {t('settings.backupTitle')}
                   </strong>
-                  <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  <p className="mt-1 text-[13px] leading-4 text-slate-500">
                     {t('settings.backupDetail')}
                   </p>
                 </div>
@@ -213,11 +213,11 @@ export function SettingsPage() {
         </TabsContent>
         <TabsContent value="config" className="outline-none">
           <Panel title={t('settings.advanced')} meta={<span>{t('settings.advancedMeta')}</span>}>
-            <p className="text-[12px] leading-4 text-slate-500">{t('settings.advancedDetail')}</p>
+            <p className="text-xs leading-4 text-slate-500">{t('settings.advancedDetail')}</p>
             <textarea
               className={cn(
                 'min-h-127.5 w-full resize-y rounded-[5px] border border-slate-700',
-                'bg-slate-900 p-3 font-mono text-[12px] leading-4 text-blue-100 outline-none',
+                'bg-slate-900 p-3 font-mono text-xs leading-4 text-blue-100 outline-none',
                 'focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10',
               )}
               value={rawConfig}
@@ -229,7 +229,7 @@ export function SettingsPage() {
               <p
                 className={cn(
                   'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                  'text-[11px] text-rose-700',
+                  'text-[13px] text-rose-700',
                 )}
               >
                 {messageFrom(save.error)}

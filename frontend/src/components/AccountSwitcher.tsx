@@ -167,14 +167,14 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
         >
           <AccountAvatar
             account={active}
-            className="size-7.5 rounded-full bg-blue-50"
-            fallbackClassName="text-[11px] text-blue-700"
+            className="size-7.5 rounded-[5px] bg-blue-50"
+            fallbackClassName="text-[13px] text-blue-700"
           />
           <span className="flex min-w-20 flex-1 flex-col items-start overflow-hidden max-md:hidden">
-            <strong className="w-full truncate text-left text-[12px] text-slate-700">
+            <strong className="w-full truncate text-left text-xs text-slate-700">
               {active?.label ?? 'Telegram'}
             </strong>
-            <small className="w-full truncate text-left text-[10px] text-slate-400">
+            <small className="w-full truncate text-left text-xs text-slate-400">
               {active ? accountSubtitle(active, t) : t('accounts.loading')}
             </small>
           </span>
@@ -186,7 +186,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
             align="end"
             sideOffset={8}
           >
-            <DropdownMenu.Label className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase">
+            <DropdownMenu.Label className="px-2 py-1.5 text-xs font-bold text-slate-400 uppercase">
               {t('accounts.title')}
             </DropdownMenu.Label>
             {accounts.data?.map((account) => (
@@ -204,14 +204,12 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
               >
                 <AccountAvatar
                   account={account}
-                  className="size-7.5 rounded-full"
-                  fallbackClassName="text-[10px]"
+                  className="size-7.5 rounded-[5px]"
+                  fallbackClassName="text-xs"
                 />
                 <span className="min-w-0">
-                  <strong className="block truncate text-[12px] text-slate-700">
-                    {account.label}
-                  </strong>
-                  <small className="block truncate text-[10px] text-slate-400">
+                  <strong className="block truncate text-xs text-slate-700">{account.label}</strong>
+                  <small className="block truncate text-xs text-slate-400">
                     {accountSubtitle(account, t)}
                   </small>
                 </span>
@@ -220,14 +218,14 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
             ))}
             <DropdownMenu.Separator className="my-1 h-px bg-slate-100" />
             <DropdownMenu.Item
-              className="flex h-9 items-center gap-2 rounded px-2 text-[12px] text-blue-700 outline-none data-[highlighted]:bg-blue-50"
+              className="flex h-9 items-center gap-2 rounded px-2 text-xs text-blue-700 outline-none data-[highlighted]:bg-blue-50"
               onSelect={openAccountDialog}
             >
               <Plus size={15} />
               {t('accounts.add')}
             </DropdownMenu.Item>
             <DropdownMenu.Item
-              className="flex h-9 items-center gap-2 rounded px-2 text-[12px] text-slate-600 outline-none data-[highlighted]:bg-slate-50"
+              className="flex h-9 items-center gap-2 rounded px-2 text-xs text-slate-600 outline-none data-[highlighted]:bg-slate-50"
               onSelect={onLogout}
             >
               <LogOut size={15} />
@@ -255,13 +253,13 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
               <AccountAvatar
                 account={account}
                 className="size-9.5 rounded-[5px] border border-slate-200 bg-white"
-                fallbackClassName="text-[12px]"
+                fallbackClassName="text-xs"
               />
               <div className="min-w-0">
                 <strong className="block truncate text-[13px] text-slate-700">
                   {account.label}
                 </strong>
-                <p className="mt-0.5 truncate text-[11px] text-slate-400">
+                <p className="mt-0.5 truncate text-[13px] text-slate-400">
                   {accountSubtitle(account, t)}
                 </p>
               </div>
@@ -304,7 +302,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                 <strong className="text-[13px] text-slate-700">
                   {t('accounts.authenticating', { name: active?.label ?? '' })}
                 </strong>
-                <p className="mt-0.5 text-[11px] text-slate-500">
+                <p className="mt-0.5 text-[13px] text-slate-500">
                   {waitingLabel ? t(waitingLabel) : t('accounts.connecting')}
                 </p>
               </div>
@@ -312,7 +310,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
             {waitingLabel ? (
               <div className="grid grid-cols-[1fr_auto] items-end gap-2 max-sm:grid-cols-1">
                 <label className={fieldClass}>
-                  <span>{waitingLabel}</span>
+                  <span>{t(waitingLabel)}</span>
                   <input
                     value={authValue}
                     onChange={(event) => setAuthValue(event.target.value)}
@@ -360,12 +358,12 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
         )}
 
         {auth.data?.state === 'success' ? (
-          <p className="mt-4 rounded-[5px] border border-emerald-100 bg-emerald-50 p-2.5 text-[11px] text-emerald-700">
+          <p className="mt-4 rounded-[5px] border border-emerald-100 bg-emerald-50 p-2.5 text-[13px] text-emerald-700">
             {t('accounts.authSuccess')}
           </p>
         ) : null}
         {flowError || auth.data?.error || switching.error || startingAuth.error ? (
-          <p className="mt-4 rounded-[5px] border border-rose-100 bg-rose-50 p-2.5 text-[11px] text-rose-700">
+          <p className="mt-4 rounded-[5px] border border-rose-100 bg-rose-50 p-2.5 text-[13px] text-rose-700">
             {flowError || auth.data?.error || messageFrom(switching.error || startingAuth.error)}
           </p>
         ) : null}

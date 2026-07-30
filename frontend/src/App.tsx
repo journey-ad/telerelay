@@ -49,7 +49,7 @@ function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => 
         <div
           className={cn(
             'flex min-h-[60vh] items-center justify-center gap-3',
-            'text-[12px] text-slate-500',
+            'text-xs text-slate-500',
           )}
         >
           <span
@@ -106,7 +106,7 @@ export default function App() {
       <main
         className={cn(
           'flex min-h-dvh flex-col items-center justify-center gap-6',
-          'bg-slate-50 text-[12px] text-slate-500',
+          'bg-slate-50 text-xs text-slate-500',
         )}
       >
         <Brand />

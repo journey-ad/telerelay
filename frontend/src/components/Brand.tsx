@@ -17,7 +17,7 @@ export function Brand({ compact = false }: { compact?: boolean }) {
       <span className="flex min-w-0 flex-col">
         <strong className="font-display text-base font-bold text-slate-900">TeleRelay</strong>
         {compact ? null : (
-          <small className="mt-0.5 text-[12px] text-slate-400">{t('brand.subtitle')}</small>
+          <small className="mt-0.5 text-xs text-slate-400">{t('brand.subtitle')}</small>
         )}
       </span>
     </div>

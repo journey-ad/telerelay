@@ -21,8 +21,6 @@ from typing import Any
 from telethon import utils
 from telethon.tl import types
 
-from backend.events import EventBus
-
 
 class TelegramPreviewError(RuntimeError):
     def __init__(self, code: str, message: str):
@@ -169,10 +167,9 @@ class TelegramPreviewService:
     CACHE_KEY_BYTES = 32
     CACHE_TAG_BYTES = 16
 
-    def __init__(self, bot_manager: Any, account_store: Any, events: EventBus):
+    def __init__(self, bot_manager: Any, account_store: Any):
         self.bot_manager = bot_manager
         self.account_store = account_store
-        self.events = events
         self.cache_root = Path(account_store.data_dir) / "telegram_preview_cache"
         self.cache_key_path = Path(account_store.data_dir) / ".telegram_preview_cache.key"
         self._cache_key, key_created = self._load_or_create_cache_key()
@@ -450,30 +447,6 @@ class TelegramPreviewService:
                 "Telegram visual media is unavailable",
             )
         return path, mime_type, Path(filename).name
-
-    async def handle_new_message(self, event: Any) -> None:
-        """Publish a compact live event without acknowledging the message as read."""
-        try:
-            account_id = self._active_account()
-            message = event.message
-            chat_id = int(event.chat_id)
-            data = await self._message_data(
-                message,
-                chat_id,
-                sender=getattr(event, "sender", None),
-                resolve_sender=False,
-            )
-            self.events.publish(
-                "telegram-preview-message",
-                {
-                    "account_id": account_id,
-                    "chat_id": chat_id,
-                    "message": data,
-                },
-            )
-        except Exception:
-            # Preview events must never interfere with forwarding handlers.
-            return
 
     async def _message(self, *, client_account: str, chat_id: int, message_id: int):
         client = self._client(client_account)

@@ -55,10 +55,10 @@ export function ConfirmDialog({
               <TriangleAlert size={20} />
             </span>
             <div className="min-w-0 pt-0.5">
-              <DialogPrimitive.Title className="m-0 text-[16px] font-bold text-slate-800">
+              <DialogPrimitive.Title className="m-0 text-base font-bold text-slate-700">
                 {title}
               </DialogPrimitive.Title>
-              <DialogPrimitive.Description className="mt-1.5 text-[12px] leading-4.5 text-slate-500">
+              <DialogPrimitive.Description className="mt-1.5 text-xs leading-4.5 text-slate-500">
                 {description}
               </DialogPrimitive.Description>
             </div>

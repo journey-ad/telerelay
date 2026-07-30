@@ -132,7 +132,7 @@ export function LogsPage() {
         <header
           className={cn(
             'grid h-10.5 grid-cols-[1fr_auto_1fr] items-center border-b',
-            'border-slate-700 bg-slate-800 px-3.5 text-[11px] text-slate-400',
+            'border-slate-700 bg-slate-800 px-3.5 text-[13px] text-slate-400',
           )}
         >
           <div className="flex gap-1.5">
@@ -152,7 +152,7 @@ export function LogsPage() {
             <p
               className={cn(
                 'm-0 grid min-w-175 grid-cols-[50px_1fr] px-3.5 py-0.5',
-                'text-[11px] leading-4 hover:bg-slate-800',
+                'text-[13px] leading-4 hover:bg-slate-800',
               )}
               key={`${index}-${line}`}
             >

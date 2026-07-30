@@ -49,11 +49,11 @@ const formatIcons = {
 }
 const errorClass = cn(
   'rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-  'text-[11px] text-rose-700',
+  'text-[13px] text-rose-700',
 )
 const formatOptionClass = cn(
   'flex h-10.5 items-center justify-center gap-1.5 rounded-[5px] border',
-  'text-[11px] leading-none',
+  'text-[13px] leading-none',
 )
 
 function downloadOption(file: string) {
@@ -376,14 +376,14 @@ export function ExportsPage() {
                     <strong className="text-[13px] text-slate-700">
                       {job.data.phase || t('exports.processingMessages')}
                     </strong>
-                    <p className="mt-1 truncate text-[10px] text-slate-400">{job.data.id}</p>
+                    <p className="mt-1 truncate text-xs text-slate-400">{job.data.id}</p>
                   </div>
                   <div className="max-sm:col-span-2">
-                    <strong className="font-display text-[22px] text-slate-800">
+                    <strong className="font-display text-[22px] text-slate-700">
                       {job.data.processed}
                     </strong>
                     {job.data.total ? (
-                      <span className="text-[11px] text-slate-400">/ {job.data.total}</span>
+                      <span className="text-[13px] text-slate-400">/ {job.data.total}</span>
                     ) : null}
                   </div>
                   <div className="col-span-full h-2 overflow-hidden rounded-sm bg-slate-100">
@@ -440,13 +440,11 @@ export function ExportsPage() {
                       </td>
                       <td>
                         {task.chat_title || task.chat_id}
-                        <small className="mt-1 block text-[10px] text-slate-400">
-                          {task.chat_id}
-                        </small>
+                        <small className="mt-1 block text-xs text-slate-400">{task.chat_id}</small>
                       </td>
                       <td>
                         {t(`exports.${task.schedule_type}`, { defaultValue: task.schedule_type })}
-                        <small className="mt-1 block text-[10px] text-slate-400">
+                        <small className="mt-1 block text-xs text-slate-400">
                           {String(task.hour).padStart(2, '0')}:
                           {String(task.minute).padStart(2, '0')} · {task.timezone}
                         </small>
@@ -664,7 +662,7 @@ export function ExportsPage() {
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                'text-[11px] text-rose-700',
+                'text-[13px] text-rose-700',
               )}
             >
               {messageFrom(saveTask.error)}

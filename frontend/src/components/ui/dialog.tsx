@@ -42,11 +42,11 @@ export function Dialog({
             )}
           >
             <div>
-              <DialogPrimitive.Title className="mb-1 text-[17px] font-bold text-slate-800">
+              <DialogPrimitive.Title className="mb-1 text-[17px] font-bold text-slate-700">
                 {title}
               </DialogPrimitive.Title>
               {description ? (
-                <DialogPrimitive.Description className="m-0 text-[12px] leading-4 text-slate-500">
+                <DialogPrimitive.Description className="m-0 text-xs leading-4 text-slate-500">
                   {description}
                 </DialogPrimitive.Description>
               ) : null}

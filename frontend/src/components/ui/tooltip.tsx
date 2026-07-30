@@ -8,7 +8,7 @@ export function Tooltip({ label, children }: { label: string; children: ReactNod
         <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content
-            className="z-100 rounded bg-slate-900 px-2 py-1.5 text-[12px] text-white shadow-xl"
+            className="z-100 rounded bg-slate-900 px-2 py-1.5 text-xs text-white shadow-xl"
             sideOffset={7}
           >
             {label}

@@ -106,7 +106,7 @@ export function HistoryPage() {
         <div className="flex min-h-12 items-center border-b border-slate-200 px-4">
           <span className="flex items-center gap-2">
             <strong className="text-[13px] text-slate-700">{t('history.results')}</strong>
-            <small className="text-[11px] text-slate-400">
+            <small className="text-[13px] text-slate-400">
               {t('history.recordCount', { count: historyQuery.data?.total ?? 0 })}
             </small>
           </span>
@@ -140,7 +140,7 @@ export function HistoryPage() {
                   <td>
                     <span>{item.sender_name || '-'}</span>
                     {item.sender_username ? (
-                      <small className="mt-1 block text-[10px] text-slate-400">
+                      <small className="mt-1 block text-xs text-slate-400">
                         @{item.sender_username}
                       </small>
                     ) : null}
@@ -164,7 +164,7 @@ export function HistoryPage() {
         <footer
           className={cn(
             'flex min-h-13 items-center justify-between border-t border-slate-200',
-            'px-4 text-[11px] text-slate-400',
+            'px-4 text-[13px] text-slate-400',
           )}
         >
           <span>{t('history.pagination', { page, pages })}</span>

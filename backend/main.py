@@ -50,13 +50,9 @@ async def lifespan(app: FastAPI):
     )
     bot.bind_loop(asyncio.get_running_loop())
     accounts = TelegramAccountService(account_store, bot, auth) if account_store and auth else None
-    telegram_preview = (
-        TelegramPreviewService(bot, account_store, events) if account_store else None
-    )
+    telegram_preview = TelegramPreviewService(bot, account_store) if account_store else None
     if accounts:
         bot.on_user_authenticated = accounts.update_active_identity
-    if telegram_preview:
-        bot.on_preview_message = telegram_preview.handle_new_message
     exports = ExportService(config, bot)
     scheduler = ExportScheduler(exports)
     rules = RuleService(config, bot)

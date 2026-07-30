@@ -138,7 +138,7 @@ export function AutomationsPage() {
             placeholder={t('automations.search')}
           />
         </div>
-        <span className="text-[11px] text-slate-400">
+        <span className="text-[13px] text-slate-400">
           {t('automations.summary', {
             enabled: query.data?.filter((rule) => rule.enabled).length ?? 0,
             total: query.data?.length ?? 0,
@@ -172,8 +172,8 @@ export function AutomationsPage() {
                         <MousePointerClick size={17} />
                       </span>
                       <span className="flex min-w-0 flex-col">
-                        <strong className="text-[12px] text-slate-700">{rule.name}</strong>
-                        <small className="mt-1 text-[10px] text-slate-400">
+                        <strong className="text-xs text-slate-700">{rule.name}</strong>
+                        <small className="mt-1 text-xs text-slate-400">
                           {t('common.delaySeconds', { seconds: rule.delay })}
                         </small>
                       </span>
@@ -188,7 +188,7 @@ export function AutomationsPage() {
                     <span className="block max-w-48 truncate">
                       {rule.source_chats.join(', ') || '-'}
                     </span>
-                    <small className="mt-1 block text-[10px] text-slate-400">
+                    <small className="mt-1 block text-xs text-slate-400">
                       {t('common.chatCount', { count: rule.source_chats.length })}
                     </small>
                   </td>
@@ -202,7 +202,7 @@ export function AutomationsPage() {
                         }[rule.match_mode]
                       }
                     </Badge>
-                    <small className="mt-1 block text-[10px] text-slate-400">
+                    <small className="mt-1 block text-xs text-slate-400">
                       {t(
                         rule.click_all_matches ? 'automations.clickAll' : 'automations.clickFirst',
                       )}
@@ -212,7 +212,7 @@ export function AutomationsPage() {
                     <span className="block max-w-48 truncate">
                       {rule.button_texts.join(' / ') || '-'}
                     </span>
-                    <small className="mt-1 block text-[10px] text-slate-400">
+                    <small className="mt-1 block text-xs text-slate-400">
                       {t('common.patternCount', { count: rule.button_texts.length })}
                     </small>
                   </td>
@@ -338,7 +338,7 @@ export function AutomationsPage() {
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                'text-[11px] text-rose-700',
+                'text-[13px] text-rose-700',
               )}
             >
               {messageFrom(save.error)}

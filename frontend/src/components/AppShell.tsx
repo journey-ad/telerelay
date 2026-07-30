@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive,
   Bot,
@@ -20,14 +20,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import { useEvents } from '../hooks/useEvents'
-import type {
-  BotStatus,
-  RelayEvent,
-  SessionInfo,
-  TelegramPreviewDialogsPage,
-  TelegramPreviewMessage,
-  TelegramPreviewMessagesPage,
-} from '../types'
+import type { BotStatus, RelayEvent, SessionInfo } from '../types'
 import { cn } from '../utils/cn'
 import { AccountSwitcher } from './AccountSwitcher'
 import { Brand } from './Brand'
@@ -52,12 +45,6 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700 [&>svg]:text-slate-400'
   }`
 
-function isPreviewMessage(value: unknown): value is TelegramPreviewMessage {
-  if (!value || typeof value !== 'object') return false
-  const message = value as Partial<TelegramPreviewMessage>
-  return typeof message.id === 'number' && typeof message.chat_id === 'number'
-}
-
 export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout: () => void }) {
   const { t } = useTranslation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -66,86 +53,18 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
   const statusQuery = useQuery({
     queryKey: ['bot-status'],
     queryFn: () => request<BotStatus>('/api/v1/bot/status'),
-    refetchInterval: 5000,
+    refetchInterval: 15_000,
   })
   const invalidateLiveData = useCallback(
     (event: RelayEvent) => {
-      void queryClient.invalidateQueries({ queryKey: ['bot-status'] })
-      void queryClient.invalidateQueries({ queryKey: ['stats'] })
-      if (event.type === 'telegram-preview-message') {
-        const accountId = event.payload.account_id
-        const chatId = event.payload.chat_id
-        const message = event.payload.message
-        if (
-          typeof accountId !== 'string' ||
-          typeof chatId !== 'number' ||
-          !isPreviewMessage(message)
-        ) {
-          return
-        }
-
-        queryClient.setQueriesData<InfiniteData<TelegramPreviewMessagesPage>>(
-          {
-            predicate: (query) => {
-              const key = query.queryKey
-              return (
-                key[0] === 'telegram-preview' &&
-                key[1] === 'messages' &&
-                key[2] === accountId &&
-                key[3] === chatId &&
-                key[4] === ''
-              )
-            },
-          },
-          (current) => {
-            if (!current?.pages.length) return current
-            if (current.pages.some((page) => page.items.some((item) => item.id === message.id))) {
-              return current
-            }
-            const pages = [...current.pages]
-            pages[0] = { ...pages[0], items: [...pages[0].items, message] }
-            return { ...current, pages }
-          },
-        )
-
-        queryClient.setQueriesData<InfiniteData<TelegramPreviewDialogsPage>>(
-          {
-            predicate: (query) => {
-              const key = query.queryKey
-              return key[0] === 'telegram-preview' && key[1] === 'dialogs' && key[2] === accountId
-            },
-          },
-          (current) => {
-            if (!current?.pages.length) return current
-            let updatedDialog: TelegramPreviewDialogsPage['items'][number] | undefined
-            const pages = current.pages.map((page) => ({
-              ...page,
-              items: page.items.filter((dialog) => {
-                if (dialog.id !== chatId) return true
-                updatedDialog = {
-                  ...dialog,
-                  unread_count: message.outgoing ? dialog.unread_count : dialog.unread_count + 1,
-                  last_message: {
-                    id: message.id,
-                    chat_id: message.chat_id,
-                    date: message.date,
-                    text: message.text,
-                    media_type: message.media?.type ?? 'text',
-                    preview: message.text || `[${message.media?.type ?? t('media.message')}]`,
-                    outgoing: message.outgoing,
-                  },
-                }
-                return false
-              }),
-            }))
-            if (!updatedDialog) return current
-            pages[0] = { ...pages[0], items: [updatedDialog, ...pages[0].items] }
-            return { ...current, pages }
-          },
-        )
+      if (event.type === 'bot') {
+        void queryClient.invalidateQueries({ queryKey: ['bot-status'] })
+      }
+      if (event.type === 'stats') {
+        void queryClient.invalidateQueries({ queryKey: ['stats'] })
       }
     },
-    [queryClient, t],
+    [queryClient],
   )
   useEvents(invalidateLiveData)
   const current = navigation.find((item) => item.to === location.pathname) ?? navigation[0]
@@ -186,7 +105,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             <Bot size={19} />
           </span>
           <span className="flex min-w-0 flex-col">
-            <small className="text-[10px] font-bold text-slate-400">{t('node.title')}</small>
+            <small className="text-xs font-bold text-slate-400">{t('node.title')}</small>
             <strong className="mt-0.5 truncate text-[13px] text-slate-700">
               {t(online ? 'node.connected' : 'node.waiting')}
             </strong>
@@ -199,7 +118,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           />
         </div>
         <nav className="flex-1 overflow-auto px-3 py-4">
-          <span className="block px-2.5 pb-2 text-[11px] font-bold text-slate-400 uppercase">
+          <span className="block px-2.5 pb-2 text-[13px] font-bold text-slate-400 uppercase">
             {t('nav.workspace')}
           </span>
           {navigation.slice(0, 6).map(({ icon: Icon, ...item }) => (
@@ -213,7 +132,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
               <span>{t(item.label)}</span>
             </NavLink>
           ))}
-          <span className="mt-5 block px-2.5 pb-2 text-[11px] font-bold text-slate-400 uppercase">
+          <span className="mt-5 block px-2.5 pb-2 text-[13px] font-bold text-slate-400 uppercase">
             {t('nav.system')}
           </span>
           {navigation.slice(6).map(({ icon: Icon, ...item }) => (
@@ -281,7 +200,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             <b className="font-semibold text-slate-700">{t(current.label)}</b>
           </div>
           <div className="flex items-center gap-2">
-            <div className="mr-1 flex items-center gap-2 text-[12px] text-slate-500 max-md:hidden">
+            <div className="mr-1 flex items-center gap-2 text-xs text-slate-500 max-md:hidden">
               <span
                 className={cn(
                   'size-2 rounded-full',
@@ -299,7 +218,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             {session.session_type === 'user' ? (
               <AccountSwitcher onLogout={onLogout} />
             ) : (
-              <span className="ml-1 flex h-9.5 items-center rounded-md border border-slate-200 bg-white px-3 text-[12px] text-slate-600">
+              <span className="ml-1 flex h-9.5 items-center rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-600">
                 {t('node.botSession')}
               </span>
             )}
@@ -328,7 +247,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             className={({ isActive }) =>
               cn(
                 'flex min-w-0 flex-col items-center justify-center gap-1',
-                'text-[10px] no-underline',
+                'text-xs no-underline',
                 isActive ? 'text-blue-600' : 'text-slate-400',
               )
             }
@@ -340,7 +259,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
         <button
           className={cn(
             'flex min-w-0 flex-col items-center justify-center gap-1',
-            'border-0 bg-transparent text-[10px] text-slate-400',
+            'border-0 bg-transparent text-xs text-slate-400',
           )}
           onClick={() => setMobileOpen(true)}
         >
