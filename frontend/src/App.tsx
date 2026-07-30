@@ -21,6 +21,9 @@ const AutomationsPage = lazy(() =>
 const HistoryPage = lazy(() =>
   import('./pages/HistoryPage').then((module) => ({ default: module.HistoryPage })),
 )
+const TelegramPreviewPage = lazy(() =>
+  import('./pages/TelegramPreviewPage').then((module) => ({ default: module.TelegramPreviewPage })),
+)
 const ExportsPage = lazy(() =>
   import('./pages/ExportsPage').then((module) => ({ default: module.ExportsPage })),
 )
@@ -65,6 +68,7 @@ function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => 
       element: <AppShell session={session} onLogout={onLogout} />,
       children: [
         { path: '/', element: page(<DashboardPage />) },
+        { path: '/telegram', element: page(<TelegramPreviewPage />) },
         { path: '/rules', element: page(<RulesPage />) },
         { path: '/automations', element: page(<AutomationsPage />) },
         { path: '/history', element: page(<HistoryPage />) },

@@ -22,6 +22,89 @@ export interface TelegramAccount {
   avatar_version?: string | null
 }
 
+export interface TelegramPreviewChat {
+  id: number
+  title: string
+  kind: 'private' | 'bot' | 'group' | 'supergroup' | 'channel'
+  username?: string | null
+  is_self: boolean
+  verified: boolean
+  inline_avatar?: string | null
+}
+
+export interface TelegramPreviewDialog extends TelegramPreviewChat {
+  archived: boolean
+  pinned: boolean
+  unread_count: number
+  unread_mentions_count: number
+  last_message?: {
+    id: number
+    chat_id: number
+    date?: string | null
+    text: string
+    media_type: string
+    preview: string
+    outgoing: boolean
+  } | null
+}
+
+export interface TelegramPreviewMessage {
+  id: number
+  chat_id: number
+  date?: string | null
+  sender: {
+    id?: number | null
+    name: string
+    username?: string | null
+  }
+  text: string
+  media?: {
+    type: string
+    file_name?: string | null
+    mime_type?: string | null
+    size?: number | null
+    duration?: number | null
+    width?: number | null
+    height?: number | null
+    has_thumbnail: boolean
+    inline_thumbnail?: string | null
+    downloadable: boolean
+  } | null
+  reply_to?: {
+    message_id: number
+    sender_name?: string | null
+    text: string
+    media_type?: string | null
+  } | null
+  forward?: {
+    from_id?: number | null
+    from_name: string
+    date?: string | null
+  } | null
+  grouped_id?: number | null
+  edited_at?: string | null
+  outgoing: boolean
+  post_author?: string | null
+  views?: number | null
+  reactions: Array<{ label: string; count: number; chosen: boolean }>
+  service_action?: string | null
+}
+
+export interface TelegramPreviewDialogsPage {
+  account_id: string
+  folder: 'main' | 'archived'
+  items: TelegramPreviewDialog[]
+  next_cursor?: string | null
+}
+
+export interface TelegramPreviewMessagesPage {
+  account_id: string
+  chat: TelegramPreviewChat
+  query?: string | null
+  items: TelegramPreviewMessage[]
+  next_before_id?: number | null
+}
+
 export interface ForwardingRule {
   name: string
   enabled: boolean

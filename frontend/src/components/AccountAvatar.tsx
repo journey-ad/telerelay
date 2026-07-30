@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { authorization } from '../api/credentials'
 import type { TelegramAccount } from '../types'
 import { cn } from '../utils/cn'
+import { hashColor } from '../utils/color'
 
 function initials(account?: TelegramAccount): string {
   const value = account?.display_name || account?.label || 'TG'
@@ -61,13 +62,13 @@ export function AccountAvatar({
 
   return (
     <span
-      className={cn(
-        'relative grid shrink-0 place-items-center overflow-hidden rounded bg-slate-100',
-        className,
-      )}
+      className={cn('relative grid shrink-0 place-items-center overflow-hidden rounded', className)}
+      style={{
+        backgroundColor: hashColor(String(account?.telegram_user_id ?? account?.id ?? 'TG')),
+      }}
       aria-hidden
     >
-      <span className={cn('font-bold text-slate-600', fallbackClassName)}>{initials(account)}</span>
+      <span className={cn('font-bold text-white', fallbackClassName)}>{initials(account)}</span>
       {source ? (
         <img
           src={source}

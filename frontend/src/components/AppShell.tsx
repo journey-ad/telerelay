@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import {
   Archive,
   Bot,
@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageSquareText,
   MoreHorizontal,
   RefreshCw,
   Route,
@@ -18,7 +19,14 @@ import { useCallback, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { request } from '../api/client'
 import { useEvents } from '../hooks/useEvents'
-import type { BotStatus, SessionInfo } from '../types'
+import type {
+  BotStatus,
+  RelayEvent,
+  SessionInfo,
+  TelegramPreviewDialogsPage,
+  TelegramPreviewMessage,
+  TelegramPreviewMessagesPage,
+} from '../types'
 import { cn } from '../utils/cn'
 import { AccountSwitcher } from './AccountSwitcher'
 import { Brand } from './Brand'
@@ -26,6 +34,7 @@ import { IconButton } from './ui'
 
 const navigation = [
   { to: '/', label: '总览', icon: LayoutDashboard, end: true },
+  { to: '/telegram', label: '会话预览', icon: MessageSquareText },
   { to: '/rules', label: '转发规则', icon: Route },
   { to: '/automations', label: '按钮自动化', icon: Sparkles },
   { to: '/history', label: '消息记录', icon: History },
@@ -41,6 +50,12 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700 [&>svg]:text-slate-400'
   }`
 
+function isPreviewMessage(value: unknown): value is TelegramPreviewMessage {
+  if (!value || typeof value !== 'object') return false
+  const message = value as Partial<TelegramPreviewMessage>
+  return typeof message.id === 'number' && typeof message.chat_id === 'number'
+}
+
 export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout: () => void }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const queryClient = useQueryClient()
@@ -50,13 +65,90 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
     queryFn: () => request<BotStatus>('/api/v1/bot/status'),
     refetchInterval: 5000,
   })
-  const invalidateLiveData = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['bot-status'] })
-    void queryClient.invalidateQueries({ queryKey: ['stats'] })
-  }, [queryClient])
+  const invalidateLiveData = useCallback(
+    (event: RelayEvent) => {
+      void queryClient.invalidateQueries({ queryKey: ['bot-status'] })
+      void queryClient.invalidateQueries({ queryKey: ['stats'] })
+      if (event.type === 'telegram-preview-message') {
+        const accountId = event.payload.account_id
+        const chatId = event.payload.chat_id
+        const message = event.payload.message
+        if (
+          typeof accountId !== 'string' ||
+          typeof chatId !== 'number' ||
+          !isPreviewMessage(message)
+        ) {
+          return
+        }
+
+        queryClient.setQueriesData<InfiniteData<TelegramPreviewMessagesPage>>(
+          {
+            predicate: (query) => {
+              const key = query.queryKey
+              return (
+                key[0] === 'telegram-preview' &&
+                key[1] === 'messages' &&
+                key[2] === accountId &&
+                key[3] === chatId &&
+                key[4] === ''
+              )
+            },
+          },
+          (current) => {
+            if (!current?.pages.length) return current
+            if (current.pages.some((page) => page.items.some((item) => item.id === message.id))) {
+              return current
+            }
+            const pages = [...current.pages]
+            pages[0] = { ...pages[0], items: [...pages[0].items, message] }
+            return { ...current, pages }
+          },
+        )
+
+        queryClient.setQueriesData<InfiniteData<TelegramPreviewDialogsPage>>(
+          {
+            predicate: (query) => {
+              const key = query.queryKey
+              return key[0] === 'telegram-preview' && key[1] === 'dialogs' && key[2] === accountId
+            },
+          },
+          (current) => {
+            if (!current?.pages.length) return current
+            let updatedDialog: TelegramPreviewDialogsPage['items'][number] | undefined
+            const pages = current.pages.map((page) => ({
+              ...page,
+              items: page.items.filter((dialog) => {
+                if (dialog.id !== chatId) return true
+                updatedDialog = {
+                  ...dialog,
+                  unread_count: message.outgoing ? dialog.unread_count : dialog.unread_count + 1,
+                  last_message: {
+                    id: message.id,
+                    chat_id: message.chat_id,
+                    date: message.date,
+                    text: message.text,
+                    media_type: message.media?.type ?? 'text',
+                    preview: message.text || `[${message.media?.type ?? '消息'}]`,
+                    outgoing: message.outgoing,
+                  },
+                }
+                return false
+              }),
+            }))
+            if (!updatedDialog) return current
+            pages[0] = { ...pages[0], items: [updatedDialog, ...pages[0].items] }
+            return { ...current, pages }
+          },
+        )
+      }
+    },
+    [queryClient],
+  )
   useEvents(invalidateLiveData)
   const current = navigation.find((item) => item.to === location.pathname) ?? navigation[0]
   const online = Boolean(statusQuery.data?.is_connected)
+  const previewRoute =
+    location.pathname === '/telegram' || location.pathname.startsWith('/telegram/')
 
   return (
     <div className="min-h-dvh">
@@ -107,7 +199,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           <span className="block px-2.5 pb-2 text-[9px] font-bold text-slate-400 uppercase">
             工作台
           </span>
-          {navigation.slice(0, 5).map(({ icon: Icon, ...item }) => (
+          {navigation.slice(0, 6).map(({ icon: Icon, ...item }) => (
             <NavLink
               key={item.to}
               {...item}
@@ -121,7 +213,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           <span className="mt-5 block px-2.5 pb-2 text-[9px] font-bold text-slate-400 uppercase">
             系统
           </span>
-          {navigation.slice(5).map(({ icon: Icon, ...item }) => (
+          {navigation.slice(6).map(({ icon: Icon, ...item }) => (
             <NavLink
               key={item.to}
               {...item}
@@ -155,10 +247,17 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
         />
       ) : null}
 
-      <main className="ml-58 min-h-dvh pb-0 max-md:ml-0 max-md:pb-14.5">
+      <main
+        className={cn(
+          'ml-58 max-md:ml-0',
+          previewRoute
+            ? 'flex h-dvh min-h-0 flex-col overflow-hidden max-md:pb-14.5'
+            : 'min-h-dvh pb-0 max-md:pb-14.5',
+        )}
+      >
         <header
           className={cn(
-            'sticky top-0 z-20 flex h-14.5 items-center justify-between border-b',
+            'sticky top-0 z-20 flex h-14.5 shrink-0 items-center justify-between border-b',
             'border-slate-200 bg-white/95 px-6.5 backdrop-blur-xl max-md:h-13.5 max-md:px-3',
           )}
         >
@@ -202,7 +301,12 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             )}
           </div>
         </header>
-        <div className="mx-auto w-full max-w-370 px-7 py-7 max-md:px-3.5 max-md:py-5">
+        <div
+          className={cn(
+            'mx-auto w-full max-w-370 px-7 py-7 max-md:px-3.5 max-md:py-5',
+            previewRoute && 'flex min-h-0 flex-1 flex-col',
+          )}
+        >
           <Outlet />
         </div>
       </main>

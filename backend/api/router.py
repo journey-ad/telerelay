@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 from backend.api.dependencies import get_context, require_auth
 from backend.application import ApplicationContext
@@ -30,6 +31,7 @@ from backend.schemas import (
 from backend.services import ServiceError, validate_regex_patterns
 from backend.stats_db import get_stats_db
 from backend.telegram_accounts import TelegramAccountError
+from backend.telegram_preview import TelegramPreviewError
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_auth)])
 
@@ -63,6 +65,46 @@ def _accounts(context: ApplicationContext):
     return context.accounts
 
 
+def _telegram_preview(context: ApplicationContext):
+    if not context.telegram_preview:
+        raise _error(
+            "not_user_mode",
+            "Telegram preview is only available in user mode",
+            409,
+        )
+    return context.telegram_preview
+
+
+def _preview_error(exc: TelegramPreviewError) -> HTTPException:
+    status = {
+        "avatar_not_found": 404,
+        "chat_not_found": 404,
+        "media_not_found": 404,
+        "message_not_found": 404,
+        "thumbnail_not_found": 404,
+        "invalid_cursor": 422,
+        "media_download_failed": 502,
+    }.get(exc.code, 409)
+    return _error(exc.code, str(exc), status)
+
+
+def _image_response(
+    content: bytes,
+    media_type: str,
+    request: Request,
+) -> Response:
+    import hashlib
+
+    etag = f'"{hashlib.blake2s(content, digest_size=12).hexdigest()}"'
+    headers = {
+        "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
+        "ETag": etag,
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=content, media_type=media_type, headers=headers)
+
+
 @router.get("/telegram-accounts")
 async def list_telegram_accounts(
     context: ApplicationContext = Depends(get_context),
@@ -85,6 +127,122 @@ async def telegram_account_avatar(
         avatar_path,
         media_type="image/jpeg",
         headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@router.get("/telegram-preview/dialogs")
+async def telegram_preview_dialogs(
+    account_id: str | None = None,
+    folder: str = Query("main", pattern="^(main|archived)$"),
+    limit: int = Query(40, ge=1, le=100),
+    cursor: str | None = None,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _telegram_preview(context).list_dialogs(
+            account_id=account_id,
+            folder=folder,
+            limit=limit,
+            cursor=cursor,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.get("/telegram-preview/chats/{chat_id}/messages")
+async def telegram_preview_messages(
+    chat_id: int,
+    account_id: str,
+    limit: int = Query(40, ge=1, le=100),
+    before_id: int | None = Query(None, ge=1),
+    query: str | None = Query(None, max_length=200),
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _telegram_preview(context).list_messages(
+            account_id=account_id,
+            chat_id=chat_id,
+            limit=limit,
+            before_id=before_id,
+            query=(query or "").strip() or None,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.get("/telegram-preview/chats/{chat_id}/messages/{message_id}")
+async def telegram_preview_message(
+    chat_id: int,
+    message_id: int,
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _telegram_preview(context).get_message(
+            account_id=account_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.get("/telegram-preview/peers/{peer_id}/avatar")
+async def telegram_preview_avatar(
+    peer_id: int,
+    request: Request,
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> Response:
+    try:
+        content = await _telegram_preview(context).avatar(
+            account_id=account_id,
+            peer_id=peer_id,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+    return _image_response(content, "image/jpeg", request)
+
+
+@router.get("/telegram-preview/chats/{chat_id}/messages/{message_id}/thumbnail")
+async def telegram_preview_thumbnail(
+    chat_id: int,
+    message_id: int,
+    request: Request,
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> Response:
+    try:
+        content, media_type = await _telegram_preview(context).media_thumbnail(
+            account_id=account_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+    return _image_response(content, media_type, request)
+
+
+@router.get("/telegram-preview/chats/{chat_id}/messages/{message_id}/media")
+async def telegram_preview_media(
+    chat_id: int,
+    message_id: int,
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> FileResponse:
+    try:
+        path, media_type, filename = await _telegram_preview(context).download_media(
+            account_id=account_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=filename,
+        background=BackgroundTask(path.unlink, missing_ok=True),
     )
 
 
@@ -124,6 +282,8 @@ async def delete_telegram_account(
     except TelegramAccountError as exc:
         status_code = 409 if exc.code == "last_account" else 404
         raise _error(exc.code, str(exc), status_code) from exc
+    if context.telegram_preview:
+        await context.telegram_preview.clear_account_cache(account_id)
     context.events.publish("telegram-account", {"action": "delete", "id": account_id})
     return ApiMessage(code="telegram_account_deleted")
 

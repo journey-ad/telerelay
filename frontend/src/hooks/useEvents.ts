@@ -8,8 +8,21 @@ export function useEvents(onEvent?: (event: RelayEvent) => void) {
 
   useEffect(() => {
     const controller = new AbortController()
-    const handle = (type: string, payload: Record<string, unknown>) => {
-      const event = { type, payload, at: new Date().toISOString() }
+    const handle = (streamType: string, value: Record<string, unknown>) => {
+      const envelope = value as {
+        type?: unknown
+        at?: unknown
+        payload?: unknown
+      }
+      const payload =
+        envelope.payload && typeof envelope.payload === 'object'
+          ? (envelope.payload as Record<string, unknown>)
+          : value
+      const event = {
+        type: typeof envelope.type === 'string' ? envelope.type : streamType,
+        payload,
+        at: typeof envelope.at === 'string' ? envelope.at : new Date().toISOString(),
+      }
       setConnected(true)
       setRecent((current) => [event, ...current].slice(0, 80))
       onEvent?.(event)

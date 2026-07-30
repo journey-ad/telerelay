@@ -16,6 +16,7 @@ import type { TelegramAccount, TelegramAuth } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 import { AccountAvatar } from './AccountAvatar'
+import { clearAuthenticatedImages } from './AuthenticatedImage'
 import { Button, Dialog, fieldClass, IconButton } from './ui'
 
 function accountSubtitle(account: TelegramAccount): string {
@@ -50,6 +51,8 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     mutationFn: (accountId: string) =>
       request<TelegramAccount>(`/api/v1/telegram-accounts/${accountId}/activate`, json('POST')),
     onSuccess: async (account) => {
+      client.removeQueries({ queryKey: ['telegram-preview'] })
+      clearAuthenticatedImages()
       if (!account.authenticated) {
         setDialogOpen(true)
         try {
@@ -76,6 +79,8 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
       return account
     },
     onSuccess: async () => {
+      client.removeQueries({ queryKey: ['telegram-preview'] })
+      clearAuthenticatedImages()
       setFlowError(null)
       setLabel('')
       await Promise.all([accounts.refetch(), auth.refetch()])
@@ -85,6 +90,8 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
   const startingAuth = useMutation({
     mutationFn: () => request('/api/v1/telegram-auth/start', json('POST')),
     onSuccess: async () => {
+      client.removeQueries({ queryKey: ['telegram-preview'] })
+      clearAuthenticatedImages()
       setFlowError(null)
       await auth.refetch()
     },
@@ -94,6 +101,8 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     mutationFn: (accountId: string) =>
       request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
     onSuccess: async () => {
+      client.removeQueries({ queryKey: ['telegram-preview'] })
+      clearAuthenticatedImages()
       await Promise.all([
         accounts.refetch(),
         auth.refetch(),

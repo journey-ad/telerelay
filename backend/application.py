@@ -11,6 +11,7 @@ from backend.exporter.scheduler import ExportScheduler
 from backend.exporter.service import ExportService
 from backend.services import RuleService
 from backend.telegram_accounts import TelegramAccountService
+from backend.telegram_preview import TelegramPreviewService
 
 
 @dataclass
@@ -24,4 +25,5 @@ class ApplicationContext:
     events: EventBus
     log_handler: EventLogHandler
     accounts: TelegramAccountService | None = None
+    telegram_preview: TelegramPreviewService | None = None
     admin_thread: Thread | None = None

@@ -57,6 +57,37 @@ class FakeBot:
         return None
 
 
+class FakeTelegramPreview:
+    def __init__(self):
+        self.calls = []
+
+    async def list_dialogs(self, **values):
+        self.calls.append(("dialogs", values))
+        return {
+            "account_id": values["account_id"],
+            "folder": values["folder"],
+            "items": [],
+            "next_cursor": None,
+        }
+
+    async def list_messages(self, **values):
+        self.calls.append(("messages", values))
+        return {
+            "account_id": values["account_id"],
+            "chat": {"id": values["chat_id"], "title": "测试会话"},
+            "items": [],
+            "next_before_id": None,
+        }
+
+    async def get_message(self, **values):
+        self.calls.append(("message", values))
+        return {
+            "id": values["message_id"],
+            "chat_id": values["chat_id"],
+            "text": "原始消息",
+        }
+
+
 def make_app(context: ApplicationContext) -> FastAPI:
     app = FastAPI()
     app.state.context = context
@@ -82,6 +113,7 @@ class ApiContractTests(unittest.TestCase):
         self.rules = RuleService(self.config, self.bot)
         self.account_store = TelegramAccountStore(root / "data")
         self.accounts = TelegramAccountService(self.account_store, self.bot, self.auth)
+        self.telegram_preview = FakeTelegramPreview()
         self.context = ApplicationContext(
             config=self.config,
             auth=self.auth,
@@ -92,6 +124,7 @@ class ApiContractTests(unittest.TestCase):
             events=self.events,
             log_handler=SimpleNamespace(),
             accounts=self.accounts,
+            telegram_preview=self.telegram_preview,
         )
         self.client = TestClient(make_app(self.context))
         self.addCleanup(self.client.close)
@@ -134,6 +167,59 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.content, b"fake-jpeg-avatar")
         account = self.client.get("/api/v1/telegram-accounts").json()[0]
         self.assertIsNotNone(account["avatar_version"])
+
+    def test_telegram_preview_dialog_and_message_contracts(self):
+        dialogs = self.client.get(
+            "/api/v1/telegram-preview/dialogs",
+            params={"account_id": "default", "folder": "archived", "limit": 25},
+        )
+        messages = self.client.get(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            params={"account_id": "default", "query": "release"},
+        )
+        message = self.client.get(
+            "/api/v1/telegram-preview/chats/-1001/messages/12",
+            params={"account_id": "default"},
+        )
+
+        self.assertEqual(dialogs.status_code, 200, dialogs.text)
+        self.assertEqual(dialogs.json()["folder"], "archived")
+        self.assertEqual(messages.status_code, 200, messages.text)
+        self.assertEqual(messages.json()["chat"]["id"], -1001)
+        self.assertEqual(message.status_code, 200, message.text)
+        self.assertEqual(message.json()["id"], 12)
+        self.assertEqual(
+            self.telegram_preview.calls,
+            [
+                (
+                    "dialogs",
+                    {
+                        "account_id": "default",
+                        "folder": "archived",
+                        "limit": 25,
+                        "cursor": None,
+                    },
+                ),
+                (
+                    "messages",
+                    {
+                        "account_id": "default",
+                        "chat_id": -1001,
+                        "limit": 40,
+                        "before_id": None,
+                        "query": "release",
+                    },
+                ),
+                (
+                    "message",
+                    {
+                        "account_id": "default",
+                        "chat_id": -1001,
+                        "message_id": 12,
+                    },
+                ),
+            ],
+        )
 
     def test_rule_crud_persists_yaml(self):
         payload = {
