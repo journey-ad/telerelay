@@ -104,8 +104,8 @@ function thumbnailPath(accountId: string, chatId: number, messageId: number): st
   return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/thumbnail?account_id=${encodeURIComponent(accountId)}`
 }
 
-function mediaPath(accountId: string, chatId: number, messageId: number): string {
-  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/media?account_id=${encodeURIComponent(accountId)}`
+function visualMediaPath(accountId: string, chatId: number, messageId: number): string {
+  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/visual-media?account_id=${encodeURIComponent(accountId)}`
 }
 
 function mediaFrame(media: NonNullable<TelegramPreviewMessage['media']>) {
@@ -221,7 +221,12 @@ function MediaPreview({
 }) {
   const media = message.media
   if (!media) return null
-  const path = mediaPath(accountId, message.chat_id, message.id)
+  if (media.poll) return <PollPreview poll={media.poll} />
+  const path = media.is_visual_media
+    ? visualMediaPath(accountId, message.chat_id, message.id)
+    : null
+  const downloadLabel =
+    media.type === 'animation' ? '下载动图' : media.type === 'sticker' ? '下载贴纸' : '下载图片'
   if (media.has_thumbnail) {
     return (
       <div
@@ -244,12 +249,12 @@ function MediaPreview({
             </span>
           }
         />
-        {media.downloadable ? (
+        {path ? (
           <button
             className="absolute right-2 bottom-2 grid size-7 place-items-center rounded bg-slate-900/70 text-white opacity-0 shadow transition group-hover:opacity-100 focus:opacity-100"
-            title="下载原图"
-            aria-label="下载原图"
-            onClick={() => void downloadFile(path, media.file_name || `telegram-${message.id}`)}
+            title={downloadLabel}
+            aria-label={downloadLabel}
+            onClick={() => void downloadFile(path, media.file_name || `telegram-${message.id}.jpg`)}
           >
             <Download size={14} />
           </button>
@@ -258,13 +263,12 @@ function MediaPreview({
     )
   }
   return (
-    <button
+    <div
       className={cn(
-        'grid w-full grid-cols-[34px_minmax(0,1fr)_24px] items-center gap-2 rounded-[5px] border',
-        'border-slate-200 bg-white/70 p-2 text-left hover:border-blue-200',
+        'grid w-full items-center gap-2 rounded-[5px] border',
+        path ? 'grid-cols-[34px_minmax(0,1fr)_24px]' : 'grid-cols-[34px_minmax(0,1fr)]',
+        'border-slate-200 bg-white/70 p-2 text-left',
       )}
-      disabled={!media.downloadable}
-      onClick={() => void downloadFile(path, media.file_name || `telegram-${message.id}`)}
     >
       <span className="grid size-8.5 place-items-center rounded bg-blue-50 text-blue-600">
         <File size={17} />
@@ -277,8 +281,98 @@ function MediaPreview({
           {[media.type, fileSize(media.size)].filter(Boolean).join(' · ')}
         </small>
       </span>
-      <Download size={14} className="text-slate-400" />
-    </button>
+      {path ? (
+        <button
+          className="grid size-6 place-items-center rounded border-0 bg-transparent text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+          title={downloadLabel}
+          aria-label={downloadLabel}
+          onClick={() => void downloadFile(path, media.file_name || `telegram-${message.id}`)}
+        >
+          <Download size={14} />
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function PollPreview({
+  poll,
+}: {
+  poll: NonNullable<NonNullable<TelegramPreviewMessage['media']>['poll']>
+}) {
+  return (
+    <div className="w-80 max-w-full rounded-[5px] border border-slate-200 bg-white/80 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <strong className="min-w-0 text-[11px] leading-4.5 text-slate-800">{poll.question}</strong>
+        {poll.closed ? (
+          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[7px] text-slate-500">
+            已结束
+          </span>
+        ) : null}
+      </div>
+      <span className="mt-1 block text-[8px] text-slate-400">
+        {poll.quiz ? '测验' : poll.multiple_choice ? '多选投票' : '单选投票'}
+      </span>
+      <div className="mt-2.5 space-y-2">
+        {poll.options.map((option, index) => {
+          const percentage = poll.total_voters
+            ? Math.min(100, Math.round((option.voters / poll.total_voters) * 100))
+            : 0
+          return (
+            <div key={`${index}-${option.text}`}>
+              <div className="flex items-start justify-between gap-3 text-[9px]">
+                <span
+                  className={cn(
+                    'min-w-0 break-words',
+                    option.correct
+                      ? 'font-semibold text-emerald-700'
+                      : option.chosen
+                        ? 'font-semibold text-blue-700'
+                        : 'text-slate-600',
+                  )}
+                >
+                  {option.text}
+                  {option.chosen ? ' · 已选择' : ''}
+                  {option.correct ? ' · 正确答案' : ''}
+                </span>
+                {poll.results_visible ? (
+                  <span className="shrink-0 text-[8px] text-slate-400">
+                    {percentage}% · {formatNumber(option.voters)} 票
+                  </span>
+                ) : null}
+              </div>
+              {poll.results_visible ? (
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <span
+                    className={cn(
+                      'block h-full rounded-full',
+                      option.correct
+                        ? 'bg-emerald-500'
+                        : option.chosen
+                          ? 'bg-blue-500'
+                          : 'bg-slate-300',
+                    )}
+                    style={{ width: `${percentage}%` }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          )
+        })}
+      </div>
+      <div className="mt-2.5 border-t border-slate-100 pt-2 text-[8px] text-slate-400">
+        {poll.results_visible
+          ? `${formatNumber(poll.total_voters)} 人参与`
+          : poll.total_voters
+            ? `${formatNumber(poll.total_voters)} 人参与 · 结果暂不可见`
+            : '投票结果暂不可见'}
+      </div>
+      {poll.solution ? (
+        <p className="mt-2 rounded bg-emerald-50 p-2 text-[8px] leading-4 text-emerald-700">
+          {poll.solution}
+        </p>
+      ) : null}
+    </div>
   )
 }
 

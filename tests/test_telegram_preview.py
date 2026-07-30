@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 from backend.events import EventBus
@@ -130,6 +131,21 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         self.events = EventBus()
         self.service = TelegramPreviewService(bot, store, self.events)
 
+    async def test_first_cache_key_creation_discards_plaintext_cache(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_file = Path(temp_dir) / "telegram_preview_cache" / "account" / "avatar.jpg"
+            cache_file.parent.mkdir(parents=True)
+            cache_file.write_bytes(b"plaintext")
+            manager = SimpleNamespace(get_client=lambda: self.client)
+            bot = SimpleNamespace(is_connected=True, client_manager=manager)
+            store = SimpleNamespace(active_account_id="work", data_dir=temp_dir)
+
+            service = TelegramPreviewService(bot, store, self.events)
+
+            self.assertFalse(service.cache_root.exists())
+            self.assertEqual(len(service.cache_key_path.read_bytes()), service.CACHE_KEY_BYTES)
+            self.assertEqual(service.cache_key_path.stat().st_mode & 0o777, 0o600)
+
     async def test_lists_main_and_archived_dialogs(self):
         main = await self.service.list_dialogs(
             account_id="work", folder="main", limit=40, cursor=None
@@ -229,6 +245,67 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(data["media"]["inline_thumbnail"].startswith("data:image/jpeg;base64,"))
 
+    async def test_poll_serializes_question_options_and_results(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = types.MessageMediaPoll(
+            poll=types.Poll(
+                id=42,
+                question=types.TextWithEntities("选择发布窗口", []),
+                answers=[
+                    types.PollAnswer(types.TextWithEntities("上午", []), b"morning"),
+                    types.PollAnswer(types.TextWithEntities("晚上", []), b"evening"),
+                ],
+                multiple_choice=True,
+                quiz=True,
+                closed=True,
+            ),
+            results=types.PollResults(
+                results=[
+                    types.PollAnswerVoters(b"evening", 3, chosen=True, correct=True),
+                    types.PollAnswerVoters(b"morning", 1),
+                ],
+                total_voters=4,
+                solution="晚间活跃度更高",
+            ),
+        )
+
+        data = await self.service._message_data(media_message, 101)
+
+        poll = data["media"]["poll"]
+        self.assertEqual(data["media"]["type"], "poll")
+        self.assertEqual(poll["question"], "选择发布窗口")
+        self.assertEqual([item["text"] for item in poll["options"]], ["上午", "晚上"])
+        self.assertEqual([item["voters"] for item in poll["options"]], [1, 3])
+        self.assertTrue(poll["options"][1]["chosen"])
+        self.assertTrue(poll["options"][1]["correct"])
+        self.assertEqual(poll["total_voters"], 4)
+        self.assertTrue(poll["multiple_choice"])
+        self.assertTrue(poll["quiz"])
+        self.assertTrue(poll["closed"])
+        self.assertEqual(poll["solution"], "晚间活跃度更高")
+        self.assertEqual(
+            self.service._message_summary(media_message, 101)["preview"],
+            "选择发布窗口",
+        )
+
+    async def test_poll_without_public_results_keeps_options_visible(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = types.MessageMediaPoll(
+            poll=types.Poll(
+                id=43,
+                question=types.TextWithEntities("今天吃什么？", []),
+                answers=[types.PollAnswer(types.TextWithEntities("面", []), b"noodle")],
+            ),
+            results=types.PollResults(total_voters=12),
+        )
+
+        data = await self.service._message_data(media_message, 101)
+
+        poll = data["media"]["poll"]
+        self.assertEqual(poll["options"][0]["text"], "面")
+        self.assertFalse(poll["results_visible"])
+        self.assertEqual(poll["total_voters"], 12)
+
     async def test_photo_media_uses_largest_dimensions(self):
         media_message = self.client.messages[101][-1]
         media_message.media = object()
@@ -243,6 +320,73 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(data["media"]["width"], 1920)
         self.assertEqual(data["media"]["height"], 1080)
+        self.assertTrue(data["media"]["is_visual_media"])
+
+    async def test_image_without_thumbnail_is_downloadable_but_not_previewed(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = object()
+        media_message.document = SimpleNamespace(thumbs=[])
+        media_message.file = SimpleNamespace(
+            name="scan.png",
+            mime_type="image/png",
+            size=10 * 1024 * 1024,
+            duration=None,
+        )
+
+        data = await self.service._message_data(media_message, 101)
+
+        self.assertTrue(data["media"]["is_visual_media"])
+        self.assertFalse(data["media"]["has_thumbnail"])
+
+    async def test_gif_and_sticker_thumbnails_use_encrypted_cache(self):
+        for kind in ("gif", "sticker"):
+            with self.subTest(kind=kind):
+                media_message = self.client.messages[101][-1]
+                media_message.media = object()
+                media_message.photo = None
+                media_message.document = SimpleNamespace(
+                    thumbs=[types.PhotoSize("m", 320, 320, 1_000)]
+                )
+                media_message.file = SimpleNamespace(
+                    name=f"media-{kind}",
+                    mime_type="video/mp4" if kind == "gif" else "application/x-tgsticker",
+                    size=1024,
+                    duration=None,
+                )
+                media_message.gif = kind == "gif"
+                media_message.sticker = kind == "sticker"
+                downloads = 0
+
+                async def download_media(message, *, file, thumb=None, **options):
+                    nonlocal downloads
+                    downloads += 1
+                    self.assertIs(file, bytes)
+                    self.assertIsNotNone(thumb)
+                    return f"{kind}-thumbnail".encode()
+
+                self.client.download_media = download_media
+                cache_path = self.service._cache_path(
+                    "work", "thumbnails", "101-3.jpg"
+                )
+                cache_path.unlink(missing_ok=True)
+
+                data = await self.service._message_data(media_message, 101)
+                first, _ = await self.service.media_thumbnail(
+                    account_id="work", chat_id=101, message_id=3
+                )
+                second, _ = await self.service.media_thumbnail(
+                    account_id="work", chat_id=101, message_id=3
+                )
+
+                self.assertEqual(data["media"]["type"], "animation" if kind == "gif" else "sticker")
+                self.assertTrue(data["media"]["is_visual_media"])
+                self.assertTrue(data["media"]["has_thumbnail"])
+                self.assertEqual(first, f"{kind}-thumbnail".encode())
+                self.assertEqual(second, first)
+                self.assertEqual(downloads, 1)
+                stored = cache_path.read_bytes()
+                self.assertTrue(stored.startswith(self.service.CACHE_MAGIC))
+                self.assertNotIn(first, stored)
 
     async def test_avatar_cache_avoids_repeated_telegram_download(self):
         self.client.downloads = 0
@@ -259,6 +403,116 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first, b"avatar")
         self.assertEqual(second, b"avatar")
         self.assertEqual(self.client.downloads, 1)
+        cache_path = self.service._cache_path("work", "avatars", "101.jpg")
+        stored = cache_path.read_bytes()
+        self.assertTrue(stored.startswith(self.service.CACHE_MAGIC))
+        self.assertNotIn(b"avatar", stored)
+
+    async def test_plaintext_cache_is_rejected_and_reloaded(self):
+        cache_path = self.service._cache_path("work", "avatars", "101.jpg")
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_bytes(b"legacy-avatar")
+
+        async def download_profile_photo(entity, **options):
+            return b"fresh-avatar"
+
+        self.client.download_profile_photo = download_profile_photo
+
+        content = await self.service.avatar(account_id="work", peer_id=101)
+
+        self.assertEqual(content, b"fresh-avatar")
+        self.assertTrue(cache_path.read_bytes().startswith(self.service.CACHE_MAGIC))
+        self.assertNotIn(b"legacy-avatar", cache_path.read_bytes())
+
+    async def test_image_download_uses_temporary_file_without_cache(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = object()
+        media_message.photo = SimpleNamespace(sizes=[])
+        media_message.file = SimpleNamespace(
+            name="photo.jpg",
+            mime_type="image/jpeg",
+            size=50 * 1024 * 1024,
+            duration=None,
+        )
+
+        async def download_media(message, *, file, **options):
+            Path(file).write_bytes(b"full-image")
+            return file
+
+        self.client.download_media = download_media
+
+        path, media_type, filename = await self.service.download_visual_media(
+            account_id="work",
+            chat_id=101,
+            message_id=3,
+        )
+        self.addCleanup(path.unlink, missing_ok=True)
+
+        self.assertEqual(path.read_bytes(), b"full-image")
+        self.assertEqual(media_type, "image/jpeg")
+        self.assertEqual(filename, "photo.jpg")
+        self.assertFalse(self.service.cache_root.exists())
+
+    async def test_gif_and_sticker_files_can_be_downloaded_without_persistent_cache(self):
+        for kind in ("gif", "sticker"):
+            with self.subTest(kind=kind):
+                media_message = self.client.messages[101][-1]
+                media_message.media = object()
+                media_message.photo = None
+                media_message.document = SimpleNamespace(thumbs=[])
+                media_message.file = SimpleNamespace(
+                    name=f"media-{kind}",
+                    mime_type="video/mp4" if kind == "gif" else "application/x-tgsticker",
+                    size=1024,
+                    duration=None,
+                )
+                media_message.gif = kind == "gif"
+                media_message.sticker = kind == "sticker"
+
+                async def download_media(message, *, file, **options):
+                    Path(file).write_bytes(f"full-{kind}".encode())
+                    return file
+
+                self.client.download_media = download_media
+
+                path, _, filename = await self.service.download_visual_media(
+                    account_id="work", chat_id=101, message_id=3
+                )
+                self.addCleanup(path.unlink, missing_ok=True)
+
+                self.assertEqual(path.read_bytes(), f"full-{kind}".encode())
+                self.assertTrue(filename.startswith(f"media-{kind}"))
+                self.assertFalse(self.service.cache_root.exists())
+
+    async def test_non_visual_media_is_not_downloaded(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = object()
+        media_message.document = object()
+        media_message.file = SimpleNamespace(
+            name="video.mp4",
+            mime_type="video/mp4",
+            size=500 * 1024 * 1024,
+            duration=120,
+        )
+        downloads = 0
+
+        async def download_media(message, *, file, **options):
+            nonlocal downloads
+            downloads += 1
+            return file
+
+        self.client.download_media = download_media
+
+        with self.assertRaises(TelegramPreviewError) as raised:
+            await self.service.download_visual_media(
+                account_id="work",
+                chat_id=101,
+                message_id=3,
+            )
+
+        self.assertEqual(raised.exception.code, "visual_media_not_found")
+        self.assertEqual(downloads, 0)
+        self.assertFalse(self.service.cache_root.exists())
 
 
 if __name__ == "__main__":

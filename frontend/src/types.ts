@@ -66,9 +66,19 @@ export interface TelegramPreviewMessage {
     duration?: number | null
     width?: number | null
     height?: number | null
+    is_visual_media: boolean
     has_thumbnail: boolean
     inline_thumbnail?: string | null
-    downloadable: boolean
+    poll?: {
+      question: string
+      options: Array<{ text: string; voters: number; chosen: boolean; correct: boolean }>
+      results_visible: boolean
+      total_voters: number
+      multiple_choice: boolean
+      quiz: boolean
+      closed: boolean
+      solution?: string | null
+    } | null
   } | null
   reply_to?: {
     message_id: number

@@ -5,9 +5,11 @@ from __future__ import annotations
 import base64
 import asyncio
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
+import secrets
 import shutil
 import tempfile
 import time
@@ -133,6 +135,19 @@ def _media_label(kind: str) -> str:
     }.get(kind, "消息")
 
 
+def _text_with_entities(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(getattr(value, "text", value) or "")
+
+
+def _poll_question(message: Any) -> str:
+    media = getattr(message, "media", None)
+    if not isinstance(media, types.MessageMediaPoll):
+        return ""
+    return _text_with_entities(getattr(media.poll, "question", None))
+
+
 def _stripped_thumbnail(content: bytes | None) -> str | None:
     if not content or len(content) > 8 * 1024:
         return None
@@ -150,12 +165,19 @@ class TelegramPreviewService:
     CACHE_MAX_BYTES = 128 * 1024 * 1024
     AVATAR_MAX_AGE = 6 * 60 * 60
     THUMBNAIL_MAX_AGE = 7 * 24 * 60 * 60
+    CACHE_MAGIC = b"TPXC1"
+    CACHE_KEY_BYTES = 32
+    CACHE_TAG_BYTES = 16
 
     def __init__(self, bot_manager: Any, account_store: Any, events: EventBus):
         self.bot_manager = bot_manager
         self.account_store = account_store
         self.events = events
         self.cache_root = Path(account_store.data_dir) / "telegram_preview_cache"
+        self.cache_key_path = Path(account_store.data_dir) / ".telegram_preview_cache.key"
+        self._cache_key, key_created = self._load_or_create_cache_key()
+        if key_created:
+            shutil.rmtree(self.cache_root, ignore_errors=True)
         self._cache_locks: weakref.WeakValueDictionary[Path, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -330,7 +352,8 @@ class TelegramPreviewService:
                 chat_id=chat_id,
                 message_id=message_id,
             )
-            if not self._has_thumbnail(message):
+            thumbnail = self._thumbnail(message)
+            if thumbnail is None:
                 raise TelegramPreviewError(
                     "thumbnail_not_found", "Message has no image thumbnail"
                 )
@@ -338,7 +361,7 @@ class TelegramPreviewService:
                 content = await client.download_media(
                     message,
                     file=bytes,
-                    thumb=self._thumbnail(message),
+                    thumb=thumbnail,
                 )
             except Exception as exc:
                 raise TelegramPreviewError(
@@ -365,32 +388,67 @@ class TelegramPreviewService:
         path = self._account_cache_path(account_id)
         await asyncio.to_thread(shutil.rmtree, path, True)
 
-    async def download_media(
+    async def download_visual_media(
         self,
         *,
         account_id: str,
         chat_id: int,
         message_id: int,
     ) -> tuple[Path, str, str]:
-        client, message = await self._message(client_account=account_id, chat_id=chat_id, message_id=message_id)
-        if not getattr(message, "media", None) or _media_type(message) == "service":
-            raise TelegramPreviewError("media_not_found", "Message has no downloadable media")
+        client, message = await self._message(
+            client_account=account_id,
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+        if not self._is_visual_media(message):
+            raise TelegramPreviewError(
+                "visual_media_not_found",
+                "Message does not contain a downloadable image, GIF, or sticker",
+            )
 
         media = self._media_data(message)
+        mime_type = media["mime_type"] or (
+            "image/gif"
+            if media["type"] == "animation"
+            else "application/x-tgsticker"
+            if media["type"] == "sticker"
+            else "image/jpeg"
+        )
         filename = media["file_name"] or f"telegram-{chat_id}-{message_id}"
-        suffix = Path(filename).suffix
-        file_descriptor, temporary_name = tempfile.mkstemp(prefix="telerelay-media-", suffix=suffix)
+        default_suffix = {
+            "animation": ".gif",
+            "sticker": ".tgs",
+        }.get(media["type"], ".jpg")
+        suffix = (
+            Path(filename).suffix
+            or mimetypes.guess_extension(mime_type)
+            or default_suffix
+        )
+        if not Path(filename).suffix:
+            filename += suffix
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix="telerelay-visual-",
+            suffix=suffix,
+        )
         os.close(file_descriptor)
         try:
             downloaded = await client.download_media(message, file=temporary_name)
         except Exception as exc:
             Path(temporary_name).unlink(missing_ok=True)
-            raise TelegramPreviewError("media_download_failed", "Telegram media download failed") from exc
+            raise TelegramPreviewError(
+                "visual_media_download_failed",
+                "Telegram visual media download failed",
+            ) from exc
         path = Path(downloaded or temporary_name)
+        temporary_path = Path(temporary_name)
+        if path != temporary_path:
+            temporary_path.unlink(missing_ok=True)
         if not path.is_file() or not path.stat().st_size:
             path.unlink(missing_ok=True)
-            raise TelegramPreviewError("media_not_found", "Telegram media is unavailable")
-        mime_type = media["mime_type"] or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            raise TelegramPreviewError(
+                "visual_media_not_found",
+                "Telegram visual media is unavailable",
+            )
         return path, mime_type, Path(filename).name
 
     async def handle_new_message(self, event: Any) -> None:
@@ -448,14 +506,20 @@ class TelegramPreviewService:
             await asyncio.to_thread(self._write_cache, path, content)
             return content
 
-    @staticmethod
-    def _read_cache(path: Path, max_age: int) -> bytes | None:
+    def _read_cache(self, path: Path, max_age: int) -> bytes | None:
         try:
             stat = path.stat()
             if time.time() - stat.st_mtime > max_age:
                 path.unlink(missing_ok=True)
                 return None
-            content = path.read_bytes()
+            stored = path.read_bytes()
+            if not stored.startswith(self.CACHE_MAGIC):
+                path.unlink(missing_ok=True)
+                return None
+            content = self._decrypt_cache(stored)
+            if content is None:
+                path.unlink(missing_ok=True)
+                return None
             os.utime(path, (time.time(), stat.st_mtime))
             return content or None
         except OSError:
@@ -470,12 +534,74 @@ class TelegramPreviewService:
         )
         try:
             with os.fdopen(file_descriptor, "wb") as handle:
-                handle.write(content)
+                handle.write(self._encrypt_cache(content))
             os.replace(temporary_name, path)
         finally:
             if os.path.exists(temporary_name):
                 os.unlink(temporary_name)
         self._prune_cache()
+
+    def _load_or_create_cache_key(self) -> tuple[bytes, bool]:
+        try:
+            key = self.cache_key_path.read_bytes()
+            created = False
+        except FileNotFoundError:
+            key = secrets.token_bytes(self.CACHE_KEY_BYTES)
+            created = True
+            self.cache_key_path.parent.mkdir(parents=True, exist_ok=True)
+            file_descriptor = os.open(
+                self.cache_key_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            try:
+                with os.fdopen(file_descriptor, "wb") as handle:
+                    handle.write(key)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except Exception:
+                self.cache_key_path.unlink(missing_ok=True)
+                raise
+        if len(key) != self.CACHE_KEY_BYTES:
+            raise RuntimeError("Telegram preview cache key is invalid")
+        try:
+            self.cache_key_path.chmod(0o600)
+        except OSError:
+            pass
+        return key, created
+
+    def _encrypt_cache(self, content: bytes) -> bytes:
+        encrypted = self._xor_cache(content)
+        tag = hmac.digest(
+            self._cache_key,
+            self.CACHE_MAGIC + encrypted,
+            "sha256",
+        )[: self.CACHE_TAG_BYTES]
+        return self.CACHE_MAGIC + tag + encrypted
+
+    def _decrypt_cache(self, stored: bytes) -> bytes | None:
+        header_size = len(self.CACHE_MAGIC) + self.CACHE_TAG_BYTES
+        if len(stored) <= header_size:
+            return None
+        tag_start = len(self.CACHE_MAGIC)
+        content_start = tag_start + self.CACHE_TAG_BYTES
+        tag = stored[tag_start:content_start]
+        encrypted = stored[content_start:]
+        expected = hmac.digest(
+            self._cache_key,
+            self.CACHE_MAGIC + encrypted,
+            "sha256",
+        )[: self.CACHE_TAG_BYTES]
+        if not hmac.compare_digest(tag, expected):
+            return None
+        return self._xor_cache(encrypted)
+
+    def _xor_cache(self, content: bytes) -> bytes:
+        key_size = len(self._cache_key)
+        return bytes(
+            value ^ self._cache_key[index % key_size]
+            for index, value in enumerate(content)
+        )
 
     def _prune_cache(self) -> None:
         now = time.monotonic()
@@ -533,13 +659,14 @@ class TelegramPreviewService:
     def _message_summary(self, message: Any, chat_id: int) -> dict[str, Any]:
         kind = _media_type(message)
         text = getattr(message, "raw_text", None) or getattr(message, "text", None) or ""
+        preview = _poll_question(message) or text or f"[{_media_label(kind)}]"
         return {
             "id": int(message.id),
             "chat_id": chat_id,
             "date": _date_text(getattr(message, "date", None)),
             "text": text,
             "media_type": kind,
-            "preview": text or f"[{_media_label(kind)}]",
+            "preview": preview,
             "outgoing": bool(getattr(message, "out", False)),
         }
 
@@ -629,7 +756,7 @@ class TelegramPreviewService:
         return {
             "message_id": int(reply.id),
             "sender_name": _display_name(sender) or None,
-            "text": text or f"[{_media_label(kind)}]",
+            "text": _poll_question(reply) or text or f"[{_media_label(kind)}]",
             "media_type": kind,
         }
 
@@ -649,9 +776,45 @@ class TelegramPreviewService:
             "duration": getattr(message_file, "duration", None),
             "width": width,
             "height": height,
+            "is_visual_media": self._is_visual_media(message),
             "has_thumbnail": self._has_thumbnail(message),
             "inline_thumbnail": self._inline_thumbnail(message),
-            "downloadable": bool(getattr(message, "media", None)),
+            "poll": self._poll_data(message),
+        }
+
+    @staticmethod
+    def _poll_data(message: Any) -> dict[str, Any] | None:
+        media = getattr(message, "media", None)
+        if not isinstance(media, types.MessageMediaPoll):
+            return None
+        poll = media.poll
+        results = media.results
+        result_items = list(getattr(results, "results", None) or [])
+        result_by_option = {
+            bytes(item.option): item
+            for item in result_items
+            if getattr(item, "option", None) is not None
+        }
+        options = []
+        for answer in poll.answers:
+            result = result_by_option.get(bytes(answer.option))
+            options.append(
+                {
+                    "text": _text_with_entities(answer.text),
+                    "voters": int(getattr(result, "voters", 0) or 0),
+                    "chosen": bool(getattr(result, "chosen", False)),
+                    "correct": bool(getattr(result, "correct", False)),
+                }
+            )
+        return {
+            "question": _text_with_entities(poll.question),
+            "options": options,
+            "results_visible": bool(result_items),
+            "total_voters": int(getattr(results, "total_voters", 0) or 0),
+            "multiple_choice": bool(getattr(poll, "multiple_choice", False)),
+            "quiz": bool(getattr(poll, "quiz", False)),
+            "closed": bool(getattr(poll, "closed", False)),
+            "solution": getattr(results, "solution", None) or None,
         }
 
     @staticmethod
@@ -706,7 +869,21 @@ class TelegramPreviewService:
 
     @staticmethod
     def _has_thumbnail(message: Any) -> bool:
-        if getattr(message, "photo", None):
+        return bool(
+            TelegramPreviewService._is_visual_media(message)
+            and (
+                TelegramPreviewService._inline_thumbnail(message)
+                or TelegramPreviewService._thumbnail(message) is not None
+            )
+        )
+
+    @staticmethod
+    def _is_visual_media(message: Any) -> bool:
+        if (
+            getattr(message, "photo", None)
+            or getattr(message, "gif", None)
+            or getattr(message, "sticker", None)
+        ):
             return True
         mime_type = getattr(getattr(message, "file", None), "mime_type", "") or ""
         return bool(getattr(message, "document", None) and mime_type.startswith("image/"))
@@ -726,7 +903,7 @@ class TelegramPreviewService:
             if not isinstance(size, (types.PhotoStrippedSize, types.PhotoPathSize))
         ]
         if not usable:
-            return -1
+            return None
         within_preview = [
             size
             for size in usable

@@ -87,11 +87,11 @@ def _preview_error(exc: TelegramPreviewError) -> HTTPException:
     status = {
         "avatar_not_found": 404,
         "chat_not_found": 404,
-        "media_not_found": 404,
+        "visual_media_not_found": 404,
         "message_not_found": 404,
         "thumbnail_not_found": 404,
         "invalid_cursor": 422,
-        "media_download_failed": 502,
+        "visual_media_download_failed": 502,
     }.get(exc.code, 409)
     return _error(exc.code, str(exc), status)
 
@@ -231,15 +231,15 @@ async def telegram_preview_thumbnail(
     return _image_response(content, media_type, request)
 
 
-@router.get("/telegram-preview/chats/{chat_id}/messages/{message_id}/media")
-async def telegram_preview_media(
+@router.get("/telegram-preview/chats/{chat_id}/messages/{message_id}/visual-media")
+async def telegram_preview_visual_media(
     chat_id: int,
     message_id: int,
     account_id: str,
     context: ApplicationContext = Depends(get_context),
 ) -> FileResponse:
     try:
-        path, media_type, filename = await _telegram_preview(context).download_media(
+        path, media_type, filename = await _telegram_preview(context).download_visual_media(
             account_id=account_id,
             chat_id=chat_id,
             message_id=message_id,
