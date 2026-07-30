@@ -15,6 +15,9 @@ frontend/dist/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+frontend-new/node_modules/
+frontend-new/dist/
+frontend-new/*.tsbuildinfo
 
 .history/
 

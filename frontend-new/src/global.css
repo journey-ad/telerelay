@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700&display=swap');
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'DM Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-display: 'Manrope', 'PingFang SC', sans-serif;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    letter-spacing: 0;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    margin: 0;
+  }
+
+  body {
+    min-width: 320px;
+    background: #f5f8fc;
+    color: #17243a;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: #2563eb;
+    color: white;
+  }
+}

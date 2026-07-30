@@ -1,0 +1,126 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { request } from './api/client'
+import { clearCredentials } from './api/credentials'
+import { AppShell } from './components/AppShell'
+import { Brand } from './components/Brand'
+import { Login } from './components/Login'
+import type { SessionInfo } from './types'
+import { cn } from './utils/cn'
+
+const DashboardPage = lazy(() =>
+  import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
+)
+const RulesPage = lazy(() =>
+  import('./pages/RulesPage').then((module) => ({ default: module.RulesPage })),
+)
+const AutomationsPage = lazy(() =>
+  import('./pages/AutomationsPage').then((module) => ({ default: module.AutomationsPage })),
+)
+const HistoryPage = lazy(() =>
+  import('./pages/HistoryPage').then((module) => ({ default: module.HistoryPage })),
+)
+const ExportsPage = lazy(() =>
+  import('./pages/ExportsPage').then((module) => ({ default: module.ExportsPage })),
+)
+const LogsPage = lazy(() =>
+  import('./pages/LogsPage').then((module) => ({ default: module.LogsPage })),
+)
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
+)
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, staleTime: 15_000, refetchOnWindowFocus: false },
+  },
+})
+
+function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => void }) {
+  const page = (children: ReactNode) => (
+    <Suspense
+      fallback={
+        <div
+          className={cn(
+            'flex min-h-[60vh] items-center justify-center gap-3',
+            'text-[10px] text-slate-500',
+          )}
+        >
+          <span
+            className={cn(
+              'size-5 animate-spin rounded-full border-2',
+              'border-blue-100 border-t-blue-600',
+            )}
+          />
+          正在加载
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  )
+  const router = createBrowserRouter([
+    {
+      element: <AppShell session={session} onLogout={onLogout} />,
+      children: [
+        { path: '/', element: page(<DashboardPage />) },
+        { path: '/rules', element: page(<RulesPage />) },
+        { path: '/automations', element: page(<AutomationsPage />) },
+        { path: '/history', element: page(<HistoryPage />) },
+        { path: '/exports', element: page(<ExportsPage />) },
+        { path: '/logs', element: page(<LogsPage />) },
+        { path: '/settings', element: page(<SettingsPage />) },
+      ],
+    },
+  ])
+  return <RouterProvider router={router} />
+}
+
+export default function App() {
+  const [ready, setReady] = useState(false)
+  const [session, setSession] = useState<SessionInfo | null>(null)
+
+  useEffect(() => {
+    request<SessionInfo>('/api/v1/session')
+      .then(setSession)
+      .catch(() => setSession(null))
+      .finally(() => setReady(true))
+  }, [])
+
+  function logout() {
+    clearCredentials()
+    setSession(null)
+    queryClient.clear()
+  }
+
+  if (!ready) {
+    return (
+      <main
+        className={cn(
+          'flex min-h-dvh flex-col items-center justify-center gap-6',
+          'bg-slate-50 text-[10px] text-slate-500',
+        )}
+      >
+        <Brand />
+        <span
+          className={cn(
+            'size-6 animate-spin rounded-full border-2',
+            'border-blue-100 border-t-blue-600',
+          )}
+        />
+        <p>正在连接本地节点</p>
+      </main>
+    )
+  }
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      {session ? (
+        <Console session={session} onLogout={logout} />
+      ) : (
+        <Login onAuthenticated={setSession} />
+      )}
+    </QueryClientProvider>
+  )
+}

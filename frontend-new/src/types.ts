@@ -1,0 +1,132 @@
+export type ChatRef = string | number
+
+export interface SessionInfo {
+  authenticated: boolean
+  auth_required: boolean
+  session_type: 'user' | 'bot'
+  language: string
+}
+
+export interface ForwardingRule {
+  name: string
+  enabled: boolean
+  source_chats: ChatRef[]
+  target_chats: ChatRef[]
+  filters: {
+    mode: 'whitelist' | 'blacklist'
+    keywords: string[]
+    regex_patterns: string[]
+    media_types: string[]
+    max_file_size: number
+    min_file_size: number
+  }
+  ignore: { user_ids: number[]; keywords: string[] }
+  forwarding: {
+    preserve_format: boolean
+    add_source_info: boolean
+    delay: number
+    force_forward: boolean
+    hide_sender: boolean
+    deduplicate: boolean
+    deduplicate_window: number
+  }
+}
+
+export interface ButtonRule {
+  name: string
+  enabled: boolean
+  source_chats: ChatRef[]
+  button_texts: string[]
+  match_mode: 'exact' | 'contains' | 'regex'
+  delay: number
+  click_all_matches: boolean
+}
+
+export interface BotStatus {
+  is_connected?: boolean
+  is_running?: boolean
+  stats?: { forwarded?: number; filtered?: number; total?: number }
+  queue?: { counts?: Record<string, number>; pause_reason?: string }
+}
+
+export interface Stats {
+  daily: Array<{ date: string; forwarded: number; filtered: number; total?: number }>
+  rules: Array<{ rule_name: string; total: number; forwarded: number; filtered?: number }>
+}
+
+export interface HistoryItem {
+  id: number
+  forwarded_at: string
+  rule_name: string
+  source_chat_name?: string
+  source_chat_id: number
+  sender_name?: string
+  sender_username?: string
+  content?: string
+  media_type?: string
+}
+
+export interface HistoryPage {
+  items: HistoryItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface ExportChat {
+  label: string
+  chat_id: number
+}
+export interface ExportTask {
+  id: number
+  name: string
+  chat_id: number
+  chat_title?: string
+  initial_start_at?: string | null
+  formats: string[]
+  subdirectory: string
+  schedule_type: 'hourly' | 'daily' | 'weekly'
+  minute: number
+  hour: number
+  weekday: number
+  timezone: string
+  all_history: boolean
+  enabled: boolean
+  next_run_at?: string | null
+}
+
+export interface ExportRun {
+  id: number
+  started_at: string
+  run_type: string
+  chat_title?: string
+  chat_id?: number
+  status: string
+  message_count: number
+  files: string[]
+}
+
+export interface ExportJob {
+  id: string
+  status: string
+  processed: number
+  total?: number
+  phase?: string
+  files: string[]
+  error?: string
+}
+
+export interface TelegramAuth {
+  state: string
+  error?: string
+  user_info?: string
+}
+export interface AppConfig {
+  config: Record<string, unknown>
+  runtime: { session_type: string }
+}
+export interface RelayEvent {
+  type: string
+  payload: Record<string, unknown>
+  at: string
+}
