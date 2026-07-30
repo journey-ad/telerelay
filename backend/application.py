@@ -10,6 +10,7 @@ from backend.events import EventBus, EventLogHandler
 from backend.exporter.scheduler import ExportScheduler
 from backend.exporter.service import ExportService
 from backend.services import RuleService
+from backend.telegram_accounts import TelegramAccountService
 
 
 @dataclass
@@ -22,5 +23,5 @@ class ApplicationContext:
     rules: RuleService
     events: EventBus
     log_handler: EventLogHandler
+    accounts: TelegramAccountService | None = None
     admin_thread: Thread | None = None
-

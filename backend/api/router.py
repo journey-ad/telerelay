@@ -24,10 +24,12 @@ from backend.schemas import (
     GroupExportRequest,
     MessageExportRequest,
     RegexValidateRequest,
+    TelegramAccountCreate,
     TogglePayload,
 )
 from backend.services import ServiceError, validate_regex_patterns
 from backend.stats_db import get_stats_db
+from backend.telegram_accounts import TelegramAccountError
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_auth)])
 
@@ -49,7 +51,81 @@ async def session(context: ApplicationContext = Depends(get_context)) -> dict:
         ),
         "session_type": context.config.session_type,
         "language": context.config.language,
+        "active_account_id": (
+            context.accounts.store.active_account_id if context.accounts else None
+        ),
     }
+
+
+def _accounts(context: ApplicationContext):
+    if not context.accounts:
+        raise _error("not_user_mode", "Telegram accounts are only available in user mode", 409)
+    return context.accounts
+
+
+@router.get("/telegram-accounts")
+async def list_telegram_accounts(
+    context: ApplicationContext = Depends(get_context),
+) -> list[dict]:
+    return _accounts(context).list_accounts()
+
+
+@router.get("/telegram-accounts/{account_id}/avatar")
+async def telegram_account_avatar(
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> FileResponse:
+    try:
+        avatar_path = _accounts(context).store.get_avatar_path(account_id)
+    except TelegramAccountError as exc:
+        raise _error(exc.code, str(exc), 404) from exc
+    if avatar_path is None:
+        raise _error("avatar_not_found", "Telegram account avatar does not exist", 404)
+    return FileResponse(
+        avatar_path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@router.post("/telegram-accounts", status_code=201)
+async def create_telegram_account(
+    payload: TelegramAccountCreate,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        account = await _accounts(context).create(payload.label)
+    except TelegramAccountError as exc:
+        raise _error(exc.code, str(exc), 409) from exc
+    context.events.publish("telegram-account", {"action": "create", "id": account["id"]})
+    return account
+
+
+@router.post("/telegram-accounts/{account_id}/activate")
+async def activate_telegram_account(
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        account = await _accounts(context).activate(account_id)
+    except TelegramAccountError as exc:
+        raise _error(exc.code, str(exc), 404) from exc
+    context.events.publish("telegram-account", {"action": "activate", "id": account_id})
+    return account
+
+
+@router.delete("/telegram-accounts/{account_id}", response_model=ApiMessage)
+async def delete_telegram_account(
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> ApiMessage:
+    try:
+        await _accounts(context).delete(account_id)
+    except TelegramAccountError as exc:
+        status_code = 409 if exc.code == "last_account" else 404
+        raise _error(exc.code, str(exc), status_code) from exc
+    context.events.publish("telegram-account", {"action": "delete", "id": account_id})
+    return ApiMessage(code="telegram_account_deleted")
 
 
 @router.get("/bot/status")
@@ -96,7 +172,10 @@ async def reset_stats(context: ApplicationContext = Depends(get_context)) -> Api
 async def telegram_auth_state(context: ApplicationContext = Depends(get_context)) -> dict:
     if not context.auth:
         return {"state": "not_required", "error": "", "user_info": ""}
-    return context.auth.get_state()
+    return {
+        **context.auth.get_state(),
+        "account_id": context.accounts.store.active_account_id if context.accounts else None,
+    }
 
 
 @router.post("/telegram-auth/start", response_model=ApiMessage)
@@ -151,9 +230,12 @@ async def submit_password(
 async def clear_telegram_session(
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
-    if context.bot.is_running:
-        await context.bot.stop()
-    await asyncio.to_thread(TelegramClientManager(context.config).clear_session)
+    if context.accounts:
+        await context.accounts.clear_active_session()
+    else:
+        if context.bot.is_running:
+            await context.bot.stop()
+        await asyncio.to_thread(TelegramClientManager(context.config).clear_session)
     if context.auth:
         context.auth.reset()
     return ApiMessage(code="telegram_session_cleared")

@@ -5,6 +5,7 @@ Manages the startup, shutdown, and restart of Telegram Bot
 import asyncio
 import threading
 from concurrent.futures import Future
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from backend.button_actions import ButtonActionEngine
@@ -36,7 +37,12 @@ logger = get_logger()
 class BotManager:
     """Bot Lifecycle Manager"""
 
-    def __init__(self, config: Config, auth_manager: Optional['AuthManager'] = None):
+    def __init__(
+        self,
+        config: Config,
+        auth_manager: Optional['AuthManager'] = None,
+        session_name: str | Path | None = None,
+    ):
         """Initialize Bot Manager
 
         Args:
@@ -45,6 +51,8 @@ class BotManager:
         """
         self.config = config
         self.auth_manager = auth_manager
+        self.session_name = Path(session_name) if session_name else Path("data/telegram_session")
+        self.on_user_authenticated: Callable[[dict[str, Any]], None] | None = None
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
         self.forwarders = []
@@ -65,6 +73,12 @@ class BotManager:
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Bind lifecycle operations to FastAPI's owning event loop."""
         self.loop = loop
+
+    def set_session_name(self, session_name: str | Path) -> None:
+        """Select the session used by the next runtime start."""
+        if self.is_running:
+            raise RuntimeError("Cannot change Telegram session while runtime is active")
+        self.session_name = Path(session_name)
 
     @property
     def is_running(self) -> bool:
@@ -132,7 +146,12 @@ class BotManager:
                 return
 
             # Initialize client
-            self.client_manager = TelegramClientManager(self.config, self.auth_manager)
+            self.client_manager = TelegramClientManager(
+                self.config,
+                self.auth_manager,
+                session_name=self.session_name,
+                on_user_authenticated=self.on_user_authenticated,
+            )
 
             # Connect
             if not await self.client_manager.connect():
@@ -463,8 +482,12 @@ class BotManager:
             return False
 
         logger.debug(t("log.bot.stopping"))
-        self._stop_event.set()
-        if task:
+        if task and not self.is_connected:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        else:
+            self._stop_event.set()
+        if task and not task.done():
             try:
                 await asyncio.wait_for(asyncio.shield(task), timeout=BOT_STOP_TIMEOUT)
             except asyncio.TimeoutError:

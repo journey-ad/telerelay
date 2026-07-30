@@ -3,7 +3,7 @@ Telegram Client Management Module
 Encapsulates Telethon client, handles connection and session management
 """
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.parse import urlparse
 
 from telethon import TelegramClient, events
@@ -27,7 +27,13 @@ logger = get_logger()
 class TelegramClientManager:
     """Telegram Client Manager"""
 
-    def __init__(self, config: Config, auth_manager: Optional['AuthManager'] = None):
+    def __init__(
+        self,
+        config: Config,
+        auth_manager: Optional['AuthManager'] = None,
+        session_name: str | Path | None = None,
+        on_user_authenticated: Callable[[dict[str, Any]], None] | None = None,
+    ):
         """
         Initialize client manager
 
@@ -37,6 +43,7 @@ class TelegramClientManager:
         """
         self.config = config
         self.auth_manager = auth_manager
+        self.on_user_authenticated = on_user_authenticated
         self.client: Optional[TelegramClient] = None
         self.is_connected = False
 
@@ -45,7 +52,8 @@ class TelegramClientManager:
         session_dir.mkdir(exist_ok=True)
 
         # Session file path
-        self.session_name = session_dir / "telegram_session"
+        self.session_name = Path(session_name) if session_name else session_dir / "telegram_session"
+        self.session_name.parent.mkdir(parents=True, exist_ok=True)
     
     def _parse_proxy(self) -> Optional[tuple]:
         """
@@ -160,6 +168,22 @@ class TelegramClientManager:
                     # Save user info to AuthManager
                     self.auth_manager.set_user_info(user_info)
 
+                    if self.on_user_authenticated:
+                        identity = {
+                            "display_name": full_name,
+                            "username": me.username or "",
+                            "telegram_user_id": me.id,
+                        }
+                        try:
+                            identity["avatar_bytes"] = await self.client.download_profile_photo(
+                                me,
+                                file=bytes,
+                                download_big=False,
+                            )
+                        except Exception as exc:
+                            logger.warning("Failed to refresh Telegram profile photo: %s", exc)
+                        self.on_user_authenticated(identity)
+
                     # Set authentication success state
                     self.auth_manager.set_state("success")
 
@@ -242,11 +266,16 @@ class TelegramClientManager:
 
     def clear_session(self) -> None:
         """Clear session file"""
+        self.clear_session_files(self.session_name)
+
+    @staticmethod
+    def clear_session_files(session_name: str | Path) -> None:
+        """Clear a specific Telethon session and its journal."""
         try:
             import os
             session_files = [
-                f"{self.session_name}.session",
-                f"{self.session_name}.session-journal"
+                f"{session_name}.session",
+                f"{session_name}.session-journal"
             ]
 
             for session_file in session_files:

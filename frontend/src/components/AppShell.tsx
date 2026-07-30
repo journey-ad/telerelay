@@ -1,9 +1,7 @@
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive,
   Bot,
-  ChevronDown,
   FileClock,
   History,
   LayoutDashboard,
@@ -22,6 +20,7 @@ import { request } from '../api/client'
 import { useEvents } from '../hooks/useEvents'
 import type { BotStatus, SessionInfo } from '../types'
 import { cn } from '../utils/cn'
+import { AccountSwitcher } from './AccountSwitcher'
 import { Brand } from './Brand'
 import { IconButton } from './ui'
 
@@ -194,52 +193,13 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
               icon={RefreshCw}
               onClick={() => void queryClient.invalidateQueries()}
             />
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger
-                className={cn(
-                  'ml-1 flex h-9.5 items-center gap-2 rounded-md border border-slate-200',
-                  'bg-white p-1 pr-2 text-slate-500 max-md:pr-1',
-                )}
-              >
-                <span
-                  className={cn(
-                    'grid size-7.5 place-items-center rounded bg-blue-50',
-                    'text-[10px] font-bold text-blue-700',
-                  )}
-                >
-                  TR
-                </span>
-                <span className="flex min-w-18 flex-col items-start max-md:hidden">
-                  <strong className="text-[10px] text-slate-700">TeleRelay</strong>
-                  <small className="text-[8px] text-slate-400">
-                    {session.session_type === 'user' ? '用户会话' : '机器人会话'}
-                  </small>
-                </span>
-                <ChevronDown className="max-md:hidden" size={14} />
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  className={cn(
-                    'z-100 min-w-40 rounded-md border border-slate-200',
-                    'bg-white p-1 shadow-xl',
-                  )}
-                  align="end"
-                  sideOffset={8}
-                >
-                  <DropdownMenu.Item
-                    className={cn(
-                      'flex h-8.5 items-center gap-2 rounded px-2 text-[11px]',
-                      'text-slate-600 outline-none data-[highlighted]:bg-blue-50',
-                      'data-[highlighted]:text-blue-700',
-                    )}
-                    onSelect={onLogout}
-                  >
-                    <LogOut size={16} />
-                    退出登录
-                  </DropdownMenu.Item>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
+            {session.session_type === 'user' ? (
+              <AccountSwitcher onLogout={onLogout} />
+            ) : (
+              <span className="ml-1 flex h-9.5 items-center rounded-md border border-slate-200 bg-white px-3 text-[10px] text-slate-600">
+                机器人会话
+              </span>
+            )}
           </div>
         </header>
         <div className="mx-auto w-full max-w-370 px-7 py-7 max-md:px-3.5 max-md:py-5">

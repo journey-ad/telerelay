@@ -22,6 +22,7 @@ from backend.exporter.service import ExportService
 from backend.i18n import set_language
 from backend.logger import get_logger, setup_logger
 from backend.services import RuleService
+from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
 
 
 @asynccontextmanager
@@ -40,8 +41,16 @@ async def lifespan(app: FastAPI):
     logger.addHandler(log_handler)
 
     auth = AuthManager(input_timeout=300) if config.session_type == "user" else None
-    bot = BotManager(config, auth)
+    account_store = TelegramAccountStore() if auth else None
+    bot = BotManager(
+        config,
+        auth,
+        session_name=account_store.active_session_name if account_store else None,
+    )
     bot.bind_loop(asyncio.get_running_loop())
+    accounts = TelegramAccountService(account_store, bot, auth) if account_store and auth else None
+    if accounts:
+        bot.on_user_authenticated = accounts.update_active_identity
     exports = ExportService(config, bot)
     scheduler = ExportScheduler(exports)
     rules = RuleService(config, bot)
@@ -54,11 +63,12 @@ async def lifespan(app: FastAPI):
         rules=rules,
         events=events,
         log_handler=log_handler,
+        accounts=accounts,
     )
     app.state.context = context
 
     scheduler.start()
-    session_file = Path("data/telegram_session.session")
+    session_file = Path(f"{bot.session_name}.session")
     if session_file.exists():
         await bot.start()
 

@@ -15,12 +15,15 @@ from backend.auth_manager import AuthManager
 from backend.config import Config
 from backend.events import EventBus
 from backend.services import RuleService
+from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
 
 
 class FakeBot:
     def __init__(self):
         self.is_running = False
+        self.is_connected = False
         self.restarts = 0
+        self.session_name = Path("data/telegram_session")
 
     async def start(self):
         if self.is_running:
@@ -38,6 +41,9 @@ class FakeBot:
         self.restarts += 1
         self.is_running = True
         return True
+
+    def set_session_name(self, session_name):
+        self.session_name = Path(session_name)
 
     def get_status(self):
         return {
@@ -74,6 +80,8 @@ class ApiContractTests(unittest.TestCase):
         self.auth = AuthManager(input_timeout=1)
         self.events = EventBus()
         self.rules = RuleService(self.config, self.bot)
+        self.account_store = TelegramAccountStore(root / "data")
+        self.accounts = TelegramAccountService(self.account_store, self.bot, self.auth)
         self.context = ApplicationContext(
             config=self.config,
             auth=self.auth,
@@ -83,6 +91,7 @@ class ApiContractTests(unittest.TestCase):
             rules=self.rules,
             events=self.events,
             log_handler=SimpleNamespace(),
+            accounts=self.accounts,
         )
         self.client = TestClient(make_app(self.context))
         self.addCleanup(self.client.close)
@@ -95,6 +104,36 @@ class ApiContractTests(unittest.TestCase):
         status = self.client.get("/api/v1/bot/status")
         self.assertEqual(status.status_code, 200)
         self.assertFalse(status.json()["is_running"])
+
+    def test_telegram_account_create_list_and_activate_contracts(self):
+        initial = self.client.get("/api/v1/telegram-accounts")
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.json()[0]["id"], "default")
+
+        created = self.client.post(
+            "/api/v1/telegram-accounts",
+            json={"label": "工作账号"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertTrue(created.json()["active"])
+
+        activated = self.client.post("/api/v1/telegram-accounts/default/activate")
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertTrue(activated.json()["active"])
+
+    def test_telegram_account_avatar_contract(self):
+        missing = self.client.get("/api/v1/telegram-accounts/default/avatar")
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["detail"]["code"], "avatar_not_found")
+
+        self.account_store.update_avatar("default", b"fake-jpeg-avatar")
+        response = self.client.get("/api/v1/telegram-accounts/default/avatar")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "image/jpeg")
+        self.assertEqual(response.content, b"fake-jpeg-avatar")
+        account = self.client.get("/api/v1/telegram-accounts").json()[0]
+        self.assertIsNotNone(account["avatar_version"])
 
     def test_rule_crud_persists_yaml(self):
         payload = {

@@ -74,6 +74,18 @@ class AuthValue(StrictModel):
     value: str = Field(min_length=1, max_length=512)
 
 
+class TelegramAccountCreate(StrictModel):
+    label: str = Field(min_length=1, max_length=100)
+
+    @field_validator("label")
+    @classmethod
+    def clean_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Account label is required")
+        return value
+
+
 class GroupExportRequest(StrictModel):
     formats: list[Literal["json", "csv", "html"]]
     subdirectory: str = "groups"
@@ -113,4 +125,3 @@ class RegexValidateRequest(StrictModel):
 
 class ConfigPayload(StrictModel):
     config: dict[str, Any]
-

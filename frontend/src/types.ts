@@ -5,6 +5,21 @@ export interface SessionInfo {
   auth_required: boolean
   session_type: 'user' | 'bot'
   language: string
+  active_account_id?: string | null
+}
+
+export interface TelegramAccount {
+  id: string
+  label: string
+  display_name: string
+  username: string
+  telegram_user_id?: number | null
+  created_at: string
+  active: boolean
+  authenticated: boolean
+  connected: boolean
+  status: 'connected' | 'authenticated' | 'needs_auth'
+  avatar_version?: string | null
 }
 
 export interface ForwardingRule {
@@ -120,6 +135,7 @@ export interface TelegramAuth {
   state: string
   error?: string
   user_info?: string
+  account_id?: string | null
 }
 export interface AppConfig {
   config: Record<string, unknown>
