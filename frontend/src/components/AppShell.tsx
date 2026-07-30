@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import { useEvents } from '../hooks/useEvents'
 import type {
@@ -30,21 +31,22 @@ import type {
 import { cn } from '../utils/cn'
 import { AccountSwitcher } from './AccountSwitcher'
 import { Brand } from './Brand'
+import { LanguageToggle } from './LanguageToggle'
 import { IconButton } from './ui'
 
 const navigation = [
-  { to: '/', label: '总览', icon: LayoutDashboard, end: true },
-  { to: '/telegram', label: '会话预览', icon: MessageSquareText },
-  { to: '/rules', label: '转发规则', icon: Route },
-  { to: '/automations', label: '按钮自动化', icon: Sparkles },
-  { to: '/history', label: '消息记录', icon: History },
-  { to: '/exports', label: '导出中心', icon: Archive },
-  { to: '/logs', label: '运行日志', icon: FileClock },
-  { to: '/settings', label: '设置', icon: Settings },
-]
+  { to: '/', label: 'nav.dashboard', icon: LayoutDashboard, end: true },
+  { to: '/telegram', label: 'nav.telegram', icon: MessageSquareText },
+  { to: '/rules', label: 'nav.rules', icon: Route },
+  { to: '/automations', label: 'nav.automations', icon: Sparkles },
+  { to: '/history', label: 'nav.history', icon: History },
+  { to: '/exports', label: 'nav.exports', icon: Archive },
+  { to: '/logs', label: 'nav.logs', icon: FileClock },
+  { to: '/settings', label: 'nav.settings', icon: Settings },
+] as const
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `mb-1 flex h-10 items-center gap-3 rounded-[5px] px-3 text-xs font-medium transition ${
+  `mb-1 flex h-10 items-center gap-3 rounded-[5px] px-3 text-sm font-medium transition ${
     isActive
       ? 'bg-blue-50 text-blue-700 shadow-[inset_2px_0_#2563eb] [&>svg]:text-blue-600'
       : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700 [&>svg]:text-slate-400'
@@ -57,6 +59,7 @@ function isPreviewMessage(value: unknown): value is TelegramPreviewMessage {
 }
 
 export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout: () => void }) {
+  const { t } = useTranslation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const queryClient = useQueryClient()
   const location = useLocation()
@@ -128,7 +131,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
                     date: message.date,
                     text: message.text,
                     media_type: message.media?.type ?? 'text',
-                    preview: message.text || `[${message.media?.type ?? '消息'}]`,
+                    preview: message.text || `[${message.media?.type ?? t('media.message')}]`,
                     outgoing: message.outgoing,
                   },
                 }
@@ -142,7 +145,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
         )
       }
     },
-    [queryClient],
+    [queryClient, t],
   )
   useEvents(invalidateLiveData)
   const current = navigation.find((item) => item.to === location.pathname) ?? navigation[0]
@@ -162,7 +165,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
         <div className="flex h-19 items-center justify-between border-b border-slate-100 px-5">
           <Brand />
           <IconButton
-            label="关闭菜单"
+            label={t('nav.closeMenu')}
             icon={X}
             className="hidden max-md:grid"
             onClick={() => setMobileOpen(false)}
@@ -183,9 +186,9 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             <Bot size={19} />
           </span>
           <span className="flex min-w-0 flex-col">
-            <small className="text-[8px] font-bold text-slate-400">Telegram node</small>
-            <strong className="mt-0.5 truncate text-[11px] text-slate-700">
-              {online ? '连接正常' : '等待连接'}
+            <small className="text-[10px] font-bold text-slate-400">{t('node.title')}</small>
+            <strong className="mt-0.5 truncate text-[13px] text-slate-700">
+              {t(online ? 'node.connected' : 'node.waiting')}
             </strong>
           </span>
           <span
@@ -196,8 +199,8 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           />
         </div>
         <nav className="flex-1 overflow-auto px-3 py-4">
-          <span className="block px-2.5 pb-2 text-[9px] font-bold text-slate-400 uppercase">
-            工作台
+          <span className="block px-2.5 pb-2 text-[11px] font-bold text-slate-400 uppercase">
+            {t('nav.workspace')}
           </span>
           {navigation.slice(0, 6).map(({ icon: Icon, ...item }) => (
             <NavLink
@@ -207,11 +210,11 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
               className={navLinkClass}
             >
               <Icon size={18} />
-              <span>{item.label}</span>
+              <span>{t(item.label)}</span>
             </NavLink>
           ))}
-          <span className="mt-5 block px-2.5 pb-2 text-[9px] font-bold text-slate-400 uppercase">
-            系统
+          <span className="mt-5 block px-2.5 pb-2 text-[11px] font-bold text-slate-400 uppercase">
+            {t('nav.system')}
           </span>
           {navigation.slice(6).map(({ icon: Icon, ...item }) => (
             <NavLink
@@ -221,7 +224,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
               className={navLinkClass}
             >
               <Icon size={18} />
-              <span>{item.label}</span>
+              <span>{t(item.label)}</span>
             </NavLink>
           ))}
         </nav>
@@ -229,20 +232,20 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           <button
             className={cn(
               'flex h-8.5 w-full items-center gap-2.5 rounded-[5px] border-0',
-              'bg-transparent px-2.5 text-[11px] text-slate-500',
+              'bg-transparent px-2.5 text-[13px] text-slate-500',
               'hover:bg-rose-50 hover:text-rose-600',
             )}
             onClick={onLogout}
           >
             <LogOut size={16} />
-            退出登录
+            {t('nav.logout')}
           </button>
         </div>
       </aside>
       {mobileOpen ? (
         <button
           className="fixed inset-0 z-29 hidden border-0 bg-slate-900/35 max-md:block"
-          aria-label="关闭菜单"
+          aria-label={t('nav.closeMenu')}
           onClick={() => setMobileOpen(false)}
         />
       ) : null}
@@ -262,41 +265,42 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           )}
         >
           <IconButton
-            label="打开菜单"
+            label={t('nav.openMenu')}
             icon={Menu}
             className="hidden max-md:grid"
             onClick={() => setMobileOpen(true)}
           />
           <div
             className={cn(
-              'flex items-center gap-2 text-[11px] text-slate-400',
+              'flex items-center gap-2 text-[13px] text-slate-400',
               'max-md:[&>span]:hidden max-md:[&>strong]:hidden',
             )}
           >
             <span>TeleRelay</span>
             <strong>/</strong>
-            <b className="font-semibold text-slate-700">{current.label}</b>
+            <b className="font-semibold text-slate-700">{t(current.label)}</b>
           </div>
           <div className="flex items-center gap-2">
-            <div className="mr-1 flex items-center gap-2 text-[10px] text-slate-500 max-md:hidden">
+            <div className="mr-1 flex items-center gap-2 text-[12px] text-slate-500 max-md:hidden">
               <span
                 className={cn(
                   'size-2 rounded-full',
                   online ? 'bg-emerald-500 ring-3 ring-emerald-500/10' : 'bg-slate-300',
                 )}
               />
-              {online ? '节点在线' : '节点离线'}
+              {t(online ? 'node.online' : 'node.offline')}
             </div>
+            <LanguageToggle />
             <IconButton
-              label="刷新当前数据"
+              label={t('nav.refresh')}
               icon={RefreshCw}
               onClick={() => void queryClient.invalidateQueries()}
             />
             {session.session_type === 'user' ? (
               <AccountSwitcher onLogout={onLogout} />
             ) : (
-              <span className="ml-1 flex h-9.5 items-center rounded-md border border-slate-200 bg-white px-3 text-[10px] text-slate-600">
-                机器人会话
+              <span className="ml-1 flex h-9.5 items-center rounded-md border border-slate-200 bg-white px-3 text-[12px] text-slate-600">
+                {t('node.botSession')}
               </span>
             )}
           </div>
@@ -324,7 +328,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             className={({ isActive }) =>
               cn(
                 'flex min-w-0 flex-col items-center justify-center gap-1',
-                'text-[8px] no-underline',
+                'text-[10px] no-underline',
                 isActive ? 'text-blue-600' : 'text-slate-400',
               )
             }
@@ -336,12 +340,12 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
         <button
           className={cn(
             'flex min-w-0 flex-col items-center justify-center gap-1',
-            'border-0 bg-transparent text-[8px] text-slate-400',
+            'border-0 bg-transparent text-[10px] text-slate-400',
           )}
           onClick={() => setMobileOpen(true)}
         >
           <MoreHorizontal size={20} />
-          <span>更多</span>
+          <span>{t('nav.more')}</span>
         </button>
       </nav>
     </div>

@@ -31,6 +31,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import { downloadFile } from '../api/downloads'
 import { AuthenticatedImage } from '../components/AuthenticatedImage'
@@ -54,37 +55,43 @@ function initials(value: string): string {
   return value.slice(0, 2).toUpperCase() || 'TG'
 }
 
-function previewTime(value?: string | null): string {
+function previewTime(value: string | null | undefined, locale: string): string {
   if (!value) return ''
   const date = new Date(value)
   const now = new Date()
   if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+    return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
   }
   if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+    return date.toLocaleDateString(locale, { month: 'numeric', day: 'numeric' })
   }
-  return date.toLocaleDateString('zh-CN', { year: '2-digit', month: 'numeric', day: 'numeric' })
+  return date.toLocaleDateString(locale, { year: '2-digit', month: 'numeric', day: 'numeric' })
 }
 
-function messageTime(value?: string | null): string {
+function messageTime(value: string | null | undefined, locale: string): string {
   if (!value) return ''
-  return new Date(value).toLocaleTimeString('zh-CN', {
+  return new Date(value).toLocaleTimeString(locale, {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   })
 }
 
-function messageDay(value?: string | null): string {
-  if (!value) return '日期未知'
+function messageDay(
+  value: string | null | undefined,
+  locale: string,
+  unknown: string,
+  todayLabel: string,
+  yesterdayLabel: string,
+): string {
+  if (!value) return unknown
   const date = new Date(value)
   const today = new Date()
   const yesterday = new Date(today)
   yesterday.setDate(today.getDate() - 1)
-  if (date.toDateString() === today.toDateString()) return '今天'
-  if (date.toDateString() === yesterday.toDateString()) return '昨天'
-  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+  if (date.toDateString() === today.toDateString()) return todayLabel
+  if (date.toDateString() === yesterday.toDateString()) return yesterdayLabel
+  return date.toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
 function fileSize(value?: number | null): string {
@@ -141,15 +148,16 @@ function Avatar({
   kind?: TelegramPreviewDialog['kind']
   className?: string
 }) {
+  const { t } = useTranslation()
   return (
     <AuthenticatedImage
       path={peerAvatarPath(accountId, peerId)}
       inlineSource={inlineSource}
-      alt={`${title}头像`}
+      alt={t('telegramPreview.avatarAlt', { title })}
       className={cn('grid shrink-0 place-items-center rounded-[6px] text-white', className)}
       style={{ backgroundColor: hashColor(String(peerId ?? title)) }}
       fallback={
-        <span className="grid size-full place-items-center text-[10px] font-bold">
+        <span className="grid size-full place-items-center text-[12px] font-bold">
           {title ? initials(title) : kind ? <ChatGlyph kind={kind} /> : 'TG'}
         </span>
       }
@@ -168,6 +176,8 @@ function DialogRow({
   selected: boolean
   onSelect: () => void
 }) {
+  const { t, i18n } = useTranslation()
+  const locale = i18n.resolvedLanguage ?? 'zh-CN'
   return (
     <button
       data-testid={`dialog-${dialog.id}`}
@@ -188,22 +198,28 @@ function DialogRow({
       />
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-1.5">
-          <strong className="truncate text-[11px] text-slate-800">{dialog.title}</strong>
+          <strong className="truncate text-[13px] text-slate-800">{dialog.title}</strong>
           {dialog.verified ? <CheckCircle2 size={12} className="shrink-0 text-blue-500" /> : null}
         </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1 text-[9px] text-slate-400">
-          {dialog.last_message?.outgoing ? <span className="text-blue-500">你:</span> : null}
-          <span className="truncate">{dialog.last_message?.preview || '暂无消息'}</span>
+        <span className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-slate-400">
+          {dialog.last_message?.outgoing ? (
+            <span className="text-blue-500">{t('telegramPreview.you')}</span>
+          ) : null}
+          <span className="truncate">
+            {dialog.last_message?.preview || t('telegramPreview.noMessages')}
+          </span>
         </span>
       </span>
       <span className="flex h-full min-w-8 flex-col items-end justify-center gap-1.5">
-        <time className="text-[8px] text-slate-400">{previewTime(dialog.last_message?.date)}</time>
+        <time className="text-[10px] text-slate-400">
+          {previewTime(dialog.last_message?.date, locale)}
+        </time>
         {dialog.unread_count ? (
-          <span className="grid min-w-4.5 place-items-center rounded-full bg-blue-600 px-1 text-[8px] font-bold leading-4.5 text-white">
+          <span className="grid min-w-4.5 place-items-center rounded-full bg-blue-600 px-1 text-[10px] font-bold leading-4.5 text-white">
             {dialog.unread_count > 99 ? '99+' : dialog.unread_count}
           </span>
         ) : dialog.pinned ? (
-          <span className="text-[8px] text-slate-300">置顶</span>
+          <span className="text-[10px] text-slate-300">{t('telegramPreview.pinned')}</span>
         ) : null}
       </span>
     </button>
@@ -219,6 +235,7 @@ function MediaPreview({
   message: TelegramPreviewMessage
   compact?: boolean
 }) {
+  const { t } = useTranslation()
   const media = message.media
   if (!media) return null
   if (media.poll) return <PollPreview poll={media.poll} />
@@ -226,7 +243,11 @@ function MediaPreview({
     ? visualMediaPath(accountId, message.chat_id, message.id)
     : null
   const downloadLabel =
-    media.type === 'animation' ? '下载动图' : media.type === 'sticker' ? '下载贴纸' : '下载图片'
+    media.type === 'animation'
+      ? t('telegramPreview.downloadAnimation')
+      : media.type === 'sticker'
+        ? t('telegramPreview.downloadSticker')
+        : t('telegramPreview.downloadImage')
   if (media.has_thumbnail) {
     return (
       <div
@@ -241,7 +262,7 @@ function MediaPreview({
             media.inline_thumbnail ? null : thumbnailPath(accountId, message.chat_id, message.id)
           }
           inlineSource={media.inline_thumbnail}
-          alt={media.file_name || '图片'}
+          alt={media.file_name || t('telegramPreview.image')}
           className="size-full"
           fallback={
             <span className="grid size-full place-items-center text-slate-300">
@@ -274,10 +295,10 @@ function MediaPreview({
         <File size={17} />
       </span>
       <span className="min-w-0">
-        <strong className="block truncate text-[10px] text-slate-700">
+        <strong className="block truncate text-[12px] text-slate-700">
           {media.file_name || media.type}
         </strong>
-        <small className="mt-0.5 block text-[8px] text-slate-400">
+        <small className="mt-0.5 block text-[10px] text-slate-400">
           {[media.type, fileSize(media.size)].filter(Boolean).join(' · ')}
         </small>
       </span>
@@ -300,18 +321,25 @@ function PollPreview({
 }: {
   poll: NonNullable<NonNullable<TelegramPreviewMessage['media']>['poll']>
 }) {
+  const { t } = useTranslation()
   return (
     <div className="w-80 max-w-full rounded-[5px] border border-slate-200 bg-white/80 p-3">
       <div className="flex items-start justify-between gap-3">
-        <strong className="min-w-0 text-[11px] leading-4.5 text-slate-800">{poll.question}</strong>
+        <strong className="min-w-0 text-[13px] leading-4.5 text-slate-800">{poll.question}</strong>
         {poll.closed ? (
-          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[7px] text-slate-500">
-            已结束
+          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9px] text-slate-500">
+            {t('telegramPreview.poll.closed')}
           </span>
         ) : null}
       </div>
-      <span className="mt-1 block text-[8px] text-slate-400">
-        {poll.quiz ? '测验' : poll.multiple_choice ? '多选投票' : '单选投票'}
+      <span className="mt-1 block text-[10px] text-slate-400">
+        {t(
+          poll.quiz
+            ? 'telegramPreview.poll.quiz'
+            : poll.multiple_choice
+              ? 'telegramPreview.poll.multiple'
+              : 'telegramPreview.poll.single',
+        )}
       </span>
       <div className="mt-2.5 space-y-2">
         {poll.options.map((option, index) => {
@@ -320,7 +348,7 @@ function PollPreview({
             : 0
           return (
             <div key={`${index}-${option.text}`}>
-              <div className="flex items-start justify-between gap-3 text-[9px]">
+              <div className="flex items-start justify-between gap-3 text-[11px]">
                 <span
                   className={cn(
                     'min-w-0 break-words',
@@ -332,12 +360,15 @@ function PollPreview({
                   )}
                 >
                   {option.text}
-                  {option.chosen ? ' · 已选择' : ''}
-                  {option.correct ? ' · 正确答案' : ''}
+                  {option.chosen ? t('telegramPreview.poll.chosen') : ''}
+                  {option.correct ? t('telegramPreview.poll.correct') : ''}
                 </span>
                 {poll.results_visible ? (
-                  <span className="shrink-0 text-[8px] text-slate-400">
-                    {percentage}% · {formatNumber(option.voters)} 票
+                  <span className="shrink-0 text-[10px] text-slate-400">
+                    {t('telegramPreview.poll.votes', {
+                      percentage,
+                      value: formatNumber(option.voters),
+                    })}
                   </span>
                 ) : null}
               </div>
@@ -360,15 +391,19 @@ function PollPreview({
           )
         })}
       </div>
-      <div className="mt-2.5 border-t border-slate-100 pt-2 text-[8px] text-slate-400">
+      <div className="mt-2.5 border-t border-slate-100 pt-2 text-[10px] text-slate-400">
         {poll.results_visible
-          ? `${formatNumber(poll.total_voters)} 人参与`
+          ? t('telegramPreview.poll.participants', {
+              value: formatNumber(poll.total_voters),
+            })
           : poll.total_voters
-            ? `${formatNumber(poll.total_voters)} 人参与 · 结果暂不可见`
-            : '投票结果暂不可见'}
+            ? t('telegramPreview.poll.participantsHidden', {
+                value: formatNumber(poll.total_voters),
+              })
+            : t('telegramPreview.poll.resultsHidden')}
       </div>
       {poll.solution ? (
-        <p className="mt-2 rounded bg-emerald-50 p-2 text-[8px] leading-4 text-emerald-700">
+        <p className="mt-2 rounded bg-emerald-50 p-2 text-[10px] leading-4 text-emerald-700">
           {poll.solution}
         </p>
       ) : null}
@@ -412,6 +447,8 @@ function MessageBubble({
   loadingReplyId: number | null
   unavailableReplyId: number | null
 }) {
+  const { t, i18n } = useTranslation()
+  const locale = i18n.resolvedLanguage ?? 'zh-CN'
   const message = group.items[0]
   const outgoing = message.outgoing
   if (message.service_action) {
@@ -419,8 +456,8 @@ function MessageBubble({
       <>
         {showDay ? <DayDivider value={message.date} /> : null}
         <div id={`message-${message.id}`} className="my-2 flex justify-center">
-          <span className="rounded bg-slate-200/80 px-2.5 py-1 text-[8px] text-slate-500">
-            {message.text || '会话状态已更新'}
+          <span className="rounded bg-slate-200/80 px-2.5 py-1 text-[10px] text-slate-500">
+            {message.text || t('telegramPreview.serviceUpdated')}
           </span>
         </div>
       </>
@@ -451,11 +488,11 @@ function MessageBubble({
           )}
         >
           {!outgoing && message.sender.name ? (
-            <strong className="mb-1 block text-[9px] text-blue-600">{message.sender.name}</strong>
+            <strong className="mb-1 block text-[11px] text-blue-600">{message.sender.name}</strong>
           ) : null}
           {message.forward ? (
-            <div className="mb-1.5 border-l-2 border-blue-400 pl-2 text-[8px] text-blue-600">
-              转发自 {message.forward.from_name}
+            <div className="mb-1.5 border-l-2 border-blue-400 pl-2 text-[10px] text-blue-600">
+              {t('telegramPreview.forwardedFrom', { name: message.forward.from_name })}
             </div>
           ) : null}
           {message.reply_to ? (
@@ -465,18 +502,18 @@ function MessageBubble({
             >
               <span className="min-w-0">
                 {message.reply_to.sender_name ? (
-                  <strong className="block truncate text-[8px] text-blue-600">
+                  <strong className="block truncate text-[10px] text-blue-600">
                     {message.reply_to.sender_name}
                   </strong>
                 ) : null}
-                <span className="block truncate text-[8px] text-slate-500">
+                <span className="block truncate text-[10px] text-slate-500">
                   {message.reply_to.text}
                 </span>
               </span>
               {loadingReplyId === message.reply_to.message_id ? (
                 <LoaderCircle size={12} className="animate-spin text-blue-500" />
               ) : unavailableReplyId === message.reply_to.message_id ? (
-                <span className="text-[7px] text-rose-500">无法加载</span>
+                <span className="text-[9px] text-rose-500">{t('telegramPreview.unavailable')}</span>
               ) : null}
             </button>
           ) : null}
@@ -501,7 +538,7 @@ function MessageBubble({
             </div>
           ) : null}
           {textMessage ? (
-            <p className="m-0 whitespace-pre-wrap break-words text-[11px] leading-4.5">
+            <p className="m-0 whitespace-pre-wrap break-words text-[13px] leading-4.5">
               {textMessage}
             </p>
           ) : null}
@@ -511,7 +548,7 @@ function MessageBubble({
                 <span
                   key={reaction.label}
                   className={cn(
-                    'rounded-full border px-1.5 py-0.5 text-[8px]',
+                    'rounded-full border px-1.5 py-0.5 text-[10px]',
                     reaction.chosen
                       ? 'border-blue-200 bg-blue-50 text-blue-700'
                       : 'border-slate-200 bg-white/70 text-slate-500',
@@ -522,10 +559,12 @@ function MessageBubble({
               ))}
             </div>
           ) : null}
-          <span className="mt-1 flex items-center justify-end gap-1.5 text-[7px] text-slate-400">
-            {message.edited_at ? <span>已编辑</span> : null}
-            {message.views ? <span>{formatNumber(message.views)} 次查看</span> : null}
-            <time>{messageTime(message.date)}</time>
+          <span className="mt-1 flex items-center justify-end gap-1.5 text-[9px] text-slate-400">
+            {message.edited_at ? <span>{t('telegramPreview.edited')}</span> : null}
+            {message.views ? (
+              <span>{t('telegramPreview.views', { value: formatNumber(message.views) })}</span>
+            ) : null}
+            <time>{messageTime(message.date, locale)}</time>
           </span>
         </div>
       </div>
@@ -534,10 +573,20 @@ function MessageBubble({
 }
 
 function DayDivider({ value }: { value?: string | null }) {
+  const { t, i18n } = useTranslation()
+  const locale = i18n.resolvedLanguage ?? 'zh-CN'
   return (
-    <div className="flex items-center gap-3 py-1.5 text-[8px] text-slate-400">
+    <div className="flex items-center gap-3 py-1.5 text-[10px] text-slate-400">
       <span className="h-px flex-1 bg-slate-200" />
-      <time>{messageDay(value)}</time>
+      <time>
+        {messageDay(
+          value,
+          locale,
+          t('telegramPreview.unknownDate'),
+          t('telegramPreview.today'),
+          t('telegramPreview.yesterday'),
+        )}
+      </time>
       <span className="h-px flex-1 bg-slate-200" />
     </div>
   )
@@ -545,7 +594,7 @@ function DayDivider({ value }: { value?: string | null }) {
 
 function Loading({ label }: { label: string }) {
   return (
-    <div className="flex min-h-28 items-center justify-center gap-2 text-[9px] text-slate-400">
+    <div className="flex min-h-28 items-center justify-center gap-2 text-[11px] text-slate-400">
       <LoaderCircle size={15} className="animate-spin" />
       {label}
     </div>
@@ -555,7 +604,7 @@ function Loading({ label }: { label: string }) {
 function ToolButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
     <button
-      className="h-8 rounded-[5px] border border-slate-200 bg-white px-3 text-[9px] font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700"
+      className="h-8 rounded-[5px] border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700"
       onClick={onClick}
     >
       {children}
@@ -564,6 +613,8 @@ function ToolButton({ children, onClick }: { children: ReactNode; onClick: () =>
 }
 
 export function TelegramPreviewPage() {
+  const { t, i18n } = useTranslation()
+  const locale = i18n.resolvedLanguage ?? 'zh-CN'
   const queryClient = useQueryClient()
   const [folder, setFolder] = useState<DialogFolder>('main')
   const [dialogFilter, setDialogFilter] = useState('')
@@ -743,9 +794,9 @@ export function TelegramPreviewPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col [&>header]:shrink-0">
       <PageHeader
-        eyebrow="TELEGRAM READER"
-        title="会话预览"
-        description="浏览当前活动账号的实时会话与消息。"
+        eyebrow={t('telegramPreview.eyebrow')}
+        title={t('telegramPreview.title')}
+        description={t('telegramPreview.description')}
       />
       <section
         className={cn(
@@ -766,7 +817,7 @@ export function TelegramPreviewPage() {
                 <button
                   key={value}
                   className={cn(
-                    'flex h-7.5 items-center justify-center gap-1.5 rounded-[4px] border-0 text-[9px] font-semibold',
+                    'flex h-8 items-center justify-center gap-1.5 rounded-[4px] border-0 text-[11px] font-semibold',
                     folder === value
                       ? 'bg-white text-slate-700 shadow-sm'
                       : 'bg-transparent text-slate-400',
@@ -777,22 +828,22 @@ export function TelegramPreviewPage() {
                   }}
                 >
                   {value === 'main' ? <Inbox size={13} /> : <Archive size={13} />}
-                  {value === 'main' ? '主列表' : '已归档'}
+                  {t(value === 'main' ? 'telegramPreview.main' : 'telegramPreview.archived')}
                 </button>
               ))}
             </div>
             <label className="mt-2.5 flex h-8.5 items-center gap-2 rounded-[5px] border border-slate-200 px-2.5 text-slate-400 focus-within:border-blue-300">
               <Search size={14} />
               <input
-                className="min-w-0 flex-1 border-0 bg-transparent text-[9px] text-slate-700 outline-none"
+                className="min-w-0 flex-1 border-0 bg-transparent text-[11px] text-slate-700 outline-none"
                 value={dialogFilter}
                 onChange={(event) => setDialogFilter(event.target.value)}
-                placeholder="筛选会话"
+                placeholder={t('telegramPreview.filterChats')}
               />
               {dialogFilter ? (
                 <button
                   className="grid size-5 place-items-center border-0 bg-transparent"
-                  aria-label="清除会话筛选"
+                  aria-label={t('telegramPreview.clearChatFilter')}
                   onClick={() => setDialogFilter('')}
                 >
                   <X size={12} />
@@ -804,15 +855,15 @@ export function TelegramPreviewPage() {
             {!connected ? (
               <EmptyState
                 icon={Radio}
-                title="当前账号未连接"
-                detail="请在右上角选择并登录 Telegram 账号。"
+                title={t('telegramPreview.accountDisconnected')}
+                detail={t('telegramPreview.accountDisconnectedDetail')}
               />
             ) : dialogs.isLoading ? (
-              <Loading label="正在读取会话" />
+              <Loading label={t('telegramPreview.loadingChats')} />
             ) : dialogs.isError ? (
               <EmptyState
                 icon={MessageCircle}
-                title="无法读取会话"
+                title={t('telegramPreview.loadChatsFailed')}
                 detail={messageFrom(dialogs.error)}
               />
             ) : allDialogs.length ? (
@@ -830,21 +881,25 @@ export function TelegramPreviewPage() {
                 icon={folder === 'main' ? Inbox : Archive}
                 title={
                   dialogFilter
-                    ? '没有匹配的会话'
+                    ? t('telegramPreview.noMatchingChats')
                     : folder === 'main'
-                      ? '主列表为空'
-                      : '没有归档会话'
+                      ? t('telegramPreview.mainEmpty')
+                      : t('telegramPreview.archivedEmpty')
                 }
               />
             )}
           </div>
           {dialogs.hasNextPage ? (
             <button
-              className="h-10 shrink-0 border-0 border-t border-slate-200 bg-white text-[9px] text-blue-600 hover:bg-blue-50"
+              className="h-10 shrink-0 border-0 border-t border-slate-200 bg-white text-[11px] text-blue-600 hover:bg-blue-50"
               onClick={() => void dialogs.fetchNextPage()}
               disabled={dialogs.isFetchingNextPage}
             >
-              {dialogs.isFetchingNextPage ? '正在加载' : '加载更多会话'}
+              {t(
+                dialogs.isFetchingNextPage
+                  ? 'telegramPreview.loading'
+                  : 'telegramPreview.loadMoreChats',
+              )}
             </button>
           ) : null}
         </aside>
@@ -859,7 +914,7 @@ export function TelegramPreviewPage() {
             <>
               <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-slate-200 bg-white px-3.5">
                 <IconButton
-                  label="返回会话列表"
+                  label={t('telegramPreview.backToChats')}
                   icon={ArrowLeft}
                   className="hidden max-md:grid"
                   onClick={() => setSelected(null)}
@@ -873,18 +928,12 @@ export function TelegramPreviewPage() {
                   className="size-9"
                 />
                 <div className="min-w-0 flex-1">
-                  <strong className="block truncate text-[11px] text-slate-800">
+                  <strong className="block truncate text-[13px] text-slate-800">
                     {selected.title}
                   </strong>
-                  <span className="mt-0.5 flex items-center gap-1 text-[8px] text-slate-400">
+                  <span className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
                     <ChatGlyph kind={selected.kind} size={11} />
-                    {selected.kind === 'private'
-                      ? '私聊'
-                      : selected.kind === 'bot'
-                        ? '机器人'
-                        : selected.kind === 'channel'
-                          ? '频道'
-                          : '群组'}
+                    {t(`telegramPreview.kinds.${selected.kind}`)}
                     {selected.username ? ` · @${selected.username}` : ''}
                   </span>
                 </div>
@@ -894,16 +943,16 @@ export function TelegramPreviewPage() {
                 >
                   <Search size={13} className="shrink-0 text-slate-400" />
                   <input
-                    className="min-w-0 flex-1 border-0 bg-transparent text-[9px] text-slate-700 outline-none"
+                    className="min-w-0 flex-1 border-0 bg-transparent text-[11px] text-slate-700 outline-none"
                     value={searchInput}
                     onChange={(event) => setSearchInput(event.target.value)}
-                    placeholder="搜索当前会话"
+                    placeholder={t('telegramPreview.searchCurrent')}
                   />
                   {messageQuery || searchInput ? (
                     <button
                       type="button"
                       className="grid size-5 place-items-center border-0 bg-transparent text-slate-400"
-                      aria-label="清除消息搜索"
+                      aria-label={t('telegramPreview.clearMessageSearch')}
                       onClick={() => {
                         setSearchInput('')
                         setMessageQuery('')
@@ -916,9 +965,9 @@ export function TelegramPreviewPage() {
                 </form>
               </header>
               {messageQuery ? (
-                <div className="flex h-8 shrink-0 items-center justify-between border-b border-blue-100 bg-blue-50 px-3.5 text-[8px] text-blue-700">
-                  <span>“{messageQuery}”的搜索结果</span>
-                  <span>{allMessages.length} 条已加载</span>
+                <div className="flex h-8 shrink-0 items-center justify-between border-b border-blue-100 bg-blue-50 px-3.5 text-[10px] text-blue-700">
+                  <span>{t('telegramPreview.searchResults', { query: messageQuery })}</span>
+                  <span>{t('telegramPreview.loadedCount', { count: allMessages.length })}</span>
                 </div>
               ) : null}
               <div
@@ -934,16 +983,20 @@ export function TelegramPreviewPage() {
                 {messages.hasNextPage ? (
                   <div className="mb-3 flex justify-center">
                     <ToolButton onClick={() => void loadOlder()}>
-                      {messages.isFetchingNextPage ? '正在加载历史' : '加载更早消息'}
+                      {t(
+                        messages.isFetchingNextPage
+                          ? 'telegramPreview.loadingHistory'
+                          : 'telegramPreview.loadOlder',
+                      )}
                     </ToolButton>
                   </div>
                 ) : null}
                 {messages.isLoading ? (
-                  <Loading label="正在读取消息" />
+                  <Loading label={t('telegramPreview.loadingMessages')} />
                 ) : messages.isError ? (
                   <EmptyState
                     icon={MessageCircle}
-                    title="无法读取消息"
+                    title={t('telegramPreview.loadMessagesFailed')}
                     detail={messageFrom(messages.error)}
                   />
                 ) : messageGroups.length ? (
@@ -957,7 +1010,20 @@ export function TelegramPreviewPage() {
                           group={group}
                           showDay={
                             !previous ||
-                            messageDay(previous.date) !== messageDay(group.items[0].date)
+                            messageDay(
+                              previous.date,
+                              locale,
+                              t('telegramPreview.unknownDate'),
+                              t('telegramPreview.today'),
+                              t('telegramPreview.yesterday'),
+                            ) !==
+                              messageDay(
+                                group.items[0].date,
+                                locale,
+                                t('telegramPreview.unknownDate'),
+                                t('telegramPreview.today'),
+                                t('telegramPreview.yesterday'),
+                              )
                           }
                           onReplyClick={(id) => void replyClick(id)}
                           loadingReplyId={loadingReplyId}
@@ -969,15 +1035,19 @@ export function TelegramPreviewPage() {
                 ) : (
                   <EmptyState
                     icon={MessagesSquare}
-                    title={messageQuery ? '没有匹配的消息' : '这个会话还没有消息'}
+                    title={t(
+                      messageQuery
+                        ? 'telegramPreview.noMatchingMessages'
+                        : 'telegramPreview.chatEmpty',
+                    )}
                   />
                 )}
               </div>
               {!stickToBottom.current && allMessages.length ? (
                 <button
                   className="absolute right-4 bottom-4 grid size-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-lg"
-                  title="回到最新消息"
-                  aria-label="回到最新消息"
+                  title={t('telegramPreview.latest')}
+                  aria-label={t('telegramPreview.latest')}
                   onClick={() => {
                     stickToBottom.current = true
                     viewportRef.current?.scrollTo({
@@ -996,8 +1066,8 @@ export function TelegramPreviewPage() {
                 <span className="mx-auto grid size-12 place-items-center rounded-[6px] border border-slate-200 bg-white text-blue-600 shadow-sm">
                   <MessagesSquare size={24} />
                 </span>
-                <strong className="mt-4 block text-[12px] text-slate-700">
-                  选择一个会话开始浏览
+                <strong className="mt-4 block text-[14px] text-slate-700">
+                  {t('telegramPreview.selectChat')}
                 </strong>
               </div>
             </div>

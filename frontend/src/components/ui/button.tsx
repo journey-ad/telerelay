@@ -24,7 +24,7 @@ export function Button({
     <button
       className={cn(
         'inline-flex min-h-9 items-center justify-center gap-2 rounded-[5px] border px-3.5',
-        'text-[11px] font-semibold transition active:translate-y-px',
+        'text-[13px] font-semibold transition active:translate-y-px',
         'disabled:cursor-not-allowed disabled:opacity-50',
         buttonVariants[variant],
         className,

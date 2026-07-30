@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Braces, Edit3, Plus, Route, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
 import { ChatTagInput } from '../components/ChatTagInput'
 import { RegexField, useRegexValidation } from '../components/RegexField'
@@ -49,6 +50,7 @@ const blankRule = (): ForwardingRule => ({
 })
 
 export function RulesPage() {
+  const { t } = useTranslation()
   const client = useQueryClient()
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
@@ -142,12 +144,12 @@ export function RulesPage() {
   return (
     <>
       <PageHeader
-        eyebrow="ROUTING MATRIX"
-        title="转发规则"
-        description="定义消息从来源会话到目标会话的路由与过滤行为。"
+        eyebrow={t('rules.eyebrow')}
+        title={t('rules.title')}
+        description={t('rules.description')}
         actions={
           <Button icon={Plus} onClick={createRule}>
-            新建规则
+            {t('rules.new')}
           </Button>
         }
       />
@@ -165,15 +167,17 @@ export function RulesPage() {
         >
           <Search size={17} />
           <input
-            className="w-full border-0 bg-transparent text-[11px] text-slate-700 outline-none"
+            className="w-full border-0 bg-transparent text-[13px] text-slate-700 outline-none"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜索规则名称"
+            placeholder={t('rules.search')}
           />
         </div>
-        <span className="text-[9px] text-slate-400">
-          {rulesQuery.data?.filter((rule) => rule.enabled).length ?? 0} 条启用 /{' '}
-          {rulesQuery.data?.length ?? 0} 条规则
+        <span className="text-[11px] text-slate-400">
+          {t('rules.summary', {
+            enabled: rulesQuery.data?.filter((rule) => rule.enabled).length ?? 0,
+            total: rulesQuery.data?.length ?? 0,
+          })}
         </span>
       </div>
       <section className={tableWrapClass}>
@@ -181,12 +185,12 @@ export function RulesPage() {
           <table className={tableClass}>
             <thead>
               <tr>
-                <th>规则</th>
-                <th>状态</th>
-                <th>来源</th>
-                <th>目标</th>
-                <th>过滤方式</th>
-                <th aria-label="操作" />
+                <th>{t('rules.columns.rule')}</th>
+                <th>{t('rules.columns.status')}</th>
+                <th>{t('rules.columns.source')}</th>
+                <th>{t('rules.columns.destination')}</th>
+                <th>{t('rules.columns.filterMode')}</th>
+                <th aria-label={t('common.actions')} />
               </tr>
             </thead>
             <tbody>
@@ -203,45 +207,53 @@ export function RulesPage() {
                         <Route size={17} />
                       </span>
                       <span className="flex min-w-0 flex-col">
-                        <strong className="text-[10px] text-slate-700">{rule.name}</strong>
-                        <small className="mt-1 text-[8px] text-slate-400">
-                          {rule.forwarding.delay}s 延迟
+                        <strong className="text-[12px] text-slate-700">{rule.name}</strong>
+                        <small className="mt-1 text-[10px] text-slate-400">
+                          {t('common.delaySeconds', { seconds: rule.forwarding.delay })}
                         </small>
                       </span>
                     </div>
                   </td>
                   <td>
                     <Badge tone={rule.enabled ? 'green' : 'gray'}>
-                      {rule.enabled ? '已启用' : '已停用'}
+                      {t(rule.enabled ? 'common.enabled' : 'common.disabled')}
                     </Badge>
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
                       {rule.source_chats.join(', ') || '-'}
                     </span>
-                    <small className="mt-1 block text-[8px] text-slate-400">
-                      {rule.source_chats.length} 个会话
+                    <small className="mt-1 block text-[10px] text-slate-400">
+                      {t('common.chatCount', { count: rule.source_chats.length })}
                     </small>
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
                       {rule.target_chats.join(', ') || '-'}
                     </span>
-                    <small className="mt-1 block text-[8px] text-slate-400">
-                      {rule.target_chats.length} 个会话
+                    <small className="mt-1 block text-[10px] text-slate-400">
+                      {t('common.chatCount', { count: rule.target_chats.length })}
                     </small>
                   </td>
                   <td>
-                    <Badge>{rule.filters.mode === 'whitelist' ? '白名单' : '黑名单'}</Badge>
-                    <small className="mt-1 block text-[8px] text-slate-400">
-                      {rule.filters.keywords.length + rule.filters.regex_patterns.length} 个条件
+                    <Badge>
+                      {t(rule.filters.mode === 'whitelist' ? 'rules.allowlist' : 'rules.blocklist')}
+                    </Badge>
+                    <small className="mt-1 block text-[10px] text-slate-400">
+                      {t('common.conditionCount', {
+                        count: rule.filters.keywords.length + rule.filters.regex_patterns.length,
+                      })}
                     </small>
                   </td>
                   <td>
                     <div className="flex justify-end gap-1">
-                      <IconButton label="编辑规则" icon={Edit3} onClick={() => editRule(index)} />
                       <IconButton
-                        label="删除规则"
+                        label={t('rules.edit')}
+                        icon={Edit3}
+                        onClick={() => editRule(index)}
+                      />
+                      <IconButton
+                        label={t('rules.delete')}
                         icon={Trash2}
                         onClick={() => deleteRule(index)}
                       />
@@ -255,8 +267,8 @@ export function RulesPage() {
         {!rules.length ? (
           <EmptyState
             icon={Route}
-            title={search ? '没有匹配的规则' : '还没有转发规则'}
-            detail={search ? '尝试使用其他关键词。' : '新建规则后即可开始路由消息。'}
+            title={t(search ? 'rules.noMatches' : 'rules.empty')}
+            detail={t(search ? 'rules.tryAnotherSearch' : 'rules.emptyDetail')}
           />
         ) : null}
       </section>
@@ -264,13 +276,13 @@ export function RulesPage() {
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        title={editing === null ? '新建转发规则' : `编辑 ${form.name}`}
-        description="每行填写一个会话或匹配项，保存后立即应用。"
+        title={editing === null ? t('rules.newTitle') : t('common.editNamed', { name: form.name })}
+        description={t('rules.dialogDescription')}
       >
         <form onSubmit={submit}>
           <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>规则名称</span>
+              <span>{t('rules.name')}</span>
               <input
                 value={form.name}
                 onChange={(event) => setForm({ ...form, name: event.target.value })}
@@ -278,21 +290,21 @@ export function RulesPage() {
               />
             </label>
             <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>来源会话</span>
+              <span>{t('rules.sourceChats')}</span>
               <ChatTagInput
                 value={form.source_chats}
                 onChange={(source_chats) => setForm({ ...form, source_chats })}
               />
             </div>
             <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>目标会话</span>
+              <span>{t('rules.destinationChats')}</span>
               <ChatTagInput
                 value={form.target_chats}
                 onChange={(target_chats) => setForm({ ...form, target_chats })}
               />
             </div>
             <label className={fieldClass}>
-              <span>过滤方式</span>
+              <span>{t('rules.filterMode')}</span>
               <Select
                 value={form.filters.mode}
                 onValueChange={(value) =>
@@ -302,13 +314,13 @@ export function RulesPage() {
                   })
                 }
                 options={[
-                  { value: 'whitelist', label: '白名单：匹配后转发' },
-                  { value: 'blacklist', label: '黑名单：匹配后过滤' },
+                  { value: 'whitelist', label: t('rules.allowlistDescription') },
+                  { value: 'blacklist', label: t('rules.blocklistDescription') },
                 ]}
               />
             </label>
             <label className={fieldClass}>
-              <span>转发延迟（秒）</span>
+              <span>{t('rules.delay')}</span>
               <input
                 type="number"
                 min="0"
@@ -318,7 +330,7 @@ export function RulesPage() {
               />
             </label>
             <label className={fieldClass}>
-              <span>关键词</span>
+              <span>{t('rules.keywords')}</span>
               <textarea
                 value={text.keywords}
                 onChange={(event) => setText({ ...text, keywords: event.target.value })}
@@ -326,13 +338,13 @@ export function RulesPage() {
               />
             </label>
             <RegexField
-              label="正则表达式"
+              label={t('rules.regex')}
               value={text.regex}
               onChange={(regex) => setText({ ...text, regex })}
               validation={regexValidation}
             />
             <label className={fieldClass}>
-              <span>忽略的用户 ID</span>
+              <span>{t('rules.ignoredUsers')}</span>
               <textarea
                 value={text.ignoredUsers}
                 onChange={(event) => setText({ ...text, ignoredUsers: event.target.value })}
@@ -340,7 +352,7 @@ export function RulesPage() {
               />
             </label>
             <label className={fieldClass}>
-              <span>忽略的关键词</span>
+              <span>{t('rules.ignoredKeywords')}</span>
               <textarea
                 value={text.ignoredKeywords}
                 onChange={(event) => setText({ ...text, ignoredKeywords: event.target.value })}
@@ -349,40 +361,40 @@ export function RulesPage() {
             </label>
           </div>
           <div className="mt-5 border-t border-slate-100 pt-4">
-            <h3 className="mb-3 flex items-center gap-2 text-[10px] font-bold text-slate-600">
+            <h3 className="mb-3 flex items-center gap-2 text-[12px] font-bold text-slate-600">
               <Braces size={16} />
-              转发行为
+              {t('rules.behavior')}
             </h3>
             <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
               <Switch
                 checked={form.enabled}
                 onCheckedChange={(enabled) => setForm({ ...form, enabled })}
-                label="启用规则"
+                label={t('rules.enable')}
               />
               <Switch
                 checked={form.forwarding.preserve_format}
                 onCheckedChange={(value) => setForwarding('preserve_format', value)}
-                label="保留格式"
+                label={t('rules.preserveFormat')}
               />
               <Switch
                 checked={form.forwarding.add_source_info}
                 onCheckedChange={(value) => setForwarding('add_source_info', value)}
-                label="附加来源"
+                label={t('rules.appendSource')}
               />
               <Switch
                 checked={form.forwarding.force_forward}
                 onCheckedChange={(value) => setForwarding('force_forward', value)}
-                label="强制上传"
+                label={t('rules.forceUpload')}
               />
               <Switch
                 checked={form.forwarding.hide_sender}
                 onCheckedChange={(value) => setForwarding('hide_sender', value)}
-                label="隐藏发送者"
+                label={t('rules.hideSender')}
               />
               <Switch
                 checked={form.forwarding.deduplicate}
                 onCheckedChange={(value) => setForwarding('deduplicate', value)}
-                label="消息去重"
+                label={t('rules.deduplicate')}
               />
             </div>
           </div>
@@ -390,7 +402,7 @@ export function RulesPage() {
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                'text-[9px] text-rose-700',
+                'text-[11px] text-rose-700',
               )}
             >
               {messageFrom(save.error)}
@@ -398,10 +410,10 @@ export function RulesPage() {
           ) : null}
           <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4">
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? '保存中...' : '保存规则'}
+              {t(save.isPending ? 'common.saving' : 'rules.save')}
             </Button>
           </div>
         </form>
@@ -411,9 +423,14 @@ export function RulesPage() {
         onOpenChange={(next) => {
           if (!next) setDeletingIndex(null)
         }}
-        title="删除转发规则"
-        description={`确定删除“${deletingIndex === null ? '' : (rulesQuery.data?.[deletingIndex]?.name ?? '这条规则')}”？删除后无法恢复。`}
-        confirmLabel="删除规则"
+        title={t('rules.deleteTitle')}
+        description={t('rules.deleteConfirm', {
+          name:
+            deletingIndex === null
+              ? ''
+              : (rulesQuery.data?.[deletingIndex]?.name ?? t('rules.fallbackName')),
+        })}
+        confirmLabel={t('rules.delete')}
         pending={remove.isPending}
         onConfirm={() => {
           if (deletingIndex !== null) remove.mutate(deletingIndex)

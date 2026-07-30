@@ -1,5 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { TriangleAlert } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../../utils/cn'
 import { Button } from './button'
 
@@ -8,7 +9,7 @@ export function ConfirmDialog({
   onOpenChange,
   title,
   description,
-  confirmLabel = '确认',
+  confirmLabel,
   pending = false,
   onConfirm,
 }: {
@@ -20,6 +21,7 @@ export function ConfirmDialog({
   pending?: boolean
   onConfirm: () => void
 }) {
+  const { t } = useTranslation()
   return (
     <DialogPrimitive.Root
       open={open}
@@ -53,10 +55,10 @@ export function ConfirmDialog({
               <TriangleAlert size={20} />
             </span>
             <div className="min-w-0 pt-0.5">
-              <DialogPrimitive.Title className="m-0 text-[14px] font-bold text-slate-800">
+              <DialogPrimitive.Title className="m-0 text-[16px] font-bold text-slate-800">
                 {title}
               </DialogPrimitive.Title>
-              <DialogPrimitive.Description className="mt-1.5 text-[10px] leading-4.5 text-slate-500">
+              <DialogPrimitive.Description className="mt-1.5 text-[12px] leading-4.5 text-slate-500">
                 {description}
               </DialogPrimitive.Description>
             </div>
@@ -64,11 +66,11 @@ export function ConfirmDialog({
           <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4">
             <DialogPrimitive.Close asChild>
               <Button type="button" variant="secondary" disabled={pending}>
-                取消
+                {t('common.cancel')}
               </Button>
             </DialogPrimitive.Close>
             <Button type="button" variant="danger" disabled={pending} onClick={onConfirm}>
-              {pending ? '正在处理' : confirmLabel}
+              {pending ? t('common.processing') : (confirmLabel ?? t('common.confirm'))}
             </Button>
           </div>
         </DialogPrimitive.Content>

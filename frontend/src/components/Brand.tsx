@@ -1,7 +1,9 @@
 import { Send } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../utils/cn'
 
 export function Brand({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation()
   return (
     <div className="flex min-w-0 items-center gap-3">
       <span
@@ -15,7 +17,7 @@ export function Brand({ compact = false }: { compact?: boolean }) {
       <span className="flex min-w-0 flex-col">
         <strong className="font-display text-base font-bold text-slate-900">TeleRelay</strong>
         {compact ? null : (
-          <small className="mt-0.5 text-[10px] text-slate-400">消息中继控制台</small>
+          <small className="mt-0.5 text-[12px] text-slate-400">{t('brand.subtitle')}</small>
         )}
       </span>
     </div>

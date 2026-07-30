@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, KeyRound, Save, Settings, ShieldCheck, Trash2, Upload } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
 import { downloadFile } from '../api/downloads'
 import {
@@ -21,6 +22,7 @@ import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 
 export function SettingsPage() {
+  const { t } = useTranslation()
   const client = useQueryClient()
   const [rawConfig, setRawConfig] = useState('')
   const [authValue, setAuthValue] = useState('')
@@ -42,12 +44,12 @@ export function SettingsPage() {
     mutationFn: () => request('/api/v1/config', json('PUT', { config: JSON.parse(rawConfig) })),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['config'] }),
   })
-  const waitingLabels: Record<string, string> = {
-    waiting_phone: '手机号码',
-    waiting_code: '登录验证码',
-    waiting_password: '两步验证密码',
-  }
-  const waitingLabel = waitingLabels[auth.data?.state ?? '']
+  const waitingLabels = {
+    waiting_phone: 'settings.phone',
+    waiting_code: 'settings.code',
+    waiting_password: 'settings.password',
+  } as const
+  const waitingLabel = waitingLabels[auth.data?.state as keyof typeof waitingLabels]
   async function startAuth() {
     await request('/api/v1/telegram-auth/start', json('POST'))
     await auth.refetch()
@@ -79,19 +81,19 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="LOCAL CONFIGURATION"
-        title="设置"
-        description="管理 Telegram 会话、配置备份与高级运行参数。"
+        eyebrow={t('settings.eyebrow')}
+        title={t('settings.title')}
+        description={t('settings.description')}
       />
       <Tabs defaultValue="session">
         <TabsList className={tabsListClass}>
           <TabsTrigger value="session">
             <KeyRound size={16} />
-            Telegram 会话
+            {t('settings.telegramSession')}
           </TabsTrigger>
           <TabsTrigger value="config">
             <Settings size={16} />
-            高级配置
+            {t('settings.advanced')}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="session" className="outline-none">
@@ -102,7 +104,7 @@ export function SettingsPage() {
             )}
           >
             <Panel
-              title="Telegram 会话"
+              title={t('settings.telegramSession')}
               meta={
                 <Badge tone={authSuccess ? 'green' : 'gray'}>{auth.data?.state ?? 'unknown'}</Badge>
               }
@@ -124,20 +126,20 @@ export function SettingsPage() {
                   <ShieldCheck size={24} />
                 </span>
                 <div className="min-w-0">
-                  <strong className="text-[11px] text-slate-700">
-                    {authSuccess ? '会话认证成功' : '需要完成会话认证'}
+                  <strong className="text-[13px] text-slate-700">
+                    {t(authSuccess ? 'settings.authSuccess' : 'settings.authRequired')}
                   </strong>
-                  <p className="mt-1 text-[9px] leading-4 text-slate-500">
+                  <p className="mt-1 text-[11px] leading-4 text-slate-500">
                     {auth.data?.user_info ||
                       auth.data?.error ||
-                      `当前模式：${config.data?.runtime.session_type ?? '-'}`}
+                      t('settings.currentMode', { mode: config.data?.runtime.session_type ?? '-' })}
                   </p>
                 </div>
               </div>
               {waitingLabel ? (
                 <div className="mt-4 grid grid-cols-[1fr_auto] items-end gap-2">
                   <label className={fieldClass}>
-                    <span>{waitingLabel}</span>
+                    <span>{t(waitingLabel)}</span>
                     <input
                       value={authValue}
                       onChange={(event) => setAuthValue(event.target.value)}
@@ -145,19 +147,19 @@ export function SettingsPage() {
                       autoFocus
                     />
                   </label>
-                  <Button onClick={() => void submitAuth()}>提交</Button>
+                  <Button onClick={() => void submitAuth()}>{t('common.submit')}</Button>
                 </div>
               ) : null}
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button icon={KeyRound} onClick={() => void startAuth()}>
-                  开始认证
+                  {t('settings.startAuth')}
                 </Button>
                 <Button variant="danger" icon={Trash2} onClick={() => setClearConfirmOpen(true)}>
-                  清除会话
+                  {t('settings.clearSession')}
                 </Button>
               </div>
             </Panel>
-            <Panel title="配置备份" meta={<span>YAML · 最大 1 MiB</span>}>
+            <Panel title={t('settings.backup')} meta={<span>{t('settings.backupMeta')}</span>}>
               <div
                 className={cn(
                   'flex items-center gap-3 rounded-[5px] border border-slate-100',
@@ -173,9 +175,11 @@ export function SettingsPage() {
                   <Download size={22} />
                 </span>
                 <div>
-                  <strong className="text-[11px] text-slate-700">导出或恢复规则配置</strong>
-                  <p className="mt-1 text-[9px] leading-4 text-slate-500">
-                    下载当前 YAML 配置，或上传经过验证的备份文件。
+                  <strong className="text-[13px] text-slate-700">
+                    {t('settings.backupTitle')}
+                  </strong>
+                  <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                    {t('settings.backupDetail')}
                   </p>
                 </div>
               </div>
@@ -187,14 +191,14 @@ export function SettingsPage() {
                     void downloadFile('/api/v1/config/export', 'telerelay-config.yaml')
                   }
                 >
-                  导出 YAML
+                  {t('settings.exportYaml')}
                 </Button>
                 <Button
                   variant="secondary"
                   icon={Upload}
                   onClick={() => importRef.current?.click()}
                 >
-                  导入 YAML
+                  {t('settings.importYaml')}
                 </Button>
                 <input
                   ref={importRef}
@@ -208,14 +212,12 @@ export function SettingsPage() {
           </div>
         </TabsContent>
         <TabsContent value="config" className="outline-none">
-          <Panel title="高级配置" meta={<span>JSON 编辑 · 保存为 YAML</span>}>
-            <p className="text-[10px] leading-4 text-slate-500">
-              保存前会由后端验证结构。无效配置不会替换当前运行配置。
-            </p>
+          <Panel title={t('settings.advanced')} meta={<span>{t('settings.advancedMeta')}</span>}>
+            <p className="text-[12px] leading-4 text-slate-500">{t('settings.advancedDetail')}</p>
             <textarea
               className={cn(
                 'min-h-127.5 w-full resize-y rounded-[5px] border border-slate-700',
-                'bg-slate-900 p-3 font-mono text-[10px] leading-4 text-blue-100 outline-none',
+                'bg-slate-900 p-3 font-mono text-[12px] leading-4 text-blue-100 outline-none',
                 'focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10',
               )}
               value={rawConfig}
@@ -227,7 +229,7 @@ export function SettingsPage() {
               <p
                 className={cn(
                   'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                  'text-[9px] text-rose-700',
+                  'text-[11px] text-rose-700',
                 )}
               >
                 {messageFrom(save.error)}
@@ -235,7 +237,7 @@ export function SettingsPage() {
             ) : null}
             <div className="mt-5 flex justify-end border-t border-slate-100 pt-4">
               <Button icon={Save} onClick={() => save.mutate()} disabled={save.isPending}>
-                {save.isPending ? '正在保存...' : '保存配置'}
+                {t(save.isPending ? 'settings.saving' : 'settings.save')}
               </Button>
             </div>
           </Panel>
@@ -244,9 +246,9 @@ export function SettingsPage() {
       <ConfirmDialog
         open={clearConfirmOpen}
         onOpenChange={setClearConfirmOpen}
-        title="清除 Telegram 会话"
-        description="当前节点会先停止，本地 Telegram 登录会话将被清除，之后需要重新认证。"
-        confirmLabel="清除会话"
+        title={t('settings.clearTitle')}
+        description={t('settings.clearDescription')}
+        confirmLabel={t('settings.clearSession')}
         pending={clearSession.isPending}
         onConfirm={() => clearSession.mutate()}
       />

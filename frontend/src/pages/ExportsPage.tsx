@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
 import { DownloadButton } from '../components/DownloadButton'
 import {
@@ -48,11 +49,11 @@ const formatIcons = {
 }
 const errorClass = cn(
   'rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-  'text-[9px] text-rose-700',
+  'text-[11px] text-rose-700',
 )
 const formatOptionClass = cn(
   'flex h-10.5 items-center justify-center gap-1.5 rounded-[5px] border',
-  'text-[9px] leading-none',
+  'text-[11px] leading-none',
 )
 
 function downloadOption(file: string) {
@@ -65,6 +66,7 @@ function downloadOption(file: string) {
 }
 
 export function ExportsPage() {
+  const { t } = useTranslation()
   const client = useQueryClient()
   const [jobId, setJobId] = useState('')
   const [taskOpen, setTaskOpen] = useState(false)
@@ -195,12 +197,12 @@ export function ExportsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="ARCHIVE PIPELINE"
-        title="导出中心"
-        description="导出会话消息，管理定时归档任务与历史文件。"
+        eyebrow={t('exports.eyebrow')}
+        title={t('exports.title')}
+        description={t('exports.description')}
         actions={
           <Button icon={Plus} onClick={openTask}>
-            新建定时任务
+            {t('exports.newScheduledTask')}
           </Button>
         }
       />
@@ -208,15 +210,15 @@ export function ExportsPage() {
         <TabsList className={tabsListClass}>
           <TabsTrigger value="instant">
             <FileArchive size={16} />
-            即时导出
+            {t('exports.instant')}
           </TabsTrigger>
           <TabsTrigger value="scheduled">
             <CalendarClock size={16} />
-            定时任务 <span>{tasks.data?.length ?? 0}</span>
+            {t('exports.scheduled')} <span>{tasks.data?.length ?? 0}</span>
           </TabsTrigger>
           <TabsTrigger value="history">
             <Archive size={16} />
-            运行记录
+            {t('exports.history')}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="instant" className="outline-none">
@@ -226,7 +228,10 @@ export function ExportsPage() {
               'max-lg:grid-cols-1',
             )}
           >
-            <Panel title="创建消息导出" meta={<span>{chats.data?.length ?? 0} 个可用会话</span>}>
+            <Panel
+              title={t('exports.createMessageExport')}
+              meta={<span>{t('exports.availableChats', { count: chats.data?.length ?? 0 })}</span>}
+            >
               <form
                 className="grid grid-cols-2 gap-4 max-md:grid-cols-1"
                 onSubmit={(event) => {
@@ -235,11 +240,11 @@ export function ExportsPage() {
                 }}
               >
                 <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-                  <span>选择会话</span>
+                  <span>{t('exports.selectChat')}</span>
                   <Select
                     value={messageForm.chat_id}
                     onValueChange={(chat_id) => setMessageForm({ ...messageForm, chat_id })}
-                    placeholder="选择需要导出的会话"
+                    placeholder={t('exports.selectChatPlaceholder')}
                     options={(chats.data ?? []).map((chat) => ({
                       value: String(chat.chat_id),
                       label: chat.label,
@@ -247,7 +252,7 @@ export function ExportsPage() {
                   />
                 </label>
                 <label className={fieldClass}>
-                  <span>开始时间</span>
+                  <span>{t('exports.startTime')}</span>
                   <input
                     type="datetime-local"
                     value={messageForm.start_at}
@@ -258,7 +263,7 @@ export function ExportsPage() {
                   />
                 </label>
                 <label className={fieldClass}>
-                  <span>结束时间</span>
+                  <span>{t('exports.endTime')}</span>
                   <input
                     type="datetime-local"
                     value={messageForm.end_at}
@@ -268,7 +273,7 @@ export function ExportsPage() {
                   />
                 </label>
                 <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-                  <span>保存目录</span>
+                  <span>{t('exports.directory')}</span>
                   <input
                     value={messageForm.subdirectory}
                     onChange={(event) =>
@@ -277,7 +282,7 @@ export function ExportsPage() {
                   />
                 </label>
                 <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-                  <span>导出格式</span>
+                  <span>{t('exports.formats')}</span>
                   <div className="grid grid-cols-4 gap-2 max-sm:grid-cols-2">
                     {formats.map((format) => {
                       const FormatIcon = formatIcons[format]
@@ -315,13 +320,13 @@ export function ExportsPage() {
                     onCheckedChange={(all_history) =>
                       setMessageForm({ ...messageForm, all_history })
                     }
-                    label="导出全部历史"
-                    detail="忽略开始时间，从最早消息开始。"
+                    label={t('exports.allHistory')}
+                    detail={t('exports.allHistoryDetail')}
                   />
                 </div>
                 {chats.error ? (
                   <p className={cn('col-span-2 max-md:col-span-1', errorClass)}>
-                    请先在设置中连接 Telegram 会话。
+                    {t('exports.connectTelegram')}
                   </p>
                 ) : null}
                 {startExport.error ? (
@@ -336,17 +341,19 @@ export function ExportsPage() {
                     startExport.isPending || !messageForm.chat_id || !messageForm.formats.length
                   }
                 >
-                  {startExport.isPending ? '正在创建...' : '开始导出'}
+                  {t(startExport.isPending ? 'exports.creating' : 'exports.start')}
                 </Button>
               </form>
             </Panel>
             <Panel
-              title="当前任务"
+              title={t('exports.currentJob')}
               meta={
                 <Badge
                   tone={job.data?.status === 'completed' ? 'green' : job.data ? 'blue' : 'gray'}
                 >
-                  {job.data?.status ?? '空闲'}
+                  {job.data?.status
+                    ? t(`exports.status.${job.data.status}`, { defaultValue: job.data.status })
+                    : t('exports.idle')}
                 </Badge>
               }
             >
@@ -366,17 +373,17 @@ export function ExportsPage() {
                     <Archive size={24} />
                   </span>
                   <div className="min-w-0">
-                    <strong className="text-[11px] text-slate-700">
-                      {job.data.phase || '正在处理消息'}
+                    <strong className="text-[13px] text-slate-700">
+                      {job.data.phase || t('exports.processingMessages')}
                     </strong>
-                    <p className="mt-1 truncate text-[8px] text-slate-400">{job.data.id}</p>
+                    <p className="mt-1 truncate text-[10px] text-slate-400">{job.data.id}</p>
                   </div>
                   <div className="max-sm:col-span-2">
                     <strong className="font-display text-[22px] text-slate-800">
                       {job.data.processed}
                     </strong>
                     {job.data.total ? (
-                      <span className="text-[9px] text-slate-400">/ {job.data.total}</span>
+                      <span className="text-[11px] text-slate-400">/ {job.data.total}</span>
                     ) : null}
                   </div>
                   <div className="col-span-full h-2 overflow-hidden rounded-sm bg-slate-100">
@@ -399,8 +406,8 @@ export function ExportsPage() {
               ) : (
                 <EmptyState
                   icon={Archive}
-                  title="暂无运行中的导出"
-                  detail="创建导出后，实时进度会显示在这里。"
+                  title={t('exports.noActiveJob')}
+                  detail={t('exports.noActiveJobDetail')}
                 />
               )}
             </Panel>
@@ -412,12 +419,12 @@ export function ExportsPage() {
               <table className={cn(tableClass, 'max-md:min-w-195')}>
                 <thead>
                   <tr>
-                    <th>任务</th>
-                    <th>会话</th>
-                    <th>计划</th>
-                    <th>格式</th>
-                    <th>下次执行</th>
-                    <th aria-label="操作" />
+                    <th>{t('exports.columns.task')}</th>
+                    <th>{t('exports.columns.chat')}</th>
+                    <th>{t('exports.columns.schedule')}</th>
+                    <th>{t('exports.columns.format')}</th>
+                    <th>{t('exports.columns.nextRun')}</th>
+                    <th aria-label={t('common.actions')} />
                   </tr>
                 </thead>
                 <tbody>
@@ -427,19 +434,19 @@ export function ExportsPage() {
                         <strong className="block text-slate-700">{task.name}</strong>
                         <small className="mt-1 block">
                           <Badge tone={task.enabled ? 'green' : 'gray'}>
-                            {task.enabled ? '启用' : '暂停'}
+                            {t(task.enabled ? 'exports.enabled' : 'exports.paused')}
                           </Badge>
                         </small>
                       </td>
                       <td>
                         {task.chat_title || task.chat_id}
-                        <small className="mt-1 block text-[8px] text-slate-400">
+                        <small className="mt-1 block text-[10px] text-slate-400">
                           {task.chat_id}
                         </small>
                       </td>
                       <td>
-                        {task.schedule_type}
-                        <small className="mt-1 block text-[8px] text-slate-400">
+                        {t(`exports.${task.schedule_type}`, { defaultValue: task.schedule_type })}
+                        <small className="mt-1 block text-[10px] text-slate-400">
                           {String(task.hour).padStart(2, '0')}:
                           {String(task.minute).padStart(2, '0')} · {task.timezone}
                         </small>
@@ -451,12 +458,12 @@ export function ExportsPage() {
                       <td>
                         <div className="flex justify-end gap-1">
                           <IconButton
-                            label="立即运行"
+                            label={t('exports.runNow')}
                             icon={Play}
                             onClick={() => void runTask(task.id)}
                           />
                           <IconButton
-                            label="删除任务"
+                            label={t('exports.deleteTask')}
                             icon={Trash2}
                             onClick={() => setDeletingTaskId(task.id)}
                           />
@@ -470,8 +477,8 @@ export function ExportsPage() {
             {!tasks.data?.length ? (
               <EmptyState
                 icon={CalendarClock}
-                title="暂无定时任务"
-                detail="新建任务后，归档会按计划自动执行。"
+                title={t('exports.noTasks')}
+                detail={t('exports.noTasksDetail')}
               />
             ) : null}
           </section>
@@ -482,12 +489,12 @@ export function ExportsPage() {
               <table className={cn(tableClass, 'max-md:min-w-195')}>
                 <thead>
                   <tr>
-                    <th>开始时间</th>
-                    <th>类型</th>
-                    <th>会话</th>
-                    <th>状态</th>
-                    <th>消息数</th>
-                    <th>文件</th>
+                    <th>{t('exports.columns.startedAt')}</th>
+                    <th>{t('exports.columns.type')}</th>
+                    <th>{t('exports.columns.chat')}</th>
+                    <th>{t('exports.columns.status')}</th>
+                    <th>{t('exports.columns.messages')}</th>
+                    <th>{t('exports.columns.files')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -496,7 +503,9 @@ export function ExportsPage() {
                       <td className="min-w-32 font-mono text-slate-500">
                         {shortDate(run.started_at)}
                       </td>
-                      <td>{run.run_type}</td>
+                      <td>
+                        {t(`exports.runType.${run.run_type}`, { defaultValue: run.run_type })}
+                      </td>
                       <td>{run.chat_title || run.chat_id || '-'}</td>
                       <td>
                         <Badge
@@ -508,7 +517,7 @@ export function ExportsPage() {
                                 : 'blue'
                           }
                         >
-                          {run.status}
+                          {t(`exports.status.${run.status}`, { defaultValue: run.status })}
                         </Badge>
                       </td>
                       <td>{run.message_count}</td>
@@ -522,7 +531,7 @@ export function ExportsPage() {
                 </tbody>
               </table>
             </div>
-            {!runs.data?.length ? <EmptyState icon={Archive} title="暂无运行记录" /> : null}
+            {!runs.data?.length ? <EmptyState icon={Archive} title={t('exports.noRuns')} /> : null}
           </section>
         </TabsContent>
       </Tabs>
@@ -530,13 +539,13 @@ export function ExportsPage() {
       <Dialog
         open={taskOpen}
         onOpenChange={setTaskOpen}
-        title="新建定时导出"
-        description="按照本地时区周期性归档指定会话。"
+        title={t('exports.newScheduledTitle')}
+        description={t('exports.newScheduledDescription')}
       >
         <form onSubmit={submitTask}>
           <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>任务名称</span>
+              <span>{t('exports.taskName')}</span>
               <input
                 value={taskForm.name}
                 onChange={(event) => setTaskForm({ ...taskForm, name: event.target.value })}
@@ -544,7 +553,7 @@ export function ExportsPage() {
               />
             </label>
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>会话</span>
+              <span>{t('exports.chat')}</span>
               <Select
                 value={taskForm.chat_id}
                 onValueChange={(chat_id) => setTaskForm({ ...taskForm, chat_id })}
@@ -555,26 +564,26 @@ export function ExportsPage() {
               />
             </label>
             <label className={fieldClass}>
-              <span>执行周期</span>
+              <span>{t('exports.frequency')}</span>
               <Select
                 value={taskForm.schedule_type}
                 onValueChange={(schedule_type) => setTaskForm({ ...taskForm, schedule_type })}
                 options={[
-                  { value: 'hourly', label: '每小时' },
-                  { value: 'daily', label: '每天' },
-                  { value: 'weekly', label: '每周' },
+                  { value: 'hourly', label: t('exports.hourly') },
+                  { value: 'daily', label: t('exports.daily') },
+                  { value: 'weekly', label: t('exports.weekly') },
                 ]}
               />
             </label>
             <label className={fieldClass}>
-              <span>时区</span>
+              <span>{t('exports.timezone')}</span>
               <input
                 value={taskForm.timezone}
                 onChange={(event) => setTaskForm({ ...taskForm, timezone: event.target.value })}
               />
             </label>
             <label className={fieldClass}>
-              <span>小时</span>
+              <span>{t('exports.hour')}</span>
               <input
                 type="number"
                 min="0"
@@ -584,7 +593,7 @@ export function ExportsPage() {
               />
             </label>
             <label className={fieldClass}>
-              <span>分钟</span>
+              <span>{t('exports.minute')}</span>
               <input
                 type="number"
                 min="0"
@@ -596,14 +605,14 @@ export function ExportsPage() {
               />
             </label>
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>保存目录</span>
+              <span>{t('exports.directory')}</span>
               <input
                 value={taskForm.subdirectory}
                 onChange={(event) => setTaskForm({ ...taskForm, subdirectory: event.target.value })}
               />
             </label>
             <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>导出格式</span>
+              <span>{t('exports.formats')}</span>
               <div className="grid grid-cols-4 gap-2 max-sm:grid-cols-2">
                 {formats.map((format) => {
                   const FormatIcon = formatIcons[format]
@@ -643,19 +652,19 @@ export function ExportsPage() {
             <Switch
               checked={taskForm.enabled}
               onCheckedChange={(enabled) => setTaskForm({ ...taskForm, enabled })}
-              label="启用任务"
+              label={t('exports.enableTask')}
             />
             <Switch
               checked={taskForm.all_history}
               onCheckedChange={(all_history) => setTaskForm({ ...taskForm, all_history })}
-              label="首次导出全部历史"
+              label={t('exports.firstRunAllHistory')}
             />
           </div>
           {saveTask.error ? (
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                'text-[9px] text-rose-700',
+                'text-[11px] text-rose-700',
               )}
             >
               {messageFrom(saveTask.error)}
@@ -663,13 +672,13 @@ export function ExportsPage() {
           ) : null}
           <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4">
             <Button type="button" variant="secondary" onClick={() => setTaskOpen(false)}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"
               disabled={saveTask.isPending || !taskForm.chat_id || !taskForm.formats.length}
             >
-              保存任务
+              {t('exports.saveTask')}
             </Button>
           </div>
         </form>
@@ -679,9 +688,13 @@ export function ExportsPage() {
         onOpenChange={(next) => {
           if (!next) setDeletingTaskId(null)
         }}
-        title="删除定时任务"
-        description={`确定删除“${tasks.data?.find((task) => task.id === deletingTaskId)?.name ?? '这个定时任务'}”？已有导出文件不会被删除。`}
-        confirmLabel="删除任务"
+        title={t('exports.deleteTitle')}
+        description={t('exports.deleteConfirm', {
+          name:
+            tasks.data?.find((task) => task.id === deletingTaskId)?.name ??
+            t('exports.fallbackTask'),
+        })}
+        confirmLabel={t('exports.deleteTask')}
         pending={removeTask.isPending}
         onConfirm={() => {
           if (deletingTaskId !== null) removeTask.mutate(deletingTaskId)

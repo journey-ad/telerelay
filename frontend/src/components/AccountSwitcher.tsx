@@ -1,5 +1,6 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { TFunction } from 'i18next'
 import {
   Check,
   ChevronDown,
@@ -11,6 +12,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
 import type { TelegramAccount, TelegramAuth } from '../types'
 import { cn } from '../utils/cn'
@@ -19,14 +21,15 @@ import { AccountAvatar } from './AccountAvatar'
 import { clearAuthenticatedImages } from './AuthenticatedImage'
 import { Button, ConfirmDialog, Dialog, fieldClass, IconButton } from './ui'
 
-function accountSubtitle(account: TelegramAccount): string {
+function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   if (account.username) return `@${account.username}`
-  if (account.connected) return '当前已连接'
-  if (account.authenticated) return '会话已保存'
-  return '等待认证'
+  if (account.connected) return t('accounts.connected')
+  if (account.authenticated) return t('accounts.saved')
+  return t('accounts.awaitingAuth')
 }
 
 export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
+  const { t } = useTranslation()
   const client = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deletingAccount, setDeletingAccount] = useState<TelegramAccount | null>(null)
@@ -120,12 +123,12 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     }
   }, [auth.data?.state]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const waitingLabels: Record<string, string> = {
-    waiting_phone: '手机号码（含国家区号）',
-    waiting_code: 'Telegram 登录验证码',
-    waiting_password: '两步验证密码',
-  }
-  const waitingLabel = waitingLabels[auth.data?.state ?? '']
+  const waitingLabels = {
+    waiting_phone: 'accounts.phone',
+    waiting_code: 'accounts.code',
+    waiting_password: 'accounts.password',
+  } as const
+  const waitingLabel = waitingLabels[auth.data?.state as keyof typeof waitingLabels]
   const authenticating = Boolean(
     auth.data?.state &&
     ['waiting_phone', 'waiting_code', 'waiting_password', 'connecting'].includes(auth.data.state),
@@ -165,14 +168,14 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
           <AccountAvatar
             account={active}
             className="size-7.5 rounded-full bg-blue-50"
-            fallbackClassName="text-[9px] text-blue-700"
+            fallbackClassName="text-[11px] text-blue-700"
           />
           <span className="flex min-w-20 flex-1 flex-col items-start overflow-hidden max-md:hidden">
-            <strong className="w-full truncate text-left text-[10px] text-slate-700">
+            <strong className="w-full truncate text-left text-[12px] text-slate-700">
               {active?.label ?? 'Telegram'}
             </strong>
-            <small className="w-full truncate text-left text-[8px] text-slate-400">
-              {active ? accountSubtitle(active) : '正在读取账号'}
+            <small className="w-full truncate text-left text-[10px] text-slate-400">
+              {active ? accountSubtitle(active, t) : t('accounts.loading')}
             </small>
           </span>
           <ChevronDown className="shrink-0 max-md:hidden" size={14} />
@@ -183,8 +186,8 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
             align="end"
             sideOffset={8}
           >
-            <DropdownMenu.Label className="px-2 py-1.5 text-[8px] font-bold text-slate-400 uppercase">
-              Telegram 账号
+            <DropdownMenu.Label className="px-2 py-1.5 text-[10px] font-bold text-slate-400 uppercase">
+              {t('accounts.title')}
             </DropdownMenu.Label>
             {accounts.data?.map((account) => (
               <DropdownMenu.Item
@@ -202,14 +205,14 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                 <AccountAvatar
                   account={account}
                   className="size-7.5 rounded-full"
-                  fallbackClassName="text-[8px]"
+                  fallbackClassName="text-[10px]"
                 />
                 <span className="min-w-0">
-                  <strong className="block truncate text-[10px] text-slate-700">
+                  <strong className="block truncate text-[12px] text-slate-700">
                     {account.label}
                   </strong>
-                  <small className="block truncate text-[8px] text-slate-400">
-                    {accountSubtitle(account)}
+                  <small className="block truncate text-[10px] text-slate-400">
+                    {accountSubtitle(account, t)}
                   </small>
                 </span>
                 {account.active ? <Check size={14} className="text-blue-600" /> : null}
@@ -217,18 +220,18 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
             ))}
             <DropdownMenu.Separator className="my-1 h-px bg-slate-100" />
             <DropdownMenu.Item
-              className="flex h-9 items-center gap-2 rounded px-2 text-[10px] text-blue-700 outline-none data-[highlighted]:bg-blue-50"
+              className="flex h-9 items-center gap-2 rounded px-2 text-[12px] text-blue-700 outline-none data-[highlighted]:bg-blue-50"
               onSelect={openAccountDialog}
             >
               <Plus size={15} />
-              添加账号
+              {t('accounts.add')}
             </DropdownMenu.Item>
             <DropdownMenu.Item
-              className="flex h-9 items-center gap-2 rounded px-2 text-[10px] text-slate-600 outline-none data-[highlighted]:bg-slate-50"
+              className="flex h-9 items-center gap-2 rounded px-2 text-[12px] text-slate-600 outline-none data-[highlighted]:bg-slate-50"
               onSelect={onLogout}
             >
               <LogOut size={15} />
-              退出控制台
+              {t('accounts.exitConsole')}
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -237,8 +240,8 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
       <Dialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        title="Telegram 账号"
-        description="账号会话只保存在本机；同一时间仅一个账号连接转发节点。"
+        title={t('accounts.title')}
+        description={t('accounts.description')}
       >
         <section className="space-y-2">
           {accounts.data?.map((account) => (
@@ -252,20 +255,20 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
               <AccountAvatar
                 account={account}
                 className="size-9.5 rounded-[5px] border border-slate-200 bg-white"
-                fallbackClassName="text-[10px]"
+                fallbackClassName="text-[12px]"
               />
               <div className="min-w-0">
-                <strong className="block truncate text-[11px] text-slate-700">
+                <strong className="block truncate text-[13px] text-slate-700">
                   {account.label}
                 </strong>
-                <p className="mt-0.5 truncate text-[9px] text-slate-400">
-                  {accountSubtitle(account)}
+                <p className="mt-0.5 truncate text-[11px] text-slate-400">
+                  {accountSubtitle(account, t)}
                 </p>
               </div>
               <div className="flex gap-1.5">
                 {!account.active ? (
                   <IconButton
-                    label={`切换到 ${account.label}`}
+                    label={t('accounts.switchTo', { name: account.label })}
                     icon={Radio}
                     onClick={() => switching.mutate(account.id)}
                     disabled={switching.isPending}
@@ -273,14 +276,14 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                 ) : null}
                 {account.active && !account.authenticated ? (
                   <IconButton
-                    label={`认证 ${account.label}`}
+                    label={t('accounts.authenticate', { name: account.label })}
                     icon={Smartphone}
                     onClick={() => startingAuth.mutate()}
                     disabled={startingAuth.isPending || authenticating}
                   />
                 ) : null}
                 <IconButton
-                  label={`删除 ${account.label}`}
+                  label={t('accounts.deleteNamed', { name: account.label })}
                   icon={Trash2}
                   className="hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
                   onClick={() => setDeletingAccount(account)}
@@ -298,9 +301,11 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
             <div className="mb-4 flex items-center gap-3 rounded-[5px] border border-blue-100 bg-blue-50 p-3">
               <Smartphone size={20} className="text-blue-600" />
               <div>
-                <strong className="text-[11px] text-slate-700">正在认证 {active?.label}</strong>
-                <p className="mt-0.5 text-[9px] text-slate-500">
-                  {waitingLabel ?? '正在建立安全连接，请稍候'}
+                <strong className="text-[13px] text-slate-700">
+                  {t('accounts.authenticating', { name: active?.label ?? '' })}
+                </strong>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  {waitingLabel ? t(waitingLabel) : t('accounts.connecting')}
                 </p>
               </div>
             </div>
@@ -319,7 +324,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                   />
                 </label>
                 <Button onClick={() => void submitAuth()} disabled={!authValue}>
-                  提交
+                  {t('common.submit')}
                 </Button>
               </div>
             ) : null}
@@ -328,15 +333,15 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
           <section>
             <div className="mb-3 flex items-center gap-2">
               <UserRound size={17} className="text-blue-600" />
-              <strong className="text-[11px] text-slate-700">添加新账号</strong>
+              <strong className="text-[13px] text-slate-700">{t('accounts.addNew')}</strong>
             </div>
             <div className="grid grid-cols-[1fr_auto] items-end gap-2 max-sm:grid-cols-1">
               <label className={fieldClass}>
-                <span>账号名称</span>
+                <span>{t('accounts.name')}</span>
                 <input
                   value={label}
                   onChange={(event) => setLabel(event.target.value)}
-                  placeholder="例如：工作账号"
+                  placeholder={t('accounts.namePlaceholder')}
                   maxLength={100}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && label.trim()) creating.mutate()
@@ -348,19 +353,19 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                 onClick={() => creating.mutate()}
                 disabled={!label.trim() || creating.isPending}
               >
-                {creating.isPending ? '正在创建' : '添加账号'}
+                {t(creating.isPending ? 'accounts.creating' : 'accounts.add')}
               </Button>
             </div>
           </section>
         )}
 
         {auth.data?.state === 'success' ? (
-          <p className="mt-4 rounded-[5px] border border-emerald-100 bg-emerald-50 p-2.5 text-[9px] text-emerald-700">
-            当前账号认证成功，可在右上角随时切换。
+          <p className="mt-4 rounded-[5px] border border-emerald-100 bg-emerald-50 p-2.5 text-[11px] text-emerald-700">
+            {t('accounts.authSuccess')}
           </p>
         ) : null}
         {flowError || auth.data?.error || switching.error || startingAuth.error ? (
-          <p className="mt-4 rounded-[5px] border border-rose-100 bg-rose-50 p-2.5 text-[9px] text-rose-700">
+          <p className="mt-4 rounded-[5px] border border-rose-100 bg-rose-50 p-2.5 text-[11px] text-rose-700">
             {flowError || auth.data?.error || messageFrom(switching.error || startingAuth.error)}
           </p>
         ) : null}
@@ -370,9 +375,11 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
         onOpenChange={(next) => {
           if (!next) setDeletingAccount(null)
         }}
-        title="删除 Telegram 账号"
-        description={`确定删除“${deletingAccount?.label ?? ''}”及其本地登录会话？该账号的预览缓存也会一并清除。`}
-        confirmLabel="删除账号"
+        title={t('accounts.deleteTitle')}
+        description={t('accounts.deleteConfirm', {
+          name: deletingAccount?.label ?? '',
+        })}
+        confirmLabel={t('accounts.delete')}
         pending={deleting.isPending}
         onConfirm={() => {
           if (deletingAccount) deleting.mutate(deletingAccount.id)

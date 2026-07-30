@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../../utils/cn'
 import { IconButton } from './button'
 
@@ -17,6 +18,7 @@ export function Dialog({
   description?: string
   children: ReactNode
 }) {
+  const { t } = useTranslation()
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -44,13 +46,13 @@ export function Dialog({
                 {title}
               </DialogPrimitive.Title>
               {description ? (
-                <DialogPrimitive.Description className="m-0 text-[10px] leading-4 text-slate-500">
+                <DialogPrimitive.Description className="m-0 text-[12px] leading-4 text-slate-500">
                   {description}
                 </DialogPrimitive.Description>
               ) : null}
             </div>
             <DialogPrimitive.Close asChild>
-              <IconButton label="关闭" icon={X} type="button" />
+              <IconButton label={t('common.close')} icon={X} type="button" />
             </DialogPrimitive.Close>
           </header>
           {children}

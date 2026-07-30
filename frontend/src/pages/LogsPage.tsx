@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Download, FileClock, Pause, Play, RefreshCw, Search } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import { Badge, Button, EmptyState, IconButton, PageHeader, Select } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
@@ -22,6 +23,7 @@ const levelColors = {
 }
 
 export function LogsPage() {
+  const { t } = useTranslation()
   const [filter, setFilter] = useState('')
   const [levelFilter, setLevelFilter] = useState('all')
   const [paused, setPaused] = useState(false)
@@ -63,15 +65,19 @@ export function LogsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="OBSERVABILITY"
-        title="运行日志"
-        description="查看运行时输出，定位连接、转发和队列问题。"
+        eyebrow={t('logs.eyebrow')}
+        title={t('logs.title')}
+        description={t('logs.description')}
         actions={
           <>
             <Button variant="secondary" icon={Download} onClick={downloadLogs}>
-              下载日志
+              {t('logs.download')}
             </Button>
-            <IconButton label="刷新日志" icon={RefreshCw} onClick={() => void logs.refetch()} />
+            <IconButton
+              label={t('logs.refresh')}
+              icon={RefreshCw}
+              onClick={() => void logs.refetch()}
+            />
           </>
         }
       />
@@ -89,10 +95,10 @@ export function LogsPage() {
         >
           <Search size={17} />
           <input
-            className="w-full border-0 bg-transparent text-[11px] text-slate-700 outline-none"
+            className="w-full border-0 bg-transparent text-[13px] text-slate-700 outline-none"
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder="筛选日志内容"
+            placeholder={t('logs.filter')}
           />
         </div>
         <div className="w-35 max-md:w-full">
@@ -100,7 +106,7 @@ export function LogsPage() {
             value={levelFilter}
             onValueChange={setLevelFilter}
             options={[
-              { value: 'all', label: '全部级别' },
+              { value: 'all', label: t('logs.allLevels') },
               { value: 'info', label: 'Info' },
               { value: 'warning', label: 'Warning' },
               { value: 'error', label: 'Error' },
@@ -114,7 +120,7 @@ export function LogsPage() {
           icon={paused ? Play : Pause}
           onClick={() => setPaused((value) => !value)}
         >
-          {paused ? '继续滚动' : '暂停滚动'}
+          {t(paused ? 'logs.resume' : 'logs.pause')}
         </Button>
       </div>
       <section
@@ -126,7 +132,7 @@ export function LogsPage() {
         <header
           className={cn(
             'grid h-10.5 grid-cols-[1fr_auto_1fr] items-center border-b',
-            'border-slate-700 bg-slate-800 px-3.5 text-[9px] text-slate-400',
+            'border-slate-700 bg-slate-800 px-3.5 text-[11px] text-slate-400',
           )}
         >
           <div className="flex gap-1.5">
@@ -136,7 +142,9 @@ export function LogsPage() {
           </div>
           <span>logs/telerelay.log</span>
           <span className="justify-self-end">
-            <Badge tone={paused ? 'amber' : 'green'}>{paused ? '已暂停' : '实时'}</Badge>
+            <Badge tone={paused ? 'amber' : 'green'}>
+              {t(paused ? 'logs.paused' : 'logs.live')}
+            </Badge>
           </span>
         </header>
         <div className="min-h-120 max-h-[calc(100vh-250px)] overflow-auto py-3">
@@ -144,7 +152,7 @@ export function LogsPage() {
             <p
               className={cn(
                 'm-0 grid min-w-175 grid-cols-[50px_1fr] px-3.5 py-0.5',
-                'text-[9px] leading-4 hover:bg-slate-800',
+                'text-[11px] leading-4 hover:bg-slate-800',
               )}
               key={`${index}-${line}`}
             >
@@ -157,7 +165,7 @@ export function LogsPage() {
             </p>
           ))}
           {!lines.length ? (
-            <EmptyState icon={FileClock} title="没有匹配的日志" detail="调整关键词或日志级别。" />
+            <EmptyState icon={FileClock} title={t('logs.empty')} detail={t('logs.emptyDetail')} />
           ) : null}
         </div>
       </section>

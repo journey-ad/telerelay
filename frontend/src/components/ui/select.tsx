@@ -1,28 +1,30 @@
 import * as SelectPrimitive from '@radix-ui/react-select'
 import { Check, ChevronDown } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../../utils/cn'
 
 export function Select({
   value,
   onValueChange,
   options,
-  placeholder = '请选择',
+  placeholder,
 }: {
   value: string
   onValueChange: (value: string) => void
   options: Array<{ value: string; label: string }>
   placeholder?: string
 }) {
+  const { t } = useTranslation()
   return (
     <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
       <SelectPrimitive.Trigger
         className={cn(
           'flex h-9.5 w-full items-center justify-between rounded-[5px] border',
-          'border-slate-200 bg-white px-2.5 text-left text-[11px] text-slate-700 outline-none',
+          'border-slate-200 bg-white px-2.5 text-left text-[13px] text-slate-700 outline-none',
           'focus:border-blue-300 focus:ring-3 focus:ring-blue-500/10',
         )}
       >
-        <SelectPrimitive.Value placeholder={placeholder} />
+        <SelectPrimitive.Value placeholder={placeholder ?? t('common.pleaseSelect')} />
         <SelectPrimitive.Icon>
           <ChevronDown size={15} />
         </SelectPrimitive.Icon>
@@ -41,7 +43,7 @@ export function Select({
               <SelectPrimitive.Item
                 className={cn(
                   'flex h-8.5 items-center justify-between rounded px-2',
-                  'text-[11px] text-slate-600 outline-none',
+                  'text-[13px] text-slate-600 outline-none',
                   'data-[highlighted]:bg-blue-50 data-[highlighted]:text-blue-700',
                 )}
                 value={option.value}

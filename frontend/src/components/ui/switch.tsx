@@ -20,9 +20,9 @@ export function Switch({
       )}
     >
       <span className="flex flex-col">
-        <strong className="text-[9px] text-slate-600">{label}</strong>
+        <strong className="text-[11px] text-slate-600">{label}</strong>
         {detail ? (
-          <small className="mt-0.5 text-[8px] leading-3.5 text-slate-400">{detail}</small>
+          <small className="mt-0.5 text-[10px] leading-3.5 text-slate-400">{detail}</small>
         ) : null}
       </span>
       <SwitchPrimitive.Root

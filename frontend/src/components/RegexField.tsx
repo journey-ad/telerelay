@@ -1,5 +1,6 @@
 import { AlertTriangle } from 'lucide-react'
 import { useCallback, useId, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
 import { lines } from '../utils/parse'
 import { cn } from '../utils/cn'
@@ -11,6 +12,7 @@ interface RegexValidationResponse {
 }
 
 export function useRegexValidation() {
+  const { t } = useTranslation()
   const requestId = useRef(0)
   const [errors, setErrors] = useState<string[]>([])
   const [validating, setValidating] = useState(false)
@@ -23,39 +25,42 @@ export function useRegexValidation() {
     setValid(null)
   }, [])
 
-  const validate = useCallback(async (value: string): Promise<boolean> => {
-    const patterns = lines(value)
-    const currentRequest = ++requestId.current
+  const validate = useCallback(
+    async (value: string): Promise<boolean> => {
+      const patterns = lines(value)
+      const currentRequest = ++requestId.current
 
-    if (patterns.length === 0) {
-      setErrors([])
-      setValidating(false)
+      if (patterns.length === 0) {
+        setErrors([])
+        setValidating(false)
+        setValid(null)
+        return true
+      }
+
+      setValidating(true)
       setValid(null)
-      return true
-    }
+      try {
+        const result = await request<RegexValidationResponse>(
+          '/api/v1/utils/validate-regex',
+          json('POST', { patterns }),
+        )
+        if (currentRequest !== requestId.current) return false
 
-    setValidating(true)
-    setValid(null)
-    try {
-      const result = await request<RegexValidationResponse>(
-        '/api/v1/utils/validate-regex',
-        json('POST', { patterns }),
-      )
-      if (currentRequest !== requestId.current) return false
+        setErrors(result.errors.map(({ pattern, error }) => `${pattern}: ${error}`))
+        setValid(result.valid)
+        return result.valid
+      } catch {
+        if (currentRequest !== requestId.current) return false
 
-      setErrors(result.errors.map(({ pattern, error }) => `${pattern}: ${error}`))
-      setValid(result.valid)
-      return result.valid
-    } catch {
-      if (currentRequest !== requestId.current) return false
-
-      setErrors(['正则验证请求失败'])
-      setValid(false)
-      return false
-    } finally {
-      if (currentRequest === requestId.current) setValidating(false)
-    }
-  }, [])
+        setErrors([t('validation.regexRequestFailed')])
+        setValid(false)
+        return false
+      } finally {
+        if (currentRequest === requestId.current) setValidating(false)
+      }
+    },
+    [t],
+  )
 
   return { errors, reset, valid, validate, validating }
 }
@@ -79,6 +84,7 @@ export function RegexField({
   placeholder?: string
   className?: string
 }) {
+  const { t } = useTranslation()
   const inputId = useId()
 
   return (
@@ -89,7 +95,7 @@ export function RegexField({
           type="button"
           disabled={validation.validating}
           className={cn(
-            'ml-2 text-[9px]',
+            'ml-2 text-[11px]',
             validation.validating
               ? 'text-slate-400'
               : validation.valid === true
@@ -99,10 +105,10 @@ export function RegexField({
           onClick={() => void validation.validate(value)}
         >
           {validation.validating
-            ? '验证中...'
+            ? t('validation.validating')
             : validation.valid === true
-              ? '格式正确'
-              : '验证格式'}
+              ? t('validation.valid')
+              : t('validation.validate')}
         </button>
       </span>
       <textarea
@@ -120,7 +126,7 @@ export function RegexField({
           {validation.errors.map((error, index) => (
             <li
               key={`${index}:${error}`}
-              className="flex items-start gap-1.5 text-[9px] text-rose-700"
+              className="flex items-start gap-1.5 text-[11px] text-rose-700"
             >
               <AlertTriangle size={12} className="mt-px shrink-0" />
               {error}

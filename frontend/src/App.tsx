@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { request } from './api/client'
 import { clearCredentials } from './api/credentials'
 import { AppShell } from './components/AppShell'
@@ -41,13 +42,14 @@ const queryClient = new QueryClient({
 })
 
 function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => void }) {
+  const { t } = useTranslation()
   const page = (children: ReactNode) => (
     <Suspense
       fallback={
         <div
           className={cn(
             'flex min-h-[60vh] items-center justify-center gap-3',
-            'text-[10px] text-slate-500',
+            'text-[12px] text-slate-500',
           )}
         >
           <span
@@ -56,7 +58,7 @@ function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => 
               'border-blue-100 border-t-blue-600',
             )}
           />
-          正在加载
+          {t('common.loading')}
         </div>
       }
     >
@@ -82,6 +84,7 @@ function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => 
 }
 
 export default function App() {
+  const { t } = useTranslation()
   const [ready, setReady] = useState(false)
   const [session, setSession] = useState<SessionInfo | null>(null)
 
@@ -103,7 +106,7 @@ export default function App() {
       <main
         className={cn(
           'flex min-h-dvh flex-col items-center justify-center gap-6',
-          'bg-slate-50 text-[10px] text-slate-500',
+          'bg-slate-50 text-[12px] text-slate-500',
         )}
       >
         <Brand />
@@ -113,7 +116,7 @@ export default function App() {
             'border-blue-100 border-t-blue-600',
           )}
         />
-        <p>正在连接本地节点</p>
+        <p>{t('node.connecting')}</p>
       </main>
     )
   }

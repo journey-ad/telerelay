@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, History, Search, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import {
   Badge,
@@ -18,6 +19,7 @@ import { cn } from '../utils/cn'
 import { shortDate } from '../utils/format'
 
 export function HistoryPage() {
+  const { t } = useTranslation()
   const [rule, setRule] = useState('all')
   const [keyword, setKeyword] = useState('')
   const [filters, setFilters] = useState({ rule: 'all', keyword: '' })
@@ -51,9 +53,9 @@ export function HistoryPage() {
   return (
     <>
       <PageHeader
-        eyebrow="MESSAGE LEDGER"
-        title="消息记录"
-        description="查询已经处理的转发消息与来源信息。"
+        eyebrow={t('history.eyebrow')}
+        title={t('history.title')}
+        description={t('history.description')}
       />
       <form
         className={cn(
@@ -63,18 +65,18 @@ export function HistoryPage() {
         onSubmit={search}
       >
         <label className={fieldClass}>
-          <span>转发规则</span>
+          <span>{t('history.rule')}</span>
           <Select
             value={rule}
             onValueChange={setRule}
             options={[
-              { value: 'all', label: '全部规则' },
+              { value: 'all', label: t('history.allRules') },
               ...(rulesQuery.data ?? []).map((item) => ({ value: item.name, label: item.name })),
             ]}
           />
         </label>
         <label className={fieldClass}>
-          <span>内容关键词</span>
+          <span>{t('history.keyword')}</span>
           <div
             className={cn(
               'flex h-9.5 items-center gap-2 rounded-[5px] border border-slate-200',
@@ -84,28 +86,28 @@ export function HistoryPage() {
           >
             <Search size={16} />
             <input
-              className="w-full border-0 bg-transparent text-[11px] text-slate-700 outline-none"
+              className="w-full border-0 bg-transparent text-[13px] text-slate-700 outline-none"
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
-              placeholder="搜索消息内容"
+              placeholder={t('history.searchPlaceholder')}
             />
           </div>
         </label>
         <div className="flex gap-2 max-md:[&>.button]:flex-1">
           <Button type="submit" icon={Search}>
-            查询
+            {t('history.search')}
           </Button>
           {filters.rule !== 'all' || filters.keyword ? (
-            <IconButton type="button" label="清除筛选" icon={X} onClick={reset} />
+            <IconButton type="button" label={t('history.clearFilters')} icon={X} onClick={reset} />
           ) : null}
         </div>
       </form>
       <section className={tableWrapClass}>
         <div className="flex min-h-12 items-center border-b border-slate-200 px-4">
           <span className="flex items-center gap-2">
-            <strong className="text-[11px] text-slate-700">查询结果</strong>
-            <small className="text-[9px] text-slate-400">
-              {historyQuery.data?.total ?? 0} 条记录
+            <strong className="text-[13px] text-slate-700">{t('history.results')}</strong>
+            <small className="text-[11px] text-slate-400">
+              {t('history.recordCount', { count: historyQuery.data?.total ?? 0 })}
             </small>
           </span>
         </div>
@@ -113,12 +115,12 @@ export function HistoryPage() {
           <table className={cn(tableClass, 'max-md:min-w-195')}>
             <thead>
               <tr>
-                <th>处理时间</th>
-                <th>规则</th>
-                <th>来源</th>
-                <th>发送者</th>
-                <th>消息内容</th>
-                <th>类型</th>
+                <th>{t('history.columns.processedAt')}</th>
+                <th>{t('history.columns.rule')}</th>
+                <th>{t('history.columns.source')}</th>
+                <th>{t('history.columns.sender')}</th>
+                <th>{t('history.columns.content')}</th>
+                <th>{t('history.columns.type')}</th>
               </tr>
             </thead>
             <tbody>
@@ -138,14 +140,14 @@ export function HistoryPage() {
                   <td>
                     <span>{item.sender_name || '-'}</span>
                     {item.sender_username ? (
-                      <small className="mt-1 block text-[8px] text-slate-400">
+                      <small className="mt-1 block text-[10px] text-slate-400">
                         @{item.sender_username}
                       </small>
                     ) : null}
                   </td>
                   <td>
                     <p className="m-0 line-clamp-2 max-w-108 leading-4">
-                      {item.content || '[无文本内容]'}
+                      {item.content || t('history.noText')}
                     </p>
                   </td>
                   <td>
@@ -157,30 +159,24 @@ export function HistoryPage() {
           </table>
         </div>
         {!historyQuery.data?.items.length ? (
-          <EmptyState
-            icon={History}
-            title="没有找到消息记录"
-            detail="调整筛选条件，或等待规则开始处理消息。"
-          />
+          <EmptyState icon={History} title={t('history.empty')} detail={t('history.emptyDetail')} />
         ) : null}
         <footer
           className={cn(
             'flex min-h-13 items-center justify-between border-t border-slate-200',
-            'px-4 text-[9px] text-slate-400',
+            'px-4 text-[11px] text-slate-400',
           )}
         >
-          <span>
-            第 {page} / {pages} 页
-          </span>
+          <span>{t('history.pagination', { page, pages })}</span>
           <div className="flex gap-1">
             <IconButton
-              label="上一页"
+              label={t('history.previous')}
               icon={ChevronLeft}
               disabled={page <= 1}
               onClick={() => setPage((value) => value - 1)}
             />
             <IconButton
-              label="下一页"
+              label={t('history.next')}
               icon={ChevronRight}
               disabled={page >= pages}
               onClick={() => setPage((value) => value + 1)}

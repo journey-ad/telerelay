@@ -2,6 +2,7 @@ import * as Popover from '@radix-ui/react-popover'
 import { useQuery } from '@tanstack/react-query'
 import { Check, Plus, Search, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import type { ChatRef, ExportChat } from '../types'
 import { cn } from '../utils/cn'
@@ -24,6 +25,7 @@ function parseChatRef(value: string): ChatRef {
 }
 
 export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
@@ -74,14 +76,15 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
         {value.map((chatId) => {
           const chat = findChat(chats.data, chatId)
           const unknown = chats.isSuccess && !chat
-          const label = chat?.label ?? (unknown ? `未知会话 [${chatId}]` : String(chatId))
+          const label =
+            chat?.label ?? (unknown ? t('chatInput.unknown', { id: chatId }) : String(chatId))
 
           return (
             <span
               key={String(chatId)}
               className={cn(
                 'inline-flex h-6.5 items-center gap-1 rounded border px-1.5',
-                'text-[10px]',
+                'text-[12px]',
                 unknown
                   ? 'border-slate-200 bg-slate-100 text-slate-500'
                   : 'border-blue-100 bg-blue-50 text-blue-700',
@@ -91,7 +94,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
               {label}
               <button
                 type="button"
-                aria-label={`移除 ${label}`}
+                aria-label={t('chatInput.remove', { name: label })}
                 className={cn(
                   'grid size-4 place-items-center rounded-sm',
                   unknown
@@ -111,9 +114,9 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
         <Popover.Trigger asChild>
           <button
             type="button"
-            aria-label="添加会话"
+            aria-label={t('chatInput.addChat')}
             className={cn(
-              'inline-flex h-6.5 items-center gap-1 rounded px-1.5 text-[10px]',
+              'inline-flex h-7 items-center gap-1 rounded px-1.5 text-[12px]',
               'text-slate-400 outline-none hover:bg-slate-100 hover:text-blue-600',
             )}
             onPointerDown={(event) => {
@@ -130,7 +133,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
             }}
           >
             <Plus size={13} />
-            {value.length === 0 ? '添加会话' : null}
+            {value.length === 0 ? t('chatInput.addChat') : null}
           </button>
         </Popover.Trigger>
       </div>
@@ -155,8 +158,8 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
           <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-slate-100 bg-white px-3 py-2">
             <Search size={14} className="shrink-0 text-slate-400" />
             <input
-              className="w-full border-0 bg-transparent text-[11px] text-slate-700 outline-none"
-              placeholder="搜索会话..."
+              className="w-full border-0 bg-transparent text-[13px] text-slate-700 outline-none"
+              placeholder={t('chatInput.search')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(event) => {
@@ -174,18 +177,26 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
                 type="button"
                 className={cn(
                   'flex w-full items-center gap-2 rounded px-2 py-1.5',
-                  'text-left text-[10px] text-blue-700 outline-none',
+                  'text-left text-[12px] text-blue-700 outline-none',
                   'hover:bg-blue-50 focus:bg-blue-50',
                 )}
                 onClick={addCustomChat}
               >
                 <Plus size={13} className="shrink-0" />
-                <span className="min-w-0 flex-1 truncate">添加 {String(customChat)}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {t('chatInput.addId', { id: String(customChat) })}
+                </span>
               </button>
             ) : null}
             {filtered.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[10px] text-slate-400">
-                {chats.isLoading ? '加载中...' : customChat === null ? '无匹配会话' : '可手动添加'}
+              <p className="px-2 py-3 text-center text-[12px] text-slate-400">
+                {t(
+                  chats.isLoading
+                    ? 'common.loadingWithDots'
+                    : customChat === null
+                      ? 'chatInput.noMatches'
+                      : 'chatInput.addManually',
+                )}
               </p>
             ) : (
               filtered.map((chat) => {
@@ -198,13 +209,13 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
                     aria-pressed={selected}
                     className={cn(
                       'flex w-full items-center gap-2 rounded px-2 py-1.5',
-                      'text-left text-[10px] text-slate-600 transition-colors',
+                      'text-left text-[12px] text-slate-600 transition-colors',
                       'hover:bg-slate-50',
                     )}
                     onClick={() => toggleChat(chat.chat_id)}
                   >
                     <span className="min-w-0 flex-1 truncate">{chat.label}</span>
-                    <span className="shrink-0 text-[8px] text-slate-400">{chat.chat_id}</span>
+                    <span className="shrink-0 text-[10px] text-slate-400">{chat.chat_id}</span>
                     <span className="grid size-4 shrink-0 place-items-center text-blue-600">
                       {selected ? <Check size={13} strokeWidth={2.5} /> : null}
                     </span>

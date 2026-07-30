@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { TFunction } from 'i18next'
 import {
   Activity,
   ArrowDownRight,
@@ -17,6 +18,7 @@ import {
   Trophy,
 } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   Area,
   AreaChart,
@@ -39,12 +41,12 @@ import { formatNumber, messageFrom } from '../utils/format'
 type ReportPeriod = '7day' | '14day' | '30day' | 'all'
 type DailyStat = Stats['daily'][number] & { total: number }
 
-const periodOptions: Array<{ value: ReportPeriod; label: string }> = [
-  { value: '7day', label: '7 天' },
-  { value: '14day', label: '14 天' },
-  { value: '30day', label: '30 天' },
-  { value: 'all', label: '全部' },
-]
+const periodOptions = [
+  { value: '7day', labelKey: 'dashboard.periods.sevenDays' },
+  { value: '14day', labelKey: 'dashboard.periods.fourteenDays' },
+  { value: '30day', labelKey: 'dashboard.periods.thirtyDays' },
+  { value: 'all', labelKey: 'dashboard.periods.all' },
+] as const satisfies ReadonlyArray<{ value: ReportPeriod; labelKey: string }>
 const periodDays = { '7day': 7, '14day': 14, '30day': 30 } as const
 const metricTones = {
   blue: 'bg-blue-50 text-blue-600',
@@ -110,15 +112,15 @@ function formatPercent(value: number): string {
   return `${Math.round(value * 10) / 10}%`
 }
 
-function formatReportDate(value: string): string {
-  return new Date(`${value}T00:00:00`).toLocaleDateString('zh-CN', {
+function formatReportDate(value: string, locale: string): string {
+  return new Date(`${value}T00:00:00`).toLocaleDateString(locale, {
     month: 'short',
     day: 'numeric',
     weekday: 'short',
   })
 }
 
-function TrendLabel({ value, fallback }: { value?: number; fallback?: string }) {
+function TrendLabel({ value, fallback, t }: { value?: number; fallback?: string; t: TFunction }) {
   if (value === undefined) {
     return <>{fallback}</>
   }
@@ -132,13 +134,16 @@ function TrendLabel({ value, fallback }: { value?: number; fallback?: string }) 
       ) : (
         <Minus size={13} />
       )}
-      较上周期 {value > 0 ? '+' : ''}
-      {formatPercent(value)}
+      {t('dashboard.comparedToPrevious', {
+        value: `${value > 0 ? '+' : ''}${formatPercent(value)}`,
+      })}
     </>
   )
 }
 
 export function DashboardPage() {
+  const { t, i18n } = useTranslation()
+  const locale = i18n.resolvedLanguage ?? 'zh-CN'
   const client = useQueryClient()
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('14day')
   const reportDays = reportPeriod === 'all' ? null : periodDays[reportPeriod]
@@ -205,40 +210,40 @@ export function DashboardPage() {
   )
   const maxRuleTotal = Math.max(...rankedRules.map((rule) => rule.total), 1)
   const flowComposition = [
-    { name: '已转发', value: report.current.forwarded, color: '#2563eb' },
-    { name: '已过滤', value: report.current.filtered, color: '#f59e0b' },
+    { name: t('dashboard.forwarded'), value: report.current.forwarded, color: '#2563eb' },
+    { name: t('dashboard.filtered'), value: report.current.filtered, color: '#f59e0b' },
   ]
   const metrics = [
     {
-      label: '周期转发',
+      label: t('dashboard.periodForwarded'),
       value: report.current.forwarded,
       icon: Send,
       trend: report.forwardedChange,
-      hint: allTime ? '全部时长累计' : undefined,
+      hint: allTime ? t('dashboard.allTimeTotal') : undefined,
       tone: 'blue',
     },
     {
-      label: '周期过滤',
+      label: t('dashboard.periodFiltered'),
       value: report.current.filtered,
       icon: Filter,
       trend: report.filteredChange,
-      hint: allTime ? '全部时长累计' : undefined,
+      hint: allTime ? t('dashboard.allTimeTotal') : undefined,
       tone: 'amber',
     },
     {
-      label: '消息总流量',
+      label: t('dashboard.totalTraffic'),
       value: report.current.total,
       icon: Activity,
       trend: report.change,
-      hint: allTime ? '全部时长累计' : undefined,
+      hint: allTime ? t('dashboard.allTimeTotal') : undefined,
       tone: 'cyan',
     },
     {
-      label: '队列待处理',
+      label: t('dashboard.queuePending'),
       value: activeQueue,
       icon: TimerReset,
       trend: undefined,
-      hint: '当前实时积压',
+      hint: t('dashboard.liveBacklog'),
       tone: 'green',
     },
   ] as const
@@ -246,13 +251,13 @@ export function DashboardPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Live operations"
-        title="运行总览"
-        description="监控消息吞吐、规则效率、队列与 Telegram 连接状态。"
+        eyebrow={t('dashboard.eyebrow')}
+        title={t('dashboard.title')}
+        description={t('dashboard.description')}
         actions={
           <div
             className={cn(
-              'flex h-8.5 items-center gap-2 rounded-[5px] border px-3 text-[10px]',
+              'flex h-8.5 items-center gap-2 rounded-[5px] border px-3 text-[12px]',
               status.is_connected
                 ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
                 : 'border-slate-200 bg-white text-slate-500',
@@ -264,7 +269,11 @@ export function DashboardPage() {
                 status.is_connected ? 'bg-emerald-500' : 'bg-slate-300',
               )}
             />
-            {status.is_connected ? 'Telegram 已连接' : 'Telegram 未连接'}
+            {t(
+              status.is_connected
+                ? 'dashboard.telegramConnected'
+                : 'dashboard.telegramDisconnected',
+            )}
           </div>
         }
       />
@@ -286,13 +295,13 @@ export function DashboardPage() {
             >
               <Icon size={19} />
             </div>
-            <span className="text-[10px] text-slate-500">{label}</span>
+            <span className="text-[12px] text-slate-500">{label}</span>
             <strong className="font-display my-0.5 text-[23px] text-slate-800">
               {formatNumber(value)}
             </strong>
             <small
               className={cn(
-                'flex items-center gap-0.5 text-[8px]',
+                'flex items-center gap-0.5 text-[10px]',
                 trend === undefined
                   ? 'text-slate-400'
                   : trend > 0
@@ -302,7 +311,7 @@ export function DashboardPage() {
                       : 'text-slate-400',
               )}
             >
-              <TrendLabel value={trend} fallback={hint} />
+              <TrendLabel value={trend} fallback={hint} t={t} />
             </small>
           </article>
         ))}
@@ -315,19 +324,19 @@ export function DashboardPage() {
         )}
       >
         <Panel
-          title="消息吞吐趋势"
+          title={t('dashboard.trafficTrend')}
           meta={
             <div
               className="flex rounded-[5px] bg-slate-100 p-0.5"
               role="group"
-              aria-label="报表周期"
+              aria-label={t('dashboard.reportPeriod')}
             >
               {periodOptions.map((option) => (
                 <button
                   type="button"
                   key={option.value}
                   className={cn(
-                    'h-6 min-w-10 rounded border-0 px-2 text-[8px] font-semibold',
+                    'h-6.5 min-w-10 rounded border-0 px-2 text-[10px] font-semibold',
                     option.value === reportPeriod
                       ? 'bg-white text-blue-700 shadow-sm'
                       : 'bg-transparent text-slate-400 hover:text-slate-600',
@@ -335,7 +344,7 @@ export function DashboardPage() {
                   aria-pressed={option.value === reportPeriod}
                   onClick={() => setReportPeriod(option.value)}
                 >
-                  {option.label}
+                  {t(option.labelKey)}
                 </button>
               ))}
             </div>
@@ -376,12 +385,12 @@ export function DashboardPage() {
                   />
                   <Tooltip
                     contentStyle={chartTooltipStyle}
-                    labelFormatter={(value) => formatReportDate(String(value))}
+                    labelFormatter={(value) => formatReportDate(String(value), locale)}
                   />
                   <Area
                     type="monotone"
                     dataKey="forwarded"
-                    name="已转发"
+                    name={t('dashboard.forwarded')}
                     stackId="flow"
                     stroke="#2563eb"
                     strokeWidth={2}
@@ -390,7 +399,7 @@ export function DashboardPage() {
                   <Area
                     type="monotone"
                     dataKey="filtered"
-                    name="已过滤"
+                    name={t('dashboard.filtered')}
                     stackId="flow"
                     stroke="#f59e0b"
                     strokeWidth={1.5}
@@ -402,40 +411,51 @@ export function DashboardPage() {
           ) : (
             <EmptyState
               icon={Activity}
-              title="暂无趋势数据"
-              detail="消息开始流转后，这里会显示每日吞吐变化。"
+              title={t('dashboard.noTrend')}
+              detail={t('dashboard.noTrendDetail')}
             />
           )}
-          <div className="flex flex-wrap gap-4 px-3 pt-2 text-[9px] text-slate-500">
+          <div className="flex flex-wrap gap-4 px-3 pt-2 text-[11px] text-slate-500">
             <span className="flex items-center gap-1.5 before:h-0.5 before:w-4 before:bg-blue-600">
-              已转发
+              {t('dashboard.forwarded')}
             </span>
             <span className="flex items-center gap-1.5 before:h-0.5 before:w-4 before:bg-amber-500">
-              已过滤
+              {t('dashboard.filtered')}
             </span>
             <span className="ml-auto text-slate-400 max-sm:ml-0">
-              当前周期 {formatNumber(report.current.total)} 条
+              {t('dashboard.currentPeriodCount', { value: formatNumber(report.current.total) })}
             </span>
           </div>
         </Panel>
 
-        <Panel title="周期摘要" meta={<span>{allTime ? '全部时长' : `近 ${reportDays} 天`}</span>}>
+        <Panel
+          title={t('dashboard.periodSummary')}
+          meta={
+            <span>
+              {allTime
+                ? t('dashboard.allTime')
+                : t('dashboard.recentDays', { count: reportDays ?? 0 })}
+            </span>
+          }
+        >
           <div className="divide-y divide-slate-100">
             <div className="grid grid-cols-[32px_1fr_auto] items-center gap-3 py-3 first:pt-0">
               <span className="grid size-8 place-items-center rounded-[5px] bg-blue-50 text-blue-600">
                 <Gauge size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[8px] text-slate-400">
-                  {allTime ? '累计范围' : '较上周期'}
+                <small className="text-[10px] text-slate-400">
+                  {allTime
+                    ? t('dashboard.cumulativeRange')
+                    : t('dashboard.comparedToPrevious', { value: '' }).trim()}
                 </small>
-                <strong className="mt-0.5 text-[10px] text-slate-700">
-                  {allTime ? '总流量' : '总流量变化'}
+                <strong className="mt-0.5 text-[12px] text-slate-700">
+                  {allTime ? t('dashboard.totalTraffic') : t('dashboard.totalTrafficChange')}
                 </strong>
               </span>
               <b
                 className={cn(
-                  'text-[12px]',
+                  'text-[14px]',
                   report.change === undefined
                     ? 'text-slate-700'
                     : report.change > 0
@@ -455,10 +475,12 @@ export function DashboardPage() {
                 <Activity size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[8px] text-slate-400">日均吞吐</small>
-                <strong className="mt-0.5 text-[10px] text-slate-700">消息处理速度</strong>
+                <small className="text-[10px] text-slate-400">{t('dashboard.dailyAverage')}</small>
+                <strong className="mt-0.5 text-[12px] text-slate-700">
+                  {t('dashboard.processingSpeed')}
+                </strong>
               </span>
-              <b className="text-[12px] text-slate-700">
+              <b className="text-[14px] text-slate-700">
                 {formatNumber(Math.round(report.dailyAverage))}
               </b>
             </div>
@@ -467,36 +489,41 @@ export function DashboardPage() {
                 <Trophy size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[8px] text-slate-400">峰值日期</small>
-                <strong className="mt-0.5 text-[10px] text-slate-700">
-                  {report.peak ? formatReportDate(report.peak.date) : '-'}
+                <small className="text-[10px] text-slate-400">{t('dashboard.peakDate')}</small>
+                <strong className="mt-0.5 text-[12px] text-slate-700">
+                  {report.peak ? formatReportDate(report.peak.date, locale) : '-'}
                 </strong>
               </span>
-              <b className="text-[12px] text-slate-700">{formatNumber(report.peak?.total)}</b>
+              <b className="text-[14px] text-slate-700">{formatNumber(report.peak?.total)}</b>
             </div>
             <div className="grid grid-cols-[32px_1fr_auto] items-center gap-3 py-3">
               <span className="grid size-8 place-items-center rounded-[5px] bg-emerald-50 text-emerald-600">
                 <CalendarDays size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[8px] text-slate-400">活跃天数</small>
-                <strong className="mt-0.5 text-[10px] text-slate-700">周期覆盖率</strong>
+                <small className="text-[10px] text-slate-400">{t('dashboard.activeDays')}</small>
+                <strong className="mt-0.5 text-[12px] text-slate-700">
+                  {t('dashboard.periodCoverage')}
+                </strong>
               </span>
-              <b className="text-[12px] text-slate-700">
+              <b className="text-[14px] text-slate-700">
                 {report.activeDays}/{report.durationDays}
               </b>
             </div>
           </div>
           <div className="mt-3 border-t border-slate-100 pt-3">
-            <div className="mb-2 flex justify-between text-[8px] text-slate-400">
-              <span>每日流量强度</span>
-              <span>低 → 高</span>
+            <div className="mb-2 flex justify-between text-[10px] text-slate-400">
+              <span>{t('dashboard.dailyIntensity')}</span>
+              <span>{t('dashboard.lowToHigh')}</span>
             </div>
             <div className="flex h-7 items-stretch gap-1">
               {report.currentDaily.map((item) => (
                 <span
                   key={item.date}
-                  title={`${formatReportDate(item.date)}：${item.total} 条`}
+                  title={t('dashboard.dayTraffic', {
+                    date: formatReportDate(item.date, locale),
+                    count: item.total,
+                  })}
                   className="min-w-1 flex-1 rounded-sm bg-blue-600"
                   style={{
                     opacity: item.total ? 0.16 + (item.total / report.maxDailyTotal) * 0.84 : 0.06,
@@ -514,7 +541,14 @@ export function DashboardPage() {
           'max-lg:grid-cols-1',
         )}
       >
-        <Panel title="流量结构" meta={<span>转发效率 {formatPercent(report.forwardRate)}</span>}>
+        <Panel
+          title={t('dashboard.trafficComposition')}
+          meta={
+            <span>
+              {t('dashboard.forwardingEfficiency', { value: formatPercent(report.forwardRate) })}
+            </span>
+          }
+        >
           {report.current.total ? (
             <div className="grid grid-cols-[150px_1fr] items-center gap-4 max-sm:grid-cols-1">
               <div className="relative mx-auto h-36 w-36">
@@ -540,7 +574,9 @@ export function DashboardPage() {
                   <strong className="font-display text-[20px] text-slate-800">
                     {formatPercent(report.forwardRate)}
                   </strong>
-                  <small className="text-[8px] text-slate-400">转发率</small>
+                  <small className="text-[10px] text-slate-400">
+                    {t('dashboard.forwardingRate')}
+                  </small>
                 </div>
               </div>
               <div className="divide-y divide-slate-100">
@@ -549,33 +585,35 @@ export function DashboardPage() {
                     className="flex items-center justify-between py-3 first:pt-0"
                     key={item.name}
                   >
-                    <span className="flex items-center gap-2 text-[9px] text-slate-500">
+                    <span className="flex items-center gap-2 text-[11px] text-slate-500">
                       <i className="size-2 rounded-sm" style={{ backgroundColor: item.color }} />
                       {item.name}
                     </span>
-                    <strong className="text-[11px] text-slate-700">
+                    <strong className="text-[13px] text-slate-700">
                       {formatNumber(item.value)}
                     </strong>
                   </div>
                 ))}
                 <div className="flex items-center justify-between py-3">
-                  <span className="text-[9px] text-slate-500">累计样本</span>
-                  <strong className="text-[11px] text-slate-700">
+                  <span className="text-[11px] text-slate-500">
+                    {t('dashboard.cumulativeSamples')}
+                  </span>
+                  <strong className="text-[13px] text-slate-700">
                     {formatNumber(report.current.total)}
                   </strong>
                 </div>
               </div>
             </div>
           ) : (
-            <EmptyState icon={Target} title="暂无流量结构" />
+            <EmptyState icon={Target} title={t('dashboard.noComposition')} />
           )}
         </Panel>
 
         <Panel
-          title="节点控制"
+          title={t('dashboard.nodeControl')}
           meta={
             <span className={status.is_running ? 'text-emerald-600' : ''}>
-              {status.is_running ? '运行中' : '已停止'}
+              {t(status.is_running ? 'dashboard.running' : 'dashboard.stopped')}
             </span>
           }
         >
@@ -597,13 +635,13 @@ export function DashboardPage() {
                 {status.is_running ? <Play size={22} fill="currentColor" /> : <Pause size={22} />}
               </span>
               <div>
-                <strong className="mb-1 block text-[11px] text-slate-700">
-                  {status.is_running ? '消息中继正在运行' : '消息中继已停止'}
+                <strong className="mb-1 block text-[13px] text-slate-700">
+                  {t(status.is_running ? 'dashboard.relayRunning' : 'dashboard.relayStopped')}
                 </strong>
-                <p className="m-0 text-[9px] leading-4 text-slate-500">
+                <p className="m-0 text-[11px] leading-4 text-slate-500">
                   {status.is_connected
-                    ? '客户端连接正常，可处理新消息。'
-                    : '等待 Telegram 客户端建立连接。'}
+                    ? t('dashboard.clientConnected')
+                    : t('dashboard.clientWaiting')}
                 </p>
               </div>
             </div>
@@ -615,7 +653,7 @@ export function DashboardPage() {
                   onClick={() => control.mutate('stop')}
                   disabled={control.isPending}
                 >
-                  停止
+                  {t('dashboard.stop')}
                 </Button>
               ) : (
                 <Button
@@ -623,7 +661,7 @@ export function DashboardPage() {
                   onClick={() => control.mutate('start')}
                   disabled={control.isPending}
                 >
-                  启动
+                  {t('dashboard.start')}
                 </Button>
               )}
               <Button
@@ -632,7 +670,7 @@ export function DashboardPage() {
                 onClick={() => control.mutate('restart')}
                 disabled={control.isPending}
               >
-                重启
+                {t('dashboard.restart')}
               </Button>
             </div>
           </div>
@@ -640,7 +678,7 @@ export function DashboardPage() {
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
-                'text-[9px] text-rose-700',
+                'text-[11px] text-rose-700',
               )}
             >
               {messageFrom(control.error)}
@@ -648,20 +686,26 @@ export function DashboardPage() {
           ) : null}
           <div className="mt-4 grid grid-cols-3 divide-x divide-slate-100 border-t border-slate-100 pt-4 max-sm:grid-cols-1 max-sm:divide-x-0 max-sm:divide-y">
             <div className="px-4 first:pl-0 max-sm:px-0 max-sm:py-2">
-              <small className="block text-[8px] text-slate-400">本次运行转发</small>
-              <strong className="mt-1 block text-[14px] text-slate-700">
+              <small className="block text-[10px] text-slate-400">
+                {t('dashboard.runtimeForwarded')}
+              </small>
+              <strong className="mt-1 block text-[16px] text-slate-700">
                 {formatNumber(runtimeStats.forwarded)}
               </strong>
             </div>
             <div className="px-4 max-sm:px-0 max-sm:py-2">
-              <small className="block text-[8px] text-slate-400">本次运行过滤</small>
-              <strong className="mt-1 block text-[14px] text-slate-700">
+              <small className="block text-[10px] text-slate-400">
+                {t('dashboard.runtimeFiltered')}
+              </small>
+              <strong className="mt-1 block text-[16px] text-slate-700">
                 {formatNumber(runtimeStats.filtered)}
               </strong>
             </div>
             <div className="px-4 max-sm:px-0 max-sm:py-2">
-              <small className="block text-[8px] text-slate-400">持久队列</small>
-              <strong className="mt-1 block text-[14px] text-blue-600">
+              <small className="block text-[10px] text-slate-400">
+                {t('dashboard.persistentQueue')}
+              </small>
+              <strong className="mt-1 block text-[16px] text-blue-600">
                 {formatNumber(activeQueue)}
               </strong>
             </div>
@@ -675,16 +719,19 @@ export function DashboardPage() {
           'max-lg:grid-cols-1',
         )}
       >
-        <Panel title="规则表现排行" meta={<span>{rankedRules.length} 条规则 · 累计数据</span>}>
+        <Panel
+          title={t('dashboard.ruleRanking')}
+          meta={<span>{t('dashboard.ruleRankingMeta', { count: rankedRules.length })}</span>}
+        >
           {rankedRules.length ? (
             <div className="overflow-x-auto">
               <div className="min-w-135">
-                <div className="grid grid-cols-[28px_minmax(130px,1fr)_minmax(160px,1.25fr)_70px_70px] gap-3 border-b border-slate-100 pb-2 text-[8px] font-bold text-slate-400 uppercase">
+                <div className="grid grid-cols-[28px_minmax(130px,1fr)_minmax(160px,1.25fr)_70px_70px] gap-3 border-b border-slate-100 pb-2 text-[10px] font-bold text-slate-400 uppercase">
                   <span>#</span>
-                  <span>规则</span>
-                  <span>处理量</span>
-                  <span className="text-right">转发率</span>
-                  <span className="text-right">总计</span>
+                  <span>{t('dashboard.rule')}</span>
+                  <span>{t('dashboard.processed')}</span>
+                  <span className="text-right">{t('dashboard.forwardingRate')}</span>
+                  <span className="text-right">{t('dashboard.total')}</span>
                 </div>
                 {rankedRules.slice(0, 8).map((rule, index) => {
                   const rate = rule.total ? (rule.forwarded / rule.total) * 100 : 0
@@ -695,18 +742,21 @@ export function DashboardPage() {
                     >
                       <span
                         className={cn(
-                          'grid size-5 place-items-center rounded text-[8px] font-bold',
+                          'grid size-5 place-items-center rounded text-[10px] font-bold',
                           index < 3 ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500',
                         )}
                       >
                         {index + 1}
                       </span>
                       <div className="min-w-0">
-                        <strong className="block truncate text-[10px] text-slate-700">
+                        <strong className="block truncate text-[12px] text-slate-700">
                           {rule.rule_name}
                         </strong>
-                        <small className="mt-0.5 block text-[8px] text-slate-400">
-                          {formatNumber(rule.forwarded)} 转发 · {formatNumber(rule.filtered)} 过滤
+                        <small className="mt-0.5 block text-[10px] text-slate-400">
+                          {t('dashboard.ruleBreakdown', {
+                            forwarded: formatNumber(rule.forwarded),
+                            filtered: formatNumber(rule.filtered),
+                          })}
                         </small>
                       </div>
                       <div className="h-2 overflow-hidden rounded-sm bg-slate-100">
@@ -715,10 +765,10 @@ export function DashboardPage() {
                           style={{ width: `${(rule.total / maxRuleTotal) * 100}%` }}
                         />
                       </div>
-                      <strong className="text-right text-[9px] text-slate-600">
+                      <strong className="text-right text-[11px] text-slate-600">
                         {formatPercent(rate)}
                       </strong>
-                      <strong className="text-right text-[10px] text-slate-700">
+                      <strong className="text-right text-[12px] text-slate-700">
                         {formatNumber(rule.total)}
                       </strong>
                     </div>
@@ -727,15 +777,15 @@ export function DashboardPage() {
               </div>
             </div>
           ) : (
-            <EmptyState icon={Route} title="暂无规则统计" />
+            <EmptyState icon={Route} title={t('dashboard.noRuleStats')} />
           )}
         </Panel>
 
         <Panel
-          title="实时事件"
+          title={t('dashboard.liveEvents')}
           meta={
             <span className={connected ? 'text-emerald-600' : ''}>
-              {connected ? 'SSE 已连接' : '等待事件'}
+              {t(connected ? 'dashboard.sseConnected' : 'dashboard.waitingEvents')}
             </span>
           }
         >
@@ -750,13 +800,15 @@ export function DashboardPage() {
               >
                 <span className="mt-1 size-2 rounded-full border-2 border-blue-100 bg-blue-400" />
                 <div className="min-w-0">
-                  <strong className="text-[9px] text-slate-600 uppercase">{event.type}</strong>
-                  <p className="mt-0.5 truncate text-[9px] text-slate-500">
-                    {String(event.payload.message ?? event.payload.action ?? '状态更新')}
+                  <strong className="text-[11px] text-slate-600 uppercase">{event.type}</strong>
+                  <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                    {String(
+                      event.payload.message ?? event.payload.action ?? t('dashboard.statusUpdate'),
+                    )}
                   </p>
                 </div>
-                <time className="text-[8px] text-slate-400">
-                  {new Date(event.at).toLocaleTimeString('zh-CN', {
+                <time className="text-[10px] text-slate-400">
+                  {new Date(event.at).toLocaleTimeString(locale, {
                     hour12: false,
                     hour: '2-digit',
                     minute: '2-digit',
@@ -767,8 +819,8 @@ export function DashboardPage() {
             {!recent.length ? (
               <EmptyState
                 icon={Activity}
-                title="等待实时事件"
-                detail="连接成功后，新事件会在这里出现。"
+                title={t('dashboard.waitingLiveEvents')}
+                detail={t('dashboard.waitingLiveEventsDetail')}
               />
             ) : null}
           </div>

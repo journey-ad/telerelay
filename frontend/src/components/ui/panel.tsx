@@ -21,9 +21,9 @@ export function PageHeader({
       )}
     >
       <div>
-        <p className="mb-1.5 text-[9px] font-bold text-blue-600 uppercase">{eyebrow}</p>
+        <p className="mb-1.5 text-[11px] font-bold text-blue-600 uppercase">{eyebrow}</p>
         <h1 className="mb-1.5 text-2xl font-bold text-slate-900">{title}</h1>
-        <p className="m-0 text-xs leading-5 text-slate-500">{description}</p>
+        <p className="m-0 text-sm leading-5 text-slate-500">{description}</p>
       </div>
       {actions ? (
         <div className="flex items-center gap-2 max-md:w-full max-md:[&>button]:flex-1">
@@ -55,8 +55,8 @@ export function Panel({
     >
       {title || meta ? (
         <header className="mb-4.5 flex items-center justify-between gap-4">
-          {title ? <h2 className="m-0 text-[13px] font-bold text-slate-700">{title}</h2> : <span />}
-          {meta ? <div className="text-[9px] text-slate-400">{meta}</div> : null}
+          {title ? <h2 className="m-0 text-[15px] font-bold text-slate-700">{title}</h2> : <span />}
+          {meta ? <div className="text-[11px] text-slate-400">{meta}</div> : null}
         </header>
       ) : null}
       {children}
@@ -88,8 +88,8 @@ export function EmptyState({
       >
         <Icon size={20} />
       </span>
-      <strong className="text-[11px] text-slate-600">{title}</strong>
-      {detail ? <p className="mt-1 max-w-70 text-[9px] leading-4">{detail}</p> : null}
+      <strong className="text-[13px] text-slate-600">{title}</strong>
+      {detail ? <p className="mt-1 max-w-70 text-[11px] leading-4">{detail}</p> : null}
     </div>
   )
 }
