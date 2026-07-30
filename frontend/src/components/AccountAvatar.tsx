@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react'
 import { authorization } from '../api/credentials'
 import type { TelegramAccount } from '../types'
+import { avatarInitials } from '../utils/avatar'
 import { cn } from '../utils/cn'
 import { hashColor } from '../utils/color'
 
 function initials(account?: TelegramAccount): string {
-  const value = account?.display_name || account?.label || 'TG'
-  const words = value.trim().split(/\s+/).filter(Boolean)
-  return words.length > 1
-    ? `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
-    : value.slice(0, 2).toUpperCase()
+  return avatarInitials(account?.display_name || account?.label || '')
 }
 
 export function AccountAvatar({
@@ -22,6 +19,7 @@ export function AccountAvatar({
   fallbackClassName?: string
 }) {
   const [source, setSource] = useState<string | null>(null)
+  const colors = hashColor(String(account?.telegram_user_id ?? account?.id ?? 'TG'))
 
   useEffect(() => {
     setSource(null)
@@ -64,11 +62,13 @@ export function AccountAvatar({
     <span
       className={cn('relative grid shrink-0 place-items-center overflow-hidden rounded', className)}
       style={{
-        backgroundColor: hashColor(String(account?.telegram_user_id ?? account?.id ?? 'TG')),
+        backgroundColor: colors.background,
       }}
       aria-hidden
     >
-      <span className={cn('font-bold text-white', fallbackClassName)}>{initials(account)}</span>
+      <span className={cn('font-bold', fallbackClassName)} style={{ color: colors.foreground }}>
+        {initials(account)}
+      </span>
       {source ? (
         <img
           src={source}

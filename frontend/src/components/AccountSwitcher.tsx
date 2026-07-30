@@ -168,7 +168,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
           <AccountAvatar
             account={active}
             className="size-7.5 rounded-[5px] bg-blue-50"
-            fallbackClassName="text-[13px] text-blue-700"
+            fallbackClassName="text-[13px]"
           />
           <span className="flex min-w-20 flex-1 flex-col items-start overflow-hidden max-md:hidden">
             <strong className="w-full truncate text-left text-xs text-slate-700">

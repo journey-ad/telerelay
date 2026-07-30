@@ -242,6 +242,7 @@ export const enUS = {
     dailyIntensity: 'Daily traffic intensity',
     lowToHigh: 'Low → High',
     dayTraffic: '{{date}}: {{count}} messages',
+    rangeAverageTraffic: '{{date}}: {{count}} messages/day',
     trafficComposition: 'Traffic composition',
     forwardingEfficiency: 'Forwarding efficiency {{value}}',
     forwardingRate: 'Forwarding rate',

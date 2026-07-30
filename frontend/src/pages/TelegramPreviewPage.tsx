@@ -43,17 +43,12 @@ import type {
   TelegramPreviewMessage,
   TelegramPreviewMessagesPage,
 } from '../types'
+import { avatarInitials } from '../utils/avatar'
 import { cn } from '../utils/cn'
 import { hashColor } from '../utils/color'
 import { formatNumber, messageFrom } from '../utils/format'
 
 type DialogFolder = 'main' | 'archived'
-
-function initials(value: string): string {
-  const parts = value.trim().split(/\s+/).filter(Boolean)
-  if (parts.length > 1) return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
-  return value.slice(0, 2).toUpperCase() || 'TG'
-}
 
 function previewTime(value: string | null | undefined, locale: string): string {
   if (!value) return ''
@@ -149,16 +144,17 @@ function Avatar({
   className?: string
 }) {
   const { t } = useTranslation()
+  const colors = hashColor(String(peerId ?? title))
   return (
     <AuthenticatedImage
       path={peerAvatarPath(accountId, peerId)}
       inlineSource={inlineSource}
       alt={t('telegramPreview.avatarAlt', { title })}
-      className={cn('grid shrink-0 place-items-center rounded-md text-white', className)}
-      style={{ backgroundColor: hashColor(String(peerId ?? title)) }}
+      className={cn('grid shrink-0 place-items-center rounded-md', className)}
+      style={{ backgroundColor: colors.background, color: colors.foreground }}
       fallback={
         <span className="grid size-full place-items-center text-xs font-bold">
-          {title ? initials(title) : kind ? <ChatGlyph kind={kind} /> : 'TG'}
+          {title ? avatarInitials(title) : kind ? <ChatGlyph kind={kind} /> : 'TG'}
         </span>
       }
     />

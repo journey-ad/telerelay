@@ -236,6 +236,7 @@ export const zhCN = {
     dailyIntensity: '每日流量强度',
     lowToHigh: '低 → 高',
     dayTraffic: '{{date}}：{{count}} 条',
+    rangeAverageTraffic: '{{date}}：日均 {{count}} 条',
     trafficComposition: '流量结构',
     forwardingEfficiency: '转发效率 {{value}}',
     forwardingRate: '转发率',

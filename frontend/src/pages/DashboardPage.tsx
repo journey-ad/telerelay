@@ -40,6 +40,7 @@ import { formatNumber, messageFrom } from '../utils/format'
 
 type ReportPeriod = '7day' | '14day' | '30day' | 'all'
 type DailyStat = Stats['daily'][number] & { total: number }
+type DailyIntensityStat = DailyStat & { endDate?: string }
 
 const periodOptions = [
   { value: '7day', labelKey: 'dashboard.periods.sevenDays' },
@@ -61,6 +62,7 @@ const chartTooltipStyle = {
   fontSize: 11,
 }
 const liveEventLimit = 12
+const intensitySampleLimit = 48
 const eventTypeKeys = {
   ready: 'dashboard.events.types.ready',
   log: 'dashboard.events.types.log',
@@ -147,6 +149,27 @@ function aggregateDaily(items: DailyStat[]) {
   )
 }
 
+function sampleDailyIntensity(
+  items: DailyStat[],
+  limit = intensitySampleLimit,
+): DailyIntensityStat[] {
+  if (items.length <= limit) return items
+
+  return Array.from({ length: limit }, (_, index) => {
+    const start = Math.floor((index * items.length) / limit)
+    const end = Math.floor(((index + 1) * items.length) / limit)
+    const bucket = items.slice(start, end)
+    const totals = aggregateDaily(bucket)
+    return {
+      date: bucket[0].date,
+      endDate: bucket[bucket.length - 1].date,
+      forwarded: Math.round(totals.forwarded / bucket.length),
+      filtered: Math.round(totals.filtered / bucket.length),
+      total: Math.round(totals.total / bucket.length),
+    }
+  })
+}
+
 function percentChange(current: number, previous: number): number {
   if (!previous) return current ? 100 : 0
   return Math.round(((current - previous) / previous) * 1000) / 10
@@ -229,15 +252,17 @@ export function DashboardPage() {
       null,
     )
     const activeDays = currentDaily.filter((item) => item.total > 0).length
-    const maxDailyTotal = Math.max(...currentDaily.map((item) => item.total), 1)
+    const intensityDaily = sampleDailyIntensity(currentDaily)
+    const maxIntensityTotal = Math.max(...intensityDaily.map((item) => item.total), 1)
 
     return {
       current,
       previous,
       currentDaily,
+      intensityDaily,
       peak,
       activeDays,
-      maxDailyTotal,
+      maxIntensityTotal,
       durationDays,
       change: allTime ? undefined : percentChange(current.total, previous.total),
       forwardedChange: allTime ? undefined : percentChange(current.forwarded, previous.forwarded),
@@ -558,17 +583,31 @@ export function DashboardPage() {
               <span>{t('dashboard.dailyIntensity')}</span>
               <span>{t('dashboard.lowToHigh')}</span>
             </div>
-            <div className="flex h-7 items-stretch gap-1">
-              {report.currentDaily.map((item) => (
+            <div
+              className="grid h-7 grid-flow-col auto-cols-fr items-stretch gap-1 overflow-hidden"
+              data-testid="daily-intensity"
+            >
+              {report.intensityDaily.map((item) => (
                 <span
-                  key={item.date}
-                  title={t('dashboard.dayTraffic', {
-                    date: formatReportDate(item.date, locale),
-                    count: item.total,
-                  })}
-                  className="min-w-1 flex-1 rounded-sm bg-blue-600"
+                  key={`${item.date}-${item.endDate ?? item.date}`}
+                  title={t(
+                    item.endDate && item.endDate !== item.date
+                      ? 'dashboard.rangeAverageTraffic'
+                      : 'dashboard.dayTraffic',
+                    {
+                      date:
+                        item.endDate && item.endDate !== item.date
+                          ? `${formatReportDate(item.date, locale)} - ${formatReportDate(item.endDate, locale)}`
+                          : formatReportDate(item.date, locale),
+                      count: item.total,
+                    },
+                  )}
+                  className="min-w-0 rounded-sm bg-blue-600"
+                  data-testid="daily-intensity-point"
                   style={{
-                    opacity: item.total ? 0.16 + (item.total / report.maxDailyTotal) * 0.84 : 0.06,
+                    opacity: item.total
+                      ? 0.16 + (item.total / report.maxIntensityTotal) * 0.84
+                      : 0.06,
                   }}
                 />
               ))}
