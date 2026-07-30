@@ -1,7 +1,6 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity,
   Archive,
   Bot,
   ChevronDown,
@@ -56,7 +55,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
     void queryClient.invalidateQueries({ queryKey: ['bot-status'] })
     void queryClient.invalidateQueries({ queryKey: ['stats'] })
   }, [queryClient])
-  const { connected } = useEvents(invalidateLiveData)
+  useEvents(invalidateLiveData)
   const current = navigation.find((item) => item.to === location.pathname) ?? navigation[0]
   const online = Boolean(statusQuery.data?.is_connected)
 
@@ -136,10 +135,6 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           ))}
         </nav>
         <div className="border-t border-slate-100 p-3.5">
-          <div className="flex items-center gap-2 pb-3 text-[9px] text-slate-400">
-            <Activity className="text-emerald-500" size={15} />
-            <span>{connected ? '实时事件已连接' : '轮询模式'}</span>
-          </div>
           <button
             className={cn(
               'flex h-8.5 w-full items-center gap-2.5 rounded-[5px] border-0',
