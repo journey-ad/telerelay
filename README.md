@@ -2,330 +2,172 @@
 
 # TeleRelay
 
-An intelligent Telegram message relay tool with smart filtering based on regex patterns and keywords, featuring a modern Web management interface.
+TeleRelay is a self-hosted Telegram relay and archive tool. It uses a FastAPI backend and a Vue 3 control console, with persistent forwarding queues, rule-based filtering, callback-button automation, and message exports.
 
-<p align="center">
-  <img src="https://count.getloli.com/@telerelay.github?theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
-</p>
+## Features
 
-## Preview
+- Multiple independent forwarding rules with source, target, filter, ignore, and forwarding options
+- Persistent SQLite forwarding queue with retry, FloodWait handling, and restart recovery
+- User session and Bot Token modes
+- Exact, contains, and regex matching for Telegram callback-button automation in User mode
+- JSON, CSV, SQLite, and offline HTML message exports
+- Hourly, daily, and weekly incremental export tasks
+- Live runtime status and logs over Server-Sent Events
+- HTTP Basic authentication for the management API and console
+- Optional Telegram Admin Bot controls
 
-<p align="center">
-  <img src="./docs/preview_en.jpeg" width="600">
-</p>
+## Architecture
 
-## ✨ Features
+TeleRelay is intentionally deployed as one service:
 
-- 🤖 **Smart Forwarding**: Automatically monitor specified Telegram groups/channels/accounts and forward messages to multiple targets
-- 📋 **Multi-Rule Management**: Support multiple independent forwarding rules, each with its own sources, targets, and filters
-- 🖱️ **Message Button Handling**: In User mode, monitor selected bots/chats and click callback buttons using exact, contains, or regex text matching
-- 🔍 **Powerful Filtering**: Support regex and keyword matching, whitelist/blacklist modes, media type and file size filtering
-- 🚫 **Ignore List**: Ignore specific messages by user ID and keywords
-- 💪 **Force Forward**: Bypass noforwards restrictions on channels/groups by downloading and re-uploading
-- 🌐 **Web Management Interface**: Gradio-based configuration panel with real-time Bot status, statistics, and logs
-- 📤 **Data Export**: Export group metadata and complete group history to JSON, CSV, or HTML with incremental schedules
-- 🌍 **Internationalization**: Full i18n support with built-in Chinese and English interfaces
-- 🔐 **Dual Authentication Modes**: Support both User Session (phone login) and Bot Token methods
-- 🐳 **Docker Support**: One-click deployment, ready to use
-- 🔒 **Secure**: Support HTTP Basic Auth for Web interface
-- ⚡ **Performance Optimized**: Asynchronous processing with rate limiting and error retry
-- 🔌 **Proxy Support**: Support SOCKS5/HTTP proxy configuration
+- `backend/`: FastAPI, Telethon runtime, application services, SQLite stores, and REST/SSE API
+- `frontend/`: Vue 3, TypeScript, Vite, Pinia, TanStack Query, and ECharts
+- FastAPI serves the production frontend from `frontend/dist`
+- Uvicorn runs with one worker so the Telegram client, scheduler, and in-memory jobs are created once
 
-## 🚀 Quick Start
+REST endpoints are under `/api/v1`, OpenAPI documentation is available at `/api/docs`, and `/api/v1/events` provides the SSE stream.
 
-### Prerequisites
+## Quick Start
 
-1. **Telegram API Credentials**
-   - Visit [https://my.telegram.org](https://my.telegram.org)
-   - Create an app to get `API_ID` and `API_HASH`
+### Configuration
 
-2. **Bot Token** (if using Bot mode)
-   - Chat with [@BotFather](https://t.me/BotFather) to create a Bot
-   - Get the Bot Token
-
-### Method 1: Docker Deployment (Recommended)
-
-Pull the pre-built image from GitHub Container Registry:
+Create local configuration files from the examples:
 
 ```bash
-docker pull ghcr.io/journey-ad/telerelay:latest
+cp .env.example .env
+cp config/config.yaml.example config/config.yaml
 ```
 
-Run with Docker:
+At minimum, set `API_ID` and `API_HASH` in `.env`. Set `BOT_TOKEN` when using `SESSION_TYPE=bot`. For a remotely accessible console, also set `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD`.
+
+Telegram API credentials are available from [my.telegram.org](https://my.telegram.org). Bot tokens are created with [@BotFather](https://t.me/BotFather).
+
+### Docker Compose
 
 ```bash
-docker run -d -p 8080:8080 \
-  -v $(pwd)/.env:/app/.env \
-  -v $(pwd)/config:/app/config \
-  -v $(pwd)/logs:/app/logs \
-  -v $(pwd)/data:/app/data \
-  ghcr.io/journey-ad/telerelay:latest
+docker compose up -d --build
 ```
 
-Or use docker-compose:
+Open `http://localhost:8080`. Compose persists configuration, Telegram sessions, databases, exports, and logs through the `config/`, `data/`, and `logs/` mounts.
 
-```yaml
-version: '3'
-services:
-  telerelay:
-    image: ghcr.io/journey-ad/telerelay:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./.env:/app/.env
-      - ./config:/app/config
-      - ./logs:/app/logs
-      - ./data:/app/data
+To use the published image instead of a local build, remove `build: .` from `docker-compose.yml` and keep `image: ghcr.io/journey-ad/telerelay:latest`.
+
+### Local Production Build
+
+Requirements: Python 3.11+ and Node.js 22+.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
+python -m backend.main
 ```
 
-Access Web interface:
-- Open browser and visit: `http://localhost:8080`
-- If HTTP Basic Auth is configured, enter username and password
+Open `http://localhost:8080`.
 
-### Method 2: Local Run
+### Frontend Development
 
-1. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+Run the API and Vite server in separate terminals:
 
-2. **Configuration files** (same as Docker deployment steps 2-3)
-
-3. **Run the program**
-   ```bash
-   python -m src.main
-   ```
-
-4. **Access Web interface**: `http://localhost:8080`
-
-## 📖 Configuration
-
-### Environment Variables (.env)
-
-```env
-# Telegram API credentials (required)
-API_ID=your_api_id
-API_HASH=your_api_hash
-
-# Bot Token (required for Bot mode)
-BOT_TOKEN=your_bot_token
-
-# Session type: user or bot
-# user: Use user account (can monitor all groups)
-# bot: Use Bot Token (can only monitor groups the bot has joined)
-SESSION_TYPE=user
-
-# Proxy configuration (optional)
-# Supported protocols: socks5, http
-# Example: socks5://127.0.0.1:1080 or http://127.0.0.1:1080
-PROXY_URL=
-
-# Web service configuration
-WEB_HOST=0.0.0.0
-WEB_PORT=8080
-
-# Web App URL for Mini App mode
-WEBAPP_URL=
-
-# Web interface authentication (recommended for production)
-WEB_AUTH_USERNAME=
-WEB_AUTH_PASSWORD=
-
-# Log level: DEBUG, INFO, WARNING, ERROR
-LOG_LEVEL=INFO
-
-# Interface language: zh_CN (Chinese) or en_US (English)
-LANGUAGE=zh_CN
-
-# Admin Bot Token (Get from @BotFather, DO NOT use the same token as BOT_TOKEN)
-ADMIN_BOT_TOKEN=
-
-# Admin Telegram User ID
-ADMIN_CHAT_ID=
+```bash
+python -m backend.main
 ```
 
-### Export Configuration (config/config.yaml)
-
-```yaml
-export:
-  root_dir: data/exports
-  message_db_dir: data/db
-  timezone: Asia/Shanghai
-  concurrency: 2
+```bash
+cd frontend
+npm ci
+npm run dev
 ```
 
-`root_dir` is the server-side export root. The Web UI only accepts relative subdirectories below it. Exported messages are also upserted into one canonical SQLite database per chat under `message_db_dir`, named `msg_export_{chat_id}.sqlite3`. Docker already mounts the complete `data/` directory, so exports, message databases, and the task database at `data/exports.db` persist across container recreation.
+Vite serves the console at `http://localhost:5173` and proxies `/api` to `http://127.0.0.1:8080`.
 
-The forwarding queue is stored in `data/forward_queue.db` and resumes after restart.
+## Configuration Ownership
 
-## 🎮 Usage Guide
+`.env` contains process credentials and runtime settings:
 
-### Authentication Mode Comparison
+- Telegram credentials and `SESSION_TYPE`
+- proxy, host, port, log level, and runtime language
+- Web Basic Auth credentials
+- optional Admin Bot and Mini App settings
 
-| Feature | User Mode | Bot Mode |
-|---------|-----------|----------|
-| Authentication | Phone + Code | Bot Token |
-| Monitoring Scope | All joined groups | Only groups bot joined |
-| First Use | Requires phone verification | No verification |
+`config/config.yaml` contains mutable application configuration:
 
-### User Mode Authentication Flow
+- forwarding and callback-button rules
+- filtering, ignore, and forwarding options
+- forwarding queue settings
+- export directories, timezone, and concurrency
 
-1. Set `SESSION_TYPE=user`
-2. Start the app and access Web interface
-3. Click "Start Authentication" in the "🔐 Authentication" tab
-4. Enter phone number (international format, e.g., `+8613800138000`)
-5. Enter the verification code sent by Telegram
-6. If two-step verification is enabled, enter password
-7. After successful authentication, current account information is displayed
+The console can import or export the YAML configuration. Credentials remain in `.env` and are not included in these backups.
 
-### Getting Group ID
+## Persistent Data
 
-1. **Using @userinfobot**
-   - Share the group to [@userinfobot](https://t.me/userinfobot)
-   - Bot will reply with the group ID
+- `data/telegram_session.session`: Telegram user session
+- `data/forward_queue.db`: pending forwarding work and deduplication tombstones
+- `data/stats.db`: forwarding statistics and history
+- `data/exports.db`: export tasks and run history
+- `data/db/msg_export_{chat_id}.sqlite3`: canonical message archives
+- `data/exports/`: generated JSON, CSV, SQLite, and HTML files
+- `logs/telerelay.log`: rotating application log
 
-2. **From Web Telegram URL**
-   - Open Web Telegram and enter the group chat
-   - URL format: `https://web.telegram.org/a/#-100123456789`
-   - The number after `#` is the group ID, e.g., `-100123456789`
+Back up `config/`, `data/`, and `.env` together. Treat `.env` and Telegram session files as secrets.
 
-### Web Interface Features
+## User Authentication Flow
 
-#### Control Panel
-- **Start/Stop/Restart**: Control Bot running status
-- **Refresh Status**: Manually refresh current status
-- **Status Display**: Running status, forwarded, filtered, total messages
+With `SESSION_TYPE=user`, open Settings and start Telegram authentication. Submit the phone number, login code, and 2FA password when requested. The async challenge is managed by the API; no terminal input is required.
 
-#### Configuration Tab
-- **Forwarding Rules**: View, add, edit, delete, enable/disable forwarding rules
-- **Source Groups**: Configure groups to monitor
-- **Target Groups**: Configure forwarding targets (supports multiple)
-- **Filter Rules**: Regex, keyword matching, media type and file size filtering
-- **Ignore List**: User ID and keyword blocking
-- **Forwarding Options**: Format preservation, source info, delay settings, force forward
-- **Message Button Handling**: Use independent rules to monitor selected bots/chats, match button text exactly, by containment, or with regex, and optionally delay the click; User mode only
+With `SESSION_TYPE=bot`, configure `BOT_TOKEN`. Callback-button automation and account-wide export discovery are unavailable because they require a user session.
 
-#### Logs Tab
-- **Real-time Logs**: View running logs
-- **Log Lines**: Adjustable display lines
+## Admin Bot
 
-#### Export Data Tab (User Mode Only)
-- **Group List**: Export information about accessible groups and channels
-- **Message History**: Export a group and time range as JSON, CSV, SQLite, or offline HTML; HTML supports search, date filters, pagination, and reply lists
-- **Scheduled Exports**: Run incremental exports hourly, daily, or weekly; messages accumulate in per-chat SQLite databases and scheduled HTML is rebuilt as one cumulative archive
+Set `ADMIN_BOT_TOKEN` and `ADMIN_CHAT_ID` to enable remote commands:
 
-This feature requires a Telegram user session and is unavailable in Bot Token mode.
+- `/status`
+- `/bot start|stop|restart`
+- `/rule list|detail|add|del|rename|toggle|set`
+- `/webapp`
 
-#### Authentication Tab (User Mode Only)
-- **Auth Status**: Display current login status and account info
-- **Auth Operations**: Start authentication, cancel authentication
-- **Input Forms**: Phone number, verification code, password
+The Admin Bot uses a separate Telegram token. Its control commands are submitted to the FastAPI runtime loop.
 
-#### Admin Bot Remote Control
-1. Search and start your Admin Bot on Telegram
-2. Use commands (e.g. `/status`) to monitor the forwarding service
-3. Available commands:
-   - `/status` : View running status
-   - `/bot start|stop|restart` : Control forwarding service
-   - `/rule list|detail|add|del|rename|toggle|set` : Manage forwarding rules
-   - `/webapp` : Open configuration panel as Telegram Mini App
+## Development Checks
 
-
-## 🔧 FAQ
-
-### Message Forwarding Issues
-
-**Messages not forwarding?**
-Check:
-- Is Bot running (check Web interface status)
-- Are filter rules correct (check logs)
-- Does Bot have permission to send messages
-- If using multi-rule configuration, check if rules are enabled
-
-**Triggered rate limit (FloodWait)?**
-- The entire forwarding queue pauses and resumes automatically
-- Can increase `forwarding.delay` time
-
-**Can't forward restricted channel content?**
-- Enable `forwarding.force_forward: true` for force forward
-- Note: Force forward downloads then re-uploads, may be slower
-
-### Proxy Configuration
-
-**How to configure proxy?**
-```env
-# SOCKS5 proxy
-PROXY_URL=socks5://127.0.0.1:1080
-
-# HTTP proxy
-PROXY_URL=http://127.0.0.1:1080
-
-# Proxy with authentication
-PROXY_URL=socks5://user:password@127.0.0.1:1080
+```bash
+PYTHONPYCACHEPREFIX=/tmp/telerelay-pyc .venv/bin/python -m compileall -q backend tests
+.venv/bin/python -m unittest discover -s tests -v
+cd frontend && npm run build
 ```
 
-## 📦 Project Structure
+## Project Structure
 
-```
+```text
 telerelay/
-├── .env.example          # Environment variables example
-├── config/               # Configuration directory
-│   └── config.yaml.example
-├── logs/                 # Log files
-├── data/                 # Telegram session files
-├── src/                  # Source code
-│   ├── i18n/             # Internationalization module
-│   │   ├── locales/      # Language packs
-│   │   │   ├── zh_CN.py  # Chinese translation
-│   │   │   └── en_US.py  # English translation
-│   │   └── translator.py # Translator
-│   ├── forwarder/        # Forwarding module
-│   │   ├── forwarder.py  # Message forwarding logic
-│   │   ├── downloader.py # Media downloader
-│   │   └── media_group.py # Media group handling
-│   ├── webui/            # Gradio Web interface
-│   │   ├── handlers/     # Business handlers
-│   │   │   ├── auth.py         # Authentication handling
-│   │   │   ├── bot_control.py  # Bot control
-│   │   │   ├── config.py       # Configuration management
-│   │   │   └── log.py          # Log viewing
-│   │   ├── app.py        # UI construction
-│   │   └── utils.py      # Utility functions
-│   ├── main.py           # Main program entry
-│   ├── config.py         # Configuration management
-│   ├── rule.py           # Forwarding rule data class
-│   ├── client.py         # Telegram client
-│   ├── auth_manager.py   # User mode auth management
-│   ├── bot_commands.py   # Admin bot commands
-│   ├── bot_manager.py    # Bot lifecycle management
-│   ├── filters.py        # Message filtering
-│   ├── constants.py      # Constants definition
-│   ├── utils.py          # Utility functions
-│   └── logger.py         # Logging configuration
-├── Dockerfile            # Docker image
-├── docker-compose.yml    # Docker Compose configuration
-└── requirements.txt      # Python dependencies
+├── backend/              # FastAPI API and Telegram runtime
+│   ├── api/              # REST and SSE routes
+│   ├── exporter/         # Export engine and scheduler
+│   ├── forwarder/        # Message forwarding pipeline
+│   ├── schemas/          # HTTP request contracts
+│   ├── services/         # UI-independent application services
+│   └── main.py           # FastAPI/Uvicorn entry point
+├── frontend/             # Vue 3 + TypeScript console
+│   └── src/
+├── config/               # Mutable YAML configuration
+├── data/                 # Sessions, SQLite databases, and exports
+├── logs/                 # Rotating logs
+├── tests/
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## 🛡️ Security Recommendations
+## Security
 
-1. **Protect Sensitive Information**
-   - Don't expose `.env` file publicly
-   - Regularly change API credentials
-   - Keep session files secure
+- Enable Web Basic Auth whenever port 8080 is reachable by other machines.
+- Terminate HTTPS at a reverse proxy; Basic Auth credentials must not travel over plain public HTTP.
+- Restrict access to `.env`, `data/*.session`, databases, exports, and backups.
+- Keep Uvicorn at one worker. Multiple workers would start duplicate Telegram clients and schedulers.
 
-2. **Web Interface Security**
-   - Must configure `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` in production
-   - Use reverse proxy (like Nginx) to add HTTPS
-   - Configure firewall in production environment
-   - Restrict Web interface access IPs
-
-3. **Regular Backups**
-   - Backup session files (`data/`)
-   - Backup configuration files
-   - Backup `data/exports.db`, `data/exports/`, and `data/db/` together
-   - Backup `data/forward_queue.db`
-
-## 📝 License
+## License
 
 [MIT License](LICENSE)

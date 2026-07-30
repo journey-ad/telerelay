@@ -12,11 +12,6 @@ source_chats:
 target_chats:
   - -100987654321
 
-# UI language configuration
-# en_US: English (default)
-# zh_CN: Chinese
-language: en_US
-
 # Chat and group metadata export
 export:
   # Must be persistent in Docker; the default is covered by the existing data volume.

@@ -1,0 +1,28 @@
+{
+  "name": "telerelay-console",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "typecheck": "vue-tsc -b",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/vue-query": "latest",
+    "echarts": "latest",
+    "naive-ui": "latest",
+    "pinia": "latest",
+    "vue": "latest",
+    "vue-i18n": "latest",
+    "vue-router": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "@vitejs/plugin-vue": "latest",
+    "typescript": "^5.9.3",
+    "vite": "latest",
+    "vue-tsc": "latest"
+  }
+}

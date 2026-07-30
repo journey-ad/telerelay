@@ -71,9 +71,9 @@ def main():
 
     # 导入语言文件
     import sys
-    sys.path.insert(0, str(project_root / "../src"))
+    sys.path.insert(0, str(project_root / ".."))
 
-    from i18n.locales import en_US, zh_CN
+    from backend.i18n.locales import en_US, zh_CN
 
     print("=" * 80)
     print("检查语言文件中未使用的键")
@@ -124,8 +124,8 @@ def main():
     for i, key in enumerate(all_keys, 1):
         print(f"   [{i}/{len(all_keys)}] 检查: {key}", end="\r")
 
-        # 在 src 目录中搜索
-        found_files = search_key_in_files(key, str(project_root / "../src"))
+        # 在后端目录中搜索
+        found_files = search_key_in_files(key, str(project_root / "../backend"))
 
         # 排除语言文件本身
         found_files = [

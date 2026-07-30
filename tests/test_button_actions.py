@@ -13,15 +13,16 @@ from telethon.tl.types import (
     ReplyInlineMarkup,
 )
 
-from src.button_actions import (
+from backend.button_actions import (
     ButtonActionEngine,
     ButtonActionRule,
     button_text_matches,
     chat_matches,
     iter_callback_buttons,
 )
-from src.config import Config
-from src.webui.handlers.config import ConfigHandler
+from backend.config import Config
+from backend.schemas import ButtonActionRulePayload
+from backend.services import RuleService, ServiceError
 
 
 class FakeMessage:
@@ -189,7 +190,7 @@ class ButtonActionEngineTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        with patch("src.button_actions.asyncio.sleep", new_callable=AsyncMock) as sleep:
+        with patch("backend.button_actions.asyncio.sleep", new_callable=AsyncMock) as sleep:
             await engine.handle(event)
 
         sleep.assert_awaited_once_with(0.5)
@@ -225,8 +226,8 @@ class ButtonActionEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(message.clicked_data, [b"confirm"])
 
 
-class ButtonActionConfigTests(unittest.TestCase):
-    def test_config_handler_saves_multiple_patterns_and_regex_mode(self):
+class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rule_service_saves_multiple_patterns_and_regex_mode(self):
         with (
             tempfile.TemporaryDirectory() as temp_dir,
             patch.dict(os.environ, {"SESSION_TYPE": "user"}),
@@ -236,19 +237,21 @@ class ButtonActionConfigTests(unittest.TestCase):
                 env_file=str(Path(temp_dir) / "missing.env"),
                 config_file=str(config_path),
             )
-            handler = ConfigHandler(config, SimpleNamespace(is_running=False))
+            service = RuleService(config, SimpleNamespace(is_running=False))
 
-            result = handler.save_button_action_rule(
-                0,
-                True,
-                "@example_bot\n-100123",
-                "^确认.*$\n立即签到",
-                "regex",
-                0.5,
-                True,
+            result = await service.create_button_rule(
+                ButtonActionRulePayload(
+                    name="签到",
+                    enabled=True,
+                    source_chats=["@example_bot", -100123],
+                    button_texts=["^确认.*$", "立即签到"],
+                    match_mode="regex",
+                    delay=0.5,
+                    click_all_matches=True,
+                )
             )
 
-            self.assertIn("✅", result)
+            self.assertEqual(result["name"], "签到")
             rules = config.get_button_action_rules()
             self.assertEqual(len(rules), 1)
             self.assertEqual(rules[0].source_chats, ["@example_bot", -100123])
@@ -269,7 +272,7 @@ class ButtonActionConfigTests(unittest.TestCase):
         self.assertFalse(rule.click_all_matches)
         self.assertFalse(rule.to_dict()["click_all_matches"])
 
-    def test_config_handler_rejects_invalid_regex(self):
+    async def test_rule_service_rejects_invalid_regex(self):
         with (
             tempfile.TemporaryDirectory() as temp_dir,
             patch.dict(os.environ, {"SESSION_TYPE": "user"}),
@@ -278,16 +281,23 @@ class ButtonActionConfigTests(unittest.TestCase):
                 env_file=str(Path(temp_dir) / "missing.env"),
                 config_file=str(Path(temp_dir) / "config.yaml"),
             )
-            handler = ConfigHandler(config, SimpleNamespace(is_running=False))
+            service = RuleService(config, SimpleNamespace(is_running=False))
 
-            result = handler.save_button_action_rule(
-                0, True, "@example_bot", "[invalid", "regex", 0
-            )
+            with self.assertRaises(ServiceError) as raised:
+                await service.create_button_rule(
+                    ButtonActionRulePayload(
+                        name="invalid",
+                        enabled=True,
+                        source_chats=["@example_bot"],
+                        button_texts=["[invalid"],
+                        match_mode="regex",
+                    )
+                )
 
-            self.assertIn("❌", result)
+            self.assertEqual(raised.exception.code, "invalid_regex")
             self.assertEqual(config.get_button_action_rules(), [])
 
-    def test_config_handler_rejects_bot_mode_when_enabling(self):
+    async def test_rule_service_rejects_bot_mode_when_enabling(self):
         with (
             tempfile.TemporaryDirectory() as temp_dir,
             patch.dict(os.environ, {"SESSION_TYPE": "bot"}),
@@ -296,13 +306,19 @@ class ButtonActionConfigTests(unittest.TestCase):
                 env_file=str(Path(temp_dir) / "missing.env"),
                 config_file=str(Path(temp_dir) / "config.yaml"),
             )
-            handler = ConfigHandler(config, SimpleNamespace(is_running=False))
+            service = RuleService(config, SimpleNamespace(is_running=False))
 
-            result = handler.save_button_action_rule(
-                0, True, "@example_bot", "确认", "exact", 0
-            )
+            with self.assertRaises(ServiceError) as raised:
+                await service.create_button_rule(
+                    ButtonActionRulePayload(
+                        name="bot-mode",
+                        enabled=True,
+                        source_chats=["@example_bot"],
+                        button_texts=["确认"],
+                    )
+                )
 
-            self.assertIn("❌", result)
+            self.assertEqual(raised.exception.code, "user_mode_required")
             self.assertEqual(config.get_button_action_rules(), [])
 
 

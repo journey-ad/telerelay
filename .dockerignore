@@ -12,6 +12,8 @@ __pycache__
 *.egg-info/
 dist/
 build/
+.venv/
+.ruff_cache/
 
 # Environment
 .env
@@ -32,6 +34,13 @@ docker-compose.yml
 README.md
 *.md
 docs/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
 
 # IDE
 .vscode/

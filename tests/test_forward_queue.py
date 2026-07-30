@@ -9,10 +9,10 @@ from unittest.mock import patch
 
 from telethon.errors import FloodWaitError
 
-from src.bot_manager import BotManager
-from src.forward_queue import ForwardQueue, ForwardQueueStore
-from src.forwarder.forwarder import MessageForwarder
-from src.rule import ForwardingRule
+from backend.bot_manager import BotManager
+from backend.forward_queue import ForwardQueue, ForwardQueueStore
+from backend.forwarder.forwarder import MessageForwarder
+from backend.rule import ForwardingRule
 
 
 def rule_data(name="queue-rule"):
@@ -352,7 +352,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             rule.name: (rule, FakeFilter(), SimpleNamespace())
         }
 
-        with patch("src.bot_manager.logger.info") as log_info:
+        with patch("backend.bot_manager.logger.info") as log_info:
             await manager._central_message_handler(Event())
 
         self.assertEqual(len(manager.forward_queue.calls), 1)
@@ -406,8 +406,8 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         }
 
         with (
-            patch("src.bot_manager.logger.info") as log_info,
-            patch("src.bot_manager.logger.debug") as log_debug,
+            patch("backend.bot_manager.logger.info") as log_info,
+            patch("backend.bot_manager.logger.debug") as log_debug,
         ):
             await manager._central_message_handler(Event(42))
             await manager._central_message_handler(Event(43))
@@ -443,7 +443,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        with patch("src.bot_manager.logger.info") as log_info:
+        with patch("backend.bot_manager.logger.info") as log_info:
             await manager._button_action_handler(event)
 
         success_log = log_info.call_args.args[0]
@@ -465,8 +465,8 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with (
-            patch("src.bot_manager.logger.info") as log_info,
-            patch("src.utils.get_media_description", return_value="[video]"),
+            patch("backend.bot_manager.logger.info") as log_info,
+            patch("backend.utils.get_media_description", return_value="[video]"),
         ):
             await manager._button_action_handler(event)
 
@@ -491,8 +491,8 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         forwarder._target_label_cache = shared_cache
 
         with (
-            patch("src.forwarder.forwarder.utils.get_display_name", return_value="Target Chat"),
-            patch("src.forwarder.forwarder.utils.get_peer_id", return_value=-100200),
+            patch("backend.forwarder.forwarder.utils.get_display_name", return_value="Target Chat"),
+            patch("backend.forwarder.forwarder.utils.get_peer_id", return_value=-100200),
         ):
             first = await forwarder._resolve_target_labels(["@target"])
             second = await forwarder._resolve_target_labels(["@target"])
@@ -527,7 +527,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             grouped_id=None,
         )
 
-        with patch("src.forwarder.forwarder.logger.info") as log_info:
+        with patch("backend.forwarder.forwarder.logger.info") as log_info:
             forwarder._log_result(
                 message,
                 [message],
@@ -569,7 +569,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             grouped_id=999,
         )
 
-        with patch("src.forwarder.forwarder.logger.info") as log_info:
+        with patch("backend.forwarder.forwarder.logger.info") as log_info:
             forwarder._log_result(
                 message,
                 [message, SimpleNamespace(id=43)],

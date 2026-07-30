@@ -2,332 +2,172 @@
 
 # TeleRelay
 
-强大的 Telegram 消息转发工具，支持基于正则表达式和关键词的灵活过滤，提供现代化的 Web 管理界面
+TeleRelay 是一个自托管的 Telegram 消息转发与归档工具。项目采用 FastAPI 后端和 Vue 3 管理控制台，支持持久化转发队列、规则过滤、回调按钮自动化及消息导出。
 
-<p align="center">
-  <img src="https://count.getloli.com/@telerelay.github?theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
-</p>
+## 功能
 
-## 预览
+- 多组独立转发规则，分别配置来源、目标、过滤、忽略及转发选项
+- 基于 SQLite 的持久化转发队列，支持重试、FloodWait 和重启恢复
+- User Session 与 Bot Token 两种 Telegram 运行模式
+- User 模式下按精确、包含或正则匹配自动点击 Telegram 回调按钮
+- 将消息导出为 JSON、CSV、SQLite 和离线 HTML
+- 按小时、天或周执行增量导出任务
+- 通过 Server-Sent Events 实时推送运行状态和日志
+- 管理 API 与控制台支持 HTTP Basic Auth
+- 可选的 Telegram 管理 Bot
 
-<p align="center">
-  <img src="./docs/preview_zh.jpeg" width="600">
-</p>
+## 架构
 
-## ✨ 功能特性
+TeleRelay 有意保持为一个服务：
 
-- 🤖 **智能转发**: 自动监控指定 Telegram 群组/频道/账号的消息并转发到多个目标
-- 📋 **多规则管理**: 支持配置多组独立的转发规则，每个规则有独立的源、目标和过滤条件
-- 🖱️ **消息按钮处理**: User 模式下监听指定 Bot/会话，按精确、包含或正则方式匹配并点击回调按钮
-- 🔍 **过滤方式**: 支持正则表达式和关键词匹配，黑白名单模式，媒体类型和文件大小过滤
-- 🚫 **忽略列表**: 支持按用户 ID 和关键词忽略特定消息
-- 💪 **强制转发**: 通过下载后重新上传，绕过频道/群组的转发限制
-- 🌐 **Web 管理界面**: 基于 Gradio 的配置面板，实时显示 Bot 状态、统计信息和日志
-- 📤 **数据导出**: 导出群列表元数据与完整群聊记录，支持 JSON、CSV、HTML 和定时增量任务
-- 🌍 **国际化支持**: 完整的 i18n 支持，内置中文和英文界面
-- 🔐 **双重认证模式**: 支持 User Session（手机号登录）和 Bot Token 两种方式
-- 🐳 **Docker 支持**: 一键部署，开箱即用
-- 🔒 **安全可靠**: 支持 Web 界面 HTTP Basic Auth 认证
-- ⚡ **性能优化**: 异步处理，支持速率限制和错误重试
-- 🔌 **代理支持**: 支持 SOCKS5/HTTP 代理配置
+- `backend/`：FastAPI、Telethon 运行时、应用服务、SQLite 存储和 REST/SSE API
+- `frontend/`：Vue 3、TypeScript、Vite、Pinia、TanStack Query 和 ECharts
+- 生产环境由 FastAPI 直接托管 `frontend/dist`
+- Uvicorn 固定为单 worker，确保 Telegram client、调度器和内存任务只启动一次
 
-## 🚀 快速开始
+REST API 位于 `/api/v1`，OpenAPI 文档位于 `/api/docs`，SSE 事件流位于 `/api/v1/events`。
 
-### 前置要求
+## 快速开始
 
-1. **Telegram API 凭据**
-   - 访问 [https://my.telegram.org](https://my.telegram.org)
-   - 创建应用获取 `API_ID` 和 `API_HASH`
+### 配置
 
-2. **Bot Token**（如果使用 Bot 模式）
-   - 与 [@BotFather](https://t.me/BotFather) 对话创建 Bot
-   - 获取 Bot Token
-
-### 方式一：Docker 部署（推荐）
-
-从 GitHub Container Registry 拉取预构建镜像：
+从示例创建本地配置：
 
 ```bash
-docker pull ghcr.io/journey-ad/telerelay:latest
+cp .env.example .env
+cp config/config.yaml.example config/config.yaml
 ```
 
-使用 Docker 运行：
+至少需要在 `.env` 中设置 `API_ID` 和 `API_HASH`。使用 `SESSION_TYPE=bot` 时还需要设置 `BOT_TOKEN`。如果控制台会被其他设备访问，应同时设置 `WEB_AUTH_USERNAME` 和 `WEB_AUTH_PASSWORD`。
+
+Telegram API 凭据从 [my.telegram.org](https://my.telegram.org) 获取，Bot Token 通过 [@BotFather](https://t.me/BotFather) 创建。
+
+### Docker Compose
 
 ```bash
-docker run -d -p 8080:8080 \
-  -v $(pwd)/.env:/app/.env \
-  -v $(pwd)/config:/app/config \
-  -v $(pwd)/logs:/app/logs \
-  -v $(pwd)/data:/app/data \
-  ghcr.io/journey-ad/telerelay:latest
+docker compose up -d --build
 ```
 
-或使用 docker-compose：
+打开 `http://localhost:8080`。Compose 会通过 `config/`、`data/` 和 `logs/` 挂载持久化配置、Telegram session、数据库、导出文件及日志。
 
-```yaml
-version: '3'
-services:
-  telerelay:
-    image: ghcr.io/journey-ad/telerelay:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./.env:/app/.env
-      - ./config:/app/config
-      - ./logs:/app/logs
-      - ./data:/app/data
+如需直接使用发布镜像，可删除 `docker-compose.yml` 中的 `build: .`，保留 `image: ghcr.io/journey-ad/telerelay:latest`。
+
+### 本地生产构建
+
+需要 Python 3.11+ 和 Node.js 22+。
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
+python -m backend.main
 ```
 
-访问 Web 界面：
-- 打开浏览器访问: `http://localhost:8080`
-- 如果配置了 HTTP Basic Auth，输入用户名和密码
+打开 `http://localhost:8080`。
 
-### 方式二：本地运行
+### 前端开发
 
-1. **安装依赖**
-   ```bash
-   pip install -r requirements.txt
-   ```
+分别启动 API 和 Vite：
 
-2. **配置文件**（同 Docker 部署步骤 2-3）
-
-3. **运行程序**
-   ```bash
-   python -m src.main
-   ```
-
-4. **访问 Web 界面**: `http://localhost:8080`
-
-## 📖 配置说明
-
-### 环境变量（.env）
-
-```env
-# Telegram API 凭据（必填）
-API_ID=your_api_id
-API_HASH=your_api_hash
-
-# Bot Token（Bot 模式必填）
-BOT_TOKEN=your_bot_token
-
-# 会话类型: user 或 bot
-# user: 使用用户账号（可以监控所有群组）
-# bot: 使用 Bot Token（仅能监控 Bot 加入的群组）
-SESSION_TYPE=user
-
-# 代理配置（可选）
-# 支持的协议：socks5, http
-# 示例：socks5://127.0.0.1:1080 或 http://127.0.0.1:1080
-PROXY_URL=
-
-# Web 服务配置
-WEB_HOST=0.0.0.0
-WEB_PORT=8080
-
-# Web 面板公网访问地址
-WEBAPP_URL=
-
-# Web 界面认证（推荐在生产环境启用）
-WEB_AUTH_USERNAME=
-WEB_AUTH_PASSWORD=
-
-# 日志级别：DEBUG, INFO, WARNING, ERROR
-LOG_LEVEL=INFO
-
-# 界面语言：zh_CN（中文）或 en_US（英文）
-LANGUAGE=zh_CN
-
-# 管理 Bot Token，通过 @BotFather 创建，不能和 BOT_TOKEN 重复
-ADMIN_BOT_TOKEN=
-
-# 管理员用户 ID
-ADMIN_CHAT_ID=
+```bash
+python -m backend.main
 ```
 
-### 导出配置（config/config.yaml）
-
-```yaml
-export:
-  root_dir: data/exports
-  timezone: Asia/Shanghai
-  concurrency: 2
+```bash
+cd frontend
+npm ci
+npm run dev
 ```
 
-`root_dir` 是服务端导出根目录，Web 界面中只能填写它下面的相对子目录。Docker 默认挂载整个 `data/`，因此导出文件和任务数据库 `data/exports.db` 都会持久保留。
+Vite 在 `http://localhost:5173` 提供控制台，并将 `/api` 代理到 `http://127.0.0.1:8080`。
 
-实时转发队列保存在 `data/forward_queue.db`，支持重启恢复。
+## 配置职责
 
-## 🎮 使用说明
+`.env` 保存进程凭据和运行参数：
 
-### 认证模式对比
+- Telegram 凭据与 `SESSION_TYPE`
+- 代理、监听地址、端口、日志级别和运行时语言
+- Web Basic Auth 凭据
+- 可选的管理 Bot 与 Mini App 设置
 
-| 特性 | User 模式 | Bot 模式 |
-|------|----------|---------|
-| 认证方式 | 手机号 + 验证码 | Bot Token |
-| 监控范围 | 所有已加入的群组 | 仅 Bot 加入的群组 |
-| 首次使用 | 需要手机验证 | 无需验证 |
+`config/config.yaml` 保存可变的应用配置：
 
-### User 模式认证流程
+- 转发规则和回调按钮规则
+- 过滤、忽略及转发选项
+- 持久转发队列设置
+- 导出目录、时区和并发数
 
-1. 设置 `SESSION_TYPE=user`
-2. 启动应用，访问 Web 界面
-3. 在「🔐 认证」标签页点击「开始认证」
-4. 输入手机号（带国际区号，如 `+8613800138000`）
-5. 输入 Telegram 发送的验证码
-6. 如果启用了两步验证，输入密码
-7. 认证成功后显示当前登录账号信息
+控制台可以导入或导出 YAML 配置。凭据仍保存在 `.env` 中，不会进入配置备份。
 
-### 获取群组 ID
+## 持久化数据
 
-1. **使用 @userinfobot**
-   - 分享群组到 [@userinfobot](https://t.me/userinfobot)
-   - Bot 会回复群组 ID
+- `data/telegram_session.session`：Telegram 用户 session
+- `data/forward_queue.db`：待转发任务和去重记录
+- `data/stats.db`：转发统计与历史
+- `data/exports.db`：导出任务与运行历史
+- `data/db/msg_export_{chat_id}.sqlite3`：按会话保存的标准消息归档
+- `data/exports/`：生成的 JSON、CSV、SQLite 和 HTML 文件
+- `logs/telerelay.log`：按天轮转的应用日志
 
-2. **从网页版 URL 中获取**
-   - 打开 Web 版 Telegram，进入群组聊天
-   - URL 格式：`https://web.telegram.org/a/#-100123456789`
-   - `#` 后面的数字即为群组 ID，如 `-100123456789`
+建议一起备份 `config/`、`data/` 和 `.env`。`.env` 与 Telegram session 均应视为敏感信息。
 
-### Web 界面功能
+## User 模式认证
 
-#### 控制面板
-- **启动/停止/重启**: 控制 Bot 运行状态
-- **刷新状态**: 手动刷新当前状态
-- **状态显示**: 运行状态、已转发、已过滤、总消息数
+使用 `SESSION_TYPE=user` 时，在 Settings 页面启动 Telegram 认证，并按状态提交手机号、验证码和 2FA 密码。认证 challenge 由异步 API 管理，不需要在终端输入。
 
-#### 配置标签页
-- **转发规则**: 查看、添加、编辑、删除、启用/禁用转发规则
-- **源群组配置**: 设置要监控的群组
-- **目标群组配置**: 设置转发目标（支持多个）
-- **过滤规则**: 正则表达式、关键词匹配、媒体类型和文件大小过滤
-- **忽略列表**: 用户 ID 和关键词屏蔽
-- **转发选项**: 格式保留、来源信息、延迟设置、强制转发
-- **消息附加按钮处理**: 使用独立规则监听指定 Bot/会话，支持按钮文字精确匹配、包含匹配和正则匹配，并可设置点击延迟；仅 User 模式可用
+使用 `SESSION_TYPE=bot` 时配置 `BOT_TOKEN`。回调按钮自动化和账号级导出会话发现仅适用于 User 模式。
 
-#### 日志标签页
-- **实时日志**: 查看运行日志
-- **日志行数**: 可调整显示行数
+## 管理 Bot
 
-#### 导出数据标签页（仅 User 模式）
-- **群列表**: 导出账号可访问的群组和频道信息
-- **消息记录**: 按群组和时间范围导出 JSON、CSV 或离线 HTML；HTML 支持搜索、日期筛选、分页和回复列表
-- **定时任务**: 按小时、天或周增量导出，并可查看运行记录和下载结果
+设置 `ADMIN_BOT_TOKEN` 和 `ADMIN_CHAT_ID` 后可以使用：
 
-该功能依赖 Telegram 用户会话，Bot Token 模式不可用。
+- `/status`
+- `/bot start|stop|restart`
+- `/rule list|detail|add|del|rename|toggle|set`
+- `/webapp`
 
-#### 认证标签页（仅 User 模式）
-- **认证状态**: 显示当前登录状态和账号信息
-- **认证操作**: 开始认证、取消认证
-- **输入表单**: 手机号、验证码、密码
+管理 Bot 必须使用独立 Token，其控制命令会提交到 FastAPI 所在的 asyncio loop。
 
-### 管理 Bot 功能
+## 开发检查
 
-通过配置 `ADMIN_BOT_TOKEN` 和 `ADMIN_CHAT_ID`，你可以通过 Telegram Bot 远程管理 TeleRelay。
-
-**使用步骤：**
-1. 在 Telegram 中搜索并启动你的管理 Bot
-2. 发送命令（如 `/status`）监控转发服务
-3. 支持的命令列表：
-   - `/status` : 查看运行状态统计
-   - `/bot start|stop|restart` : 控制转发服务的启停
-   - `/rule list|detail|add|del|rename|toggle|set` : 管理转发规则
-   - `/webapp` : 以 Telegram 小程序(Mini App)方式打开配置面板
-
-## 🔧 常见问题
-
-### 消息转发问题
-
-**消息未转发？**
-检查：
-- Bot 是否正在运行（查看 Web 界面状态）
-- 过滤规则是否正确（检查日志）
-- Bot 是否有发送消息权限
-- 如果使用多规则配置，检查规则是否已启用
-
-**触发速率限制 (FloodWait)？**
-- 程序会暂停整个转发队列，等待结束后自动继续
-- 可增加 `forwarding.delay` 延迟时间
-
-**无法转发受限制频道的内容？**
-- 启用 `forwarding.force_forward: true` 强制转发功能
-- 注意：强制转发会下载后重新上传，可能较慢
-
-### 代理配置
-
-**如何配置代理？**
-```env
-# SOCKS5 代理
-PROXY_URL=socks5://127.0.0.1:1080
-
-# HTTP 代理
-PROXY_URL=http://127.0.0.1:1080
-
-# 带认证的代理
-PROXY_URL=socks5://user:password@127.0.0.1:1080
+```bash
+PYTHONPYCACHEPREFIX=/tmp/telerelay-pyc .venv/bin/python -m compileall -q backend tests
+.venv/bin/python -m unittest discover -s tests -v
+cd frontend && npm run build
 ```
 
-## 📦 项目结构
+## 项目结构
 
-```
+```text
 telerelay/
-├── .env.example          # 环境变量示例
-├── config/               # 配置文件目录
-│   └── config.yaml.example
-├── logs/                 # 日志文件
-├── data/                 # Telegram 会话文件
-├── src/                  # 源代码
-│   ├── i18n/             # i18n 模块
-│   │   ├── locales/      # 语言包
-│   │   │   ├── zh_CN.py  # 中文翻译
-│   │   │   └── en_US.py  # 英文翻译
-│   │   └── translator.py # 翻译器
-│   ├── forwarder/        # 转发模块
-│   │   ├── forwarder.py  # 消息转发逻辑
-│   │   ├── downloader.py # 媒体下载器
-│   │   └── media_group.py # 媒体组处理
-│   ├── webui/            # Gradio Web 界面
-│   │   ├── handlers/     # 业务处理器
-│   │   │   ├── auth.py         # 认证处理
-│   │   │   ├── bot_control.py  # Bot 控制
-│   │   │   ├── config.py       # 配置管理
-│   │   │   └── log.py          # 日志查看
-│   │   ├── app.py        # UI 构建
-│   │   └── utils.py      # 工具函数
-│   ├── main.py           # 主程序入口
-│   ├── config.py         # 配置管理
-│   ├── rule.py           # 转发规则数据类
-│   ├── client.py         # Telegram 客户端
-│   ├── auth_manager.py   # User 模式认证管理
-│   ├── bot_commands.py   # 管理机器人指令
-│   ├── bot_manager.py    # Bot 生命周期管理
-│   ├── filters.py        # 消息过滤
-│   ├── constants.py      # 常量定义
-│   ├── utils.py          # 工具函数
-│   └── logger.py         # 日志配置
-├── Dockerfile            # Docker 镜像
-├── docker-compose.yml    # Docker Compose 配置
-└── requirements.txt      # Python 依赖
+├── backend/              # FastAPI API 与 Telegram 运行时
+│   ├── api/              # REST 与 SSE 路由
+│   ├── exporter/         # 导出引擎与调度器
+│   ├── forwarder/        # 消息转发流水线
+│   ├── schemas/          # HTTP 请求契约
+│   ├── services/         # 与 UI 无关的应用服务
+│   └── main.py           # FastAPI/Uvicorn 入口
+├── frontend/             # Vue 3 + TypeScript 控制台
+│   └── src/
+├── config/               # 可变 YAML 配置
+├── data/                 # Session、SQLite 与导出文件
+├── logs/                 # 轮转日志
+├── tests/
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## 🛡️ 安全建议
+## 安全建议
 
-1. **保护敏感信息**
-   - 不要对外暴露 `.env` 文件
-   - 定期更改 API 凭据
-   - 妥善保管会话文件
+- 8080 端口会被其他设备访问时必须启用 Web Basic Auth。
+- 通过反向代理提供 HTTPS；不要让 Basic Auth 凭据通过公网明文 HTTP 传输。
+- 限制 `.env`、`data/*.session`、数据库、导出文件和备份的访问权限。
+- Uvicorn 必须保持单 worker，多 worker 会重复启动 Telegram client 和调度器。
 
-2. **Web 界面安全**
-   - 生产环境必须配置 `WEB_AUTH_USERNAME` 和 `WEB_AUTH_PASSWORD`
-   - 使用反向代理（如 Nginx）添加 HTTPS
-   - 在生产环境中配置防火墙
-   - 限制 Web 界面的访问 IP
-
-3. **定期备份**
-   - 备份会话文件（`data/`）
-   - 备份配置文件
-   - 备份 `data/exports.db` 和 `data/exports/`；恢复时两者应一起迁移
-   - 备份 `data/forward_queue.db`
-
-## 📝 许可证
+## 许可证
 
 [MIT License](LICENSE)

@@ -1,36 +1,24 @@
-# Multi-stage build to optimize image size
-FROM python:3.11-slim AS builder
+FROM node:22-alpine AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
-# Set working directory
+FROM python:3.11-slim AS python-builder
 WORKDIR /app
-
-# Install dependencies
-COPY requirements.txt .
+COPY requirements.txt ./
 RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Final image
 FROM python:3.11-slim
-
-# Set working directory
 WORKDIR /app
-
-# Create necessary directories
 RUN mkdir -p /app/logs /app/data /app/config
-
-# Copy dependencies from builder
-COPY --from=builder /root/.local /root/.local
-
-# Set environment variables
+COPY --from=python-builder /root/.local /root/.local
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH=/root/.local/bin:$PATH
-
-# Copy application code
-COPY src/ ./src/
+COPY backend/ ./backend/
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY config/*.example ./config/
-
-# Expose port
 EXPOSE 8080
-
-# Start command
-CMD ["python", "-m", "src.main"]
+CMD ["python", "-m", "backend.main"]

@@ -2,11 +2,12 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, dev, next ]
     # Optional: trigger only when Dockerfile or related files change
     # paths:
     #   - 'Dockerfile'
-    #   - 'src/**'
+    #   - 'backend/**'
+    #   - 'frontend/**'
     #   - 'requirements.txt'
 
 env:

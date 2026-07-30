@@ -1,131 +1,84 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides repository guidance for coding agents.
 
 ## Project Overview
 
-This is a Telegram message auto-forwarding tool that supports intelligent filtering based on regex patterns and keywords, with a Gradio Web management interface.
+TeleRelay is a personal Telegram forwarding and archive tool. The production application is a FastAPI backend with a Vue 3 + TypeScript frontend. Gradio has been removed and no compatibility layer is expected.
 
-**Core Features**:
-- Monitor messages from specified Telegram groups/channels
-- Filter messages based on configured rules (regex, keywords, whitelist/blacklist)
-- Forward matching messages to target groups/channels
-- Provide Web UI for real-time monitoring and configuration management
+## Commands
 
-## Development Environment Setup
-
-### Install Dependencies
 ```bash
+# Python dependencies
 pip install -r requirements.txt
+
+# Frontend dependencies and production build
+cd frontend && npm ci && npm run build
+
+# Run the combined production app from the repository root
+python -m backend.main
+
+# Backend tests
+.venv/bin/python -m unittest discover -s tests -v
+
+# Backend syntax check
+PYTHONPYCACHEPREFIX=/tmp/telerelay-pyc .venv/bin/python -m compileall -q backend tests
 ```
 
-### Run the Program
-```bash
-# Run locally
-python -m src.main
+For frontend development, run `npm run dev` in `frontend/`; Vite proxies `/api` to the FastAPI server on port 8080.
 
-# Run with Docker
-docker-compose up -d
+## Architecture
+
+```text
+backend/main.py
+  -> FastAPI lifespan and static frontend hosting
+  -> backend/api/         REST and SSE transport
+  -> backend/services/    UI-independent application operations
+  -> BotManager           Telegram runtime on the FastAPI asyncio loop
+     -> client.py
+     -> filters.py
+     -> forwarder/
+     -> forward_queue.py
+  -> exporter/            worker-backed exports and AsyncIOScheduler
+
+frontend/src/
+  -> Vue Router, Pinia, TanStack Query, vue-i18n, ECharts
 ```
 
-### Configuration Files
-- `.env`: Environment variables (API_ID, API_HASH, BOT_TOKEN, etc.)
-- `config/config.yaml`: Forwarding rules (source groups, target groups, filter rules, etc.)
-- Example files are located in `config/*.example`
+The deployment model is one repository, one container, one process, and one Uvicorn worker. Do not configure multiple workers: the Telegram client, scheduler, and in-memory export job registry must be singletons.
 
-## Architecture Design
+REST is used for commands and CRUD. SSE is used for one-way logs and runtime status updates. HTTP Basic Auth protects the versioned API when credentials are configured.
 
-### Core Module Relationships
+## Configuration and Persistence
 
-```
-main.py (entry point)
-  ├─> config.py (configuration management)
-  ├─> bot_manager.py (Bot lifecycle management)
-  │     ├─> client.py (Telegram client wrapper)
-  │     ├─> filters.py (message filtering logic)
-  │     └─> forwarder.py (message forwarding logic)
-  └─> webui/ (Gradio Web interface)
-        ├─> app.py (UI construction)
-        └─> handlers/ (business handlers)
-              ├─> bot_control.py (Bot control)
-              ├─> config.py (configuration management)
-              └─> log.py (log viewing)
-```
+- `.env` owns credentials and process/runtime settings.
+- `config/config.yaml` owns mutable forwarding, button, queue, and export configuration.
+- `Config` uses an `RLock` and atomic YAML replacement.
+- SQLite files under `data/` store forwarding state, statistics, export tasks, and message archives.
 
-### Key Design Patterns
+Do not put Telegram or Web credentials into YAML responses or backups.
 
-1. **Threading Model**:
-   - Main thread runs Gradio Web server
-   - Bot runs in a separate thread with its own asyncio event loop
-   - Uses `threading.RLock()` to ensure thread-safe state access
+## Runtime Notes
 
-2. **Configuration Management**:
-   - `Config` class manages both environment variables (.env) and YAML configuration
-   - Supports runtime dynamic configuration updates and persistence
-   - Configuration updates can trigger Bot restart
+- `BotManager.start`, `stop`, and `restart` are async and run on the FastAPI loop.
+- `AuthManager` resolves phone/code/password challenges with `asyncio.Future`.
+- Export workers may do blocking file and SQLite work in threads; Telegram calls are submitted back to the main loop.
+- The optional Admin Bot retains its own thread and submits runtime control commands to the FastAPI loop.
 
-3. **Message Processing Flow**:
-   ```
-   Telegram message -> client.py (receive)
-                    -> filters.py (filter)
-                    -> forwarder.py (forward)
-   ```
+## Common Changes
 
-4. **UI Update Mechanism**:
-   - Uses debounce mechanism (max once per second) to avoid frequent refreshes
-   - `bot_manager.trigger_ui_update()` sets update flag
-   - Gradio Timer periodically checks flag and updates UI
+- Filtering behavior: `backend/filters.py`
+- Configuration properties: `backend/config.py` and `config/config.yaml.example`
+- HTTP contracts: `backend/schemas/__init__.py` and `backend/api/router.py`
+- Rule behavior: `backend/services/rules.py`
+- Frontend routes/pages: `frontend/src/router.ts` and `frontend/src/pages/`
+- Shared frontend styling: `frontend/src/styles.css`
 
-### Important Classes
+Keep application behavior out of Vue components and API route functions when it belongs in a service. Reuse the existing stores and forwarding/export modules instead of duplicating persistence logic.
 
-- **BotManager** (`bot_manager.py`): Manages Bot startup, shutdown, restart, and coordinates components
-- **TelegramClientManager** (`client.py`): Wraps Telethon client, handles connection and message listening
-- **MessageFilter** (`filters.py`): Implements message filtering logic (regex, keywords, whitelist/blacklist, ignore list)
-- **MessageForwarder** (`forwarder.py`): Handles message forwarding, including rate limiting and error retry
-- **Config** (`config.py`): Configuration loading, validation, and persistence
+## Conventions
 
-## Common Development Tasks
-
-### Modify Filtering Logic
-Edit the `MessageFilter.should_forward()` method in `src/filters.py`.
-
-### Add New Configuration Items
-1. Add example configuration in `config/config.yaml.example`
-2. Add corresponding `@property` in the `Config` class in `src/config.py`
-3. Access via `config.xxx` in modules that need it
-
-### Modify Web UI
-- UI layout: `src/webui/app.py`
-- Business logic: handlers in `src/webui/handlers/`
-
-### Debugging Tips
-- Log files are located in the `logs/` directory
-- Set `LOG_LEVEL=DEBUG` in `.env` for detailed logs
-- Use `python -m src.main` to run locally for easier debugging
-
-## Important Notes
-
-### Telegram Client
-- Supports two modes: User Session (user account) and Bot Token (bot)
-- User mode requires phone verification on first run, session files saved in `data/` directory
-- Bot mode requires no verification, but can only monitor groups the bot has joined
-
-### Thread Safety
-- `BotManager`'s `is_running` and `is_connected` are protected with `@property` and locks
-- Must use `with self._lock:` when accessing shared state
-
-### Configuration Updates
-- Bot must be restarted for configuration changes to take effect
-- `save_config()` in `config_handler.py` automatically triggers restart
-
-### Rate Limiting
-- Telegram has strict rate limits (FloodWait)
-- Automatic wait and retry mechanism implemented in `forwarder.py`
-- Forwarding delay can be configured via `forwarding.delay`
-
-## Project Conventions
-
-- All comments and documentation use English
-- Use Python 3.11+
-- Async code uses `async/await` syntax
-- Logging uses unified `logger` instance (obtained via `get_logger()`)
+- Python 3.11+ and async/await for runtime I/O.
+- TypeScript 5.9 is intentionally pinned; do not upgrade to TypeScript 7 without checking vue-tsc compatibility.
+- Use the configured logger from `backend.logger`.
+- Preserve the single-worker deployment invariant.
