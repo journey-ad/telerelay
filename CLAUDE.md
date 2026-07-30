@@ -13,7 +13,7 @@ TeleRelay is a personal Telegram forwarding and archive tool. The production app
 pip install -r requirements.txt
 
 # Frontend dependencies and production build
-cd frontend && npm ci && npm run build
+cd frontend && pnpm install --frozen-lockfile && pnpm run build
 
 # Run the combined production app from the repository root
 python -m backend.main
@@ -25,7 +25,7 @@ python -m backend.main
 PYTHONPYCACHEPREFIX=/tmp/telerelay-pyc .venv/bin/python -m compileall -q backend tests
 ```
 
-For frontend development, run `npm run dev` in `frontend/`; Vite proxies `/api` to the FastAPI server on port 8080.
+For frontend development, run `pnpm run dev` in `frontend/`; Vite proxies `/api` to the FastAPI server on port 8080.
 
 ## Architecture
 

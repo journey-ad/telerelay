@@ -8,9 +8,10 @@ venv/
 env/
 ENV/
 *.egg-info/
+node_modules
+.pnpm-store
 dist/
 build/
-frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
 .history/

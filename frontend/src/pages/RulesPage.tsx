@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Braces, Edit3, Plus, Route, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { json, request } from '../api/client'
+import { ChatTagInput } from '../components/ChatTagInput'
+import { RegexField, useRegexValidation } from '../components/RegexField'
 import {
   Badge,
   Button,
@@ -18,7 +20,7 @@ import {
 import type { ForwardingRule } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
-import { chats, lines } from '../utils/parse'
+import { lines } from '../utils/parse'
 
 const blankRule = (): ForwardingRule => ({
   name: '',
@@ -52,13 +54,12 @@ export function RulesPage() {
   const [editing, setEditing] = useState<number | null>(null)
   const [form, setForm] = useState<ForwardingRule>(blankRule())
   const [text, setText] = useState({
-    sources: '',
-    targets: '',
     keywords: '',
     regex: '',
     ignoredUsers: '',
     ignoredKeywords: '',
   })
+  const regexValidation = useRegexValidation()
   const rulesQuery = useQuery({
     queryKey: ['rules'],
     queryFn: () => request<ForwardingRule[]>('/api/v1/rules'),
@@ -75,13 +76,12 @@ export function RulesPage() {
     setEditing(null)
     setForm(blankRule())
     setText({
-      sources: '',
-      targets: '',
       keywords: '',
       regex: '',
       ignoredUsers: '',
       ignoredKeywords: '',
     })
+    regexValidation.reset()
     setOpen(true)
   }
   function editRule(index: number) {
@@ -89,25 +89,22 @@ export function RulesPage() {
     setEditing(index)
     setForm(value)
     setText({
-      sources: value.source_chats.join('\n'),
-      targets: value.target_chats.join('\n'),
       keywords: value.filters.keywords.join('\n'),
       regex: value.filters.regex_patterns.join('\n'),
       ignoredUsers: value.ignore.user_ids.join('\n'),
       ignoredKeywords: value.ignore.keywords.join('\n'),
     })
+    regexValidation.reset()
     setOpen(true)
   }
   const save = useMutation({
     mutationFn: () => {
       const payload = structuredClone(form)
-      payload.source_chats = chats(text.sources)
-      payload.target_chats = chats(text.targets)
       payload.filters.keywords = lines(text.keywords)
       payload.filters.regex_patterns = lines(text.regex)
-      payload.ignore.user_ids = chats(text.ignoredUsers).filter(
-        (value): value is number => typeof value === 'number',
-      )
+      payload.ignore.user_ids = lines(text.ignoredUsers)
+        .map((v) => (/^-?\d+$/.test(v) ? Number(v) : null))
+        .filter((v): v is number => v !== null)
       payload.ignore.keywords = lines(text.ignoredKeywords)
       return request(
         editing === null ? '/api/v1/rules' : `/api/v1/rules/${editing}`,
@@ -125,7 +122,9 @@ export function RulesPage() {
   })
   function submit(event: FormEvent) {
     event.preventDefault()
-    save.mutate()
+    regexValidation.validate(text.regex).then((valid) => {
+      if (valid) save.mutate()
+    })
   }
   function deleteRule(index: number) {
     if (window.confirm('确定删除这条转发规则？')) remove.mutate(index)
@@ -273,24 +272,20 @@ export function RulesPage() {
                 required
               />
             </label>
-            <label className={fieldClass}>
+            <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>来源会话</span>
-              <textarea
-                value={text.sources}
-                onChange={(event) => setText({ ...text, sources: event.target.value })}
-                rows={4}
-                placeholder={'-1001234567890\n@source_channel'}
+              <ChatTagInput
+                value={form.source_chats}
+                onChange={(source_chats) => setForm({ ...form, source_chats })}
               />
-            </label>
-            <label className={fieldClass}>
+            </div>
+            <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>目标会话</span>
-              <textarea
-                value={text.targets}
-                onChange={(event) => setText({ ...text, targets: event.target.value })}
-                rows={4}
-                placeholder={'-1009876543210\n@target_channel'}
+              <ChatTagInput
+                value={form.target_chats}
+                onChange={(target_chats) => setForm({ ...form, target_chats })}
               />
-            </label>
+            </div>
             <label className={fieldClass}>
               <span>过滤方式</span>
               <Select
@@ -325,14 +320,12 @@ export function RulesPage() {
                 rows={4}
               />
             </label>
-            <label className={fieldClass}>
-              <span>正则表达式</span>
-              <textarea
-                value={text.regex}
-                onChange={(event) => setText({ ...text, regex: event.target.value })}
-                rows={4}
-              />
-            </label>
+            <RegexField
+              label="正则表达式"
+              value={text.regex}
+              onChange={(regex) => setText({ ...text, regex })}
+              validation={regexValidation}
+            />
             <label className={fieldClass}>
               <span>忽略的用户 ID</span>
               <textarea

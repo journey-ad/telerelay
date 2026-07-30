@@ -23,9 +23,10 @@ from backend.schemas import (
     ForwardingRulePayload,
     GroupExportRequest,
     MessageExportRequest,
+    RegexValidateRequest,
     TogglePayload,
 )
-from backend.services import ServiceError
+from backend.services import ServiceError, validate_regex_patterns
 from backend.stats_db import get_stats_db
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_auth)])
@@ -506,3 +507,8 @@ async def import_config(
         await context.bot.restart()
     return ApiMessage(code="config_imported")
 
+
+@router.post("/utils/validate-regex")
+async def validate_regex(payload: RegexValidateRequest) -> dict:
+    errors = validate_regex_patterns(payload.patterns)
+    return {"valid": len(errors) == 0, "errors": errors}

@@ -130,6 +130,19 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"]["code"], "invalid_regex")
 
+    def test_regex_validation_reports_invalid_patterns(self):
+        response = self.client.post(
+            "/api/v1/utils/validate-regex",
+            json={"patterns": [r"^valid\s+$", "[invalid", "(also-invalid"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["valid"])
+        self.assertEqual(
+            [error["pattern"] for error in response.json()["errors"]],
+            ["[invalid", "(also-invalid"],
+        )
+
     def test_http_basic_is_enforced_when_configured(self):
         with patch.dict(
             os.environ,

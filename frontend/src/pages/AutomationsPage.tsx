@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Edit3, MousePointerClick, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { json, request } from '../api/client'
+import { ChatTagInput } from '../components/ChatTagInput'
+import { RegexField, useRegexValidation } from '../components/RegexField'
 import {
   Badge,
   Button,
@@ -18,7 +20,7 @@ import {
 import type { ButtonRule } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
-import { chats, lines } from '../utils/parse'
+import { lines } from '../utils/parse'
 
 const blankRule = (): ButtonRule => ({
   name: '',
@@ -36,8 +38,8 @@ export function AutomationsPage() {
   const [editing, setEditing] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [form, setForm] = useState<ButtonRule>(blankRule())
-  const [sources, setSources] = useState('')
   const [buttons, setButtons] = useState('')
+  const regexValidation = useRegexValidation()
   const query = useQuery({
     queryKey: ['button-rules'],
     queryFn: () => request<ButtonRule[]>('/api/v1/button-rules'),
@@ -53,16 +55,16 @@ export function AutomationsPage() {
   function create() {
     setEditing(null)
     setForm(blankRule())
-    setSources('')
     setButtons('')
+    regexValidation.reset()
     setOpen(true)
   }
   function edit(index: number) {
     const value = structuredClone(query.data?.[index] ?? blankRule())
     setEditing(index)
     setForm(value)
-    setSources(value.source_chats.join('\n'))
     setButtons(value.button_texts.join('\n'))
+    regexValidation.reset()
     setOpen(true)
   }
   const save = useMutation({
@@ -71,7 +73,6 @@ export function AutomationsPage() {
         editing === null ? '/api/v1/button-rules' : `/api/v1/button-rules/${editing}`,
         json(editing === null ? 'POST' : 'PUT', {
           ...form,
-          source_chats: chats(sources),
           button_texts: lines(buttons),
         }),
       ),
@@ -86,7 +87,13 @@ export function AutomationsPage() {
   })
   function submit(event: FormEvent) {
     event.preventDefault()
-    save.mutate()
+    if (form.match_mode !== 'regex') {
+      save.mutate()
+      return
+    }
+    regexValidation.validate(buttons).then((valid) => {
+      if (valid) save.mutate()
+    })
   }
   function deleteRule(index: number) {
     if (window.confirm('确定删除这条按钮自动化？')) remove.mutate(index)
@@ -234,31 +241,42 @@ export function AutomationsPage() {
                 required
               />
             </label>
-            <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
+            <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>来源会话</span>
-              <textarea
-                value={sources}
-                onChange={(event) => setSources(event.target.value)}
-                rows={4}
-                placeholder="@example_bot"
+              <ChatTagInput
+                value={form.source_chats}
+                onChange={(source_chats) => setForm({ ...form, source_chats })}
               />
-            </label>
-            <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>按钮文本或模式</span>
-              <textarea
+            </div>
+            {form.match_mode === 'regex' ? (
+              <RegexField
+                className="col-span-2 max-md:col-span-1"
+                label="按钮文本或模式"
                 value={buttons}
-                onChange={(event) => setButtons(event.target.value)}
+                onChange={setButtons}
+                validation={regexValidation}
                 rows={5}
-                placeholder={'确认\n领取奖励'}
+                placeholder="\\b(确认|领取)\\b"
               />
-            </label>
+            ) : (
+              <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
+                <span>按钮文本或模式</span>
+                <textarea
+                  value={buttons}
+                  onChange={(event) => setButtons(event.target.value)}
+                  rows={5}
+                  placeholder={'确认\n领取奖励'}
+                />
+              </label>
+            )}
             <label className={fieldClass}>
               <span>匹配方式</span>
               <Select
                 value={form.match_mode}
-                onValueChange={(value) =>
+                onValueChange={(value) => {
                   setForm({ ...form, match_mode: value as ButtonRule['match_mode'] })
-                }
+                  regexValidation.reset()
+                }}
                 options={[
                   { value: 'exact', label: '精确匹配' },
                   { value: 'contains', label: '包含文本' },

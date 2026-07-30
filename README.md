@@ -54,15 +54,15 @@ To use the published image instead of a local build, remove `build: .` from `doc
 
 ### Local Production Build
 
-Requirements: Python 3.11+ and Node.js 22+.
+Requirements: Python 3.11+, Node.js 22+, and pnpm.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cd frontend
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build
 cd ..
 python -m backend.main
 ```
@@ -79,8 +79,8 @@ python -m backend.main
 
 ```bash
 cd frontend
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 Vite serves the console at `http://localhost:5173` and proxies `/api` to `http://127.0.0.1:8080`.
@@ -137,7 +137,7 @@ The Admin Bot uses a separate Telegram token. Its control commands are submitted
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/telerelay-pyc .venv/bin/python -m compileall -q backend tests
 .venv/bin/python -m unittest discover -s tests -v
-cd frontend && npm run build
+cd frontend && pnpm run build
 ```
 
 ## Project Structure

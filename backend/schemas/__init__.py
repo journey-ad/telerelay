@@ -107,6 +107,10 @@ class TogglePayload(StrictModel):
     enabled: bool
 
 
+class RegexValidateRequest(StrictModel):
+    patterns: list[str] = Field(default_factory=list, max_length=50)
+
+
 class ConfigPayload(StrictModel):
     config: dict[str, Any]
 

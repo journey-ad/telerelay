@@ -1,8 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, CalendarClock, Download, FileArchive, Play, Plus, Trash2 } from 'lucide-react'
+import {
+  Archive,
+  Braces,
+  CalendarClock,
+  Database,
+  Download,
+  FileArchive,
+  Globe2,
+  Play,
+  Plus,
+  Table2,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { json, request } from '../api/client'
-import { downloadFile } from '../api/downloads'
+import { DownloadButton } from '../components/DownloadButton'
 import {
   Badge,
   Button,
@@ -26,11 +38,30 @@ import type { ExportChat, ExportJob, ExportRun, ExportTask } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom, shortDate } from '../utils/format'
 
-const formats = ['json', 'csv', 'html', 'sqlite']
+const formats = ['json', 'csv', 'html', 'sqlite'] as const
+const formatIcons = {
+  json: Braces,
+  csv: Table2,
+  html: Globe2,
+  sqlite: Database,
+}
 const errorClass = cn(
   'rounded-[5px] border border-rose-100 bg-rose-50 p-2',
   'text-[9px] text-rose-700',
 )
+const formatOptionClass = cn(
+  'flex h-10.5 items-center justify-center gap-1.5 rounded-[5px] border',
+  'text-[9px] leading-none',
+)
+
+function downloadOption(file: string) {
+  const filename = file.split('/').pop() ?? file
+  return {
+    url: `/api/v1/exports/file?path=${encodeURIComponent(file)}`,
+    label: (filename.split('.').pop() ?? filename).toUpperCase(),
+    filename,
+  }
+}
 
 export function ExportsPage() {
   const client = useQueryClient()
@@ -243,29 +274,34 @@ export function ExportsPage() {
                 <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
                   <span>导出格式</span>
                   <div className="grid grid-cols-4 gap-2 max-sm:grid-cols-2">
-                    {formats.map((format) => (
-                      <label
-                        className={cn(
-                          'flex h-10.5 items-center justify-center gap-1.5',
-                          'rounded-[5px] border text-[9px]',
-                          messageForm.formats.includes(format)
-                            ? 'border-blue-200 bg-blue-50 text-blue-700'
-                            : 'border-slate-200 bg-slate-50 text-slate-500',
-                        )}
-                        key={format}
-                      >
-                        <input
-                          className="sr-only"
-                          type="checkbox"
-                          checked={messageForm.formats.includes(format)}
-                          onChange={(event) =>
-                            selectFormat(format, event.target.checked, 'message')
-                          }
-                        />
-                        <FileArchive size={17} />
-                        <strong>{format.toUpperCase()}</strong>
-                      </label>
-                    ))}
+                    {formats.map((format) => {
+                      const FormatIcon = formatIcons[format]
+
+                      return (
+                        <label
+                          className={cn(
+                            formatOptionClass,
+                            messageForm.formats.includes(format)
+                              ? 'border-blue-200 bg-blue-50 text-blue-700'
+                              : 'border-slate-200 bg-slate-50 text-slate-500',
+                          )}
+                          key={format}
+                        >
+                          <input
+                            className="sr-only"
+                            type="checkbox"
+                            checked={messageForm.formats.includes(format)}
+                            onChange={(event) =>
+                              selectFormat(format, event.target.checked, 'message')
+                            }
+                          />
+                          <FormatIcon className="shrink-0" size={17} />
+                          <strong className="inline-flex items-center leading-none">
+                            {format.toUpperCase()}
+                          </strong>
+                        </label>
+                      )
+                    })}
                   </div>
                 </div>
                 <div className="col-span-2 max-md:col-span-1">
@@ -351,22 +387,8 @@ export function ExportsPage() {
                   {job.data.error ? (
                     <p className={cn('col-span-full', errorClass)}>{job.data.error}</p>
                   ) : null}
-                  <div className="col-span-full flex flex-wrap gap-2">
-                    {job.data.files.map((file) => (
-                      <Button
-                        key={file}
-                        variant="secondary"
-                        icon={Download}
-                        onClick={() =>
-                          void downloadFile(
-                            `/api/v1/exports/file?path=${encodeURIComponent(file)}`,
-                            file.split('/').pop(),
-                          )
-                        }
-                      >
-                        {file.split('/').pop()}
-                      </Button>
-                    ))}
+                  <div className="col-span-full">
+                    <DownloadButton files={job.data.files.map(downloadOption)} />
                   </div>
                 </div>
               ) : (
@@ -491,19 +513,7 @@ export function ExportsPage() {
                       <td>{run.message_count}</td>
                       <td>
                         <div className="flex justify-end gap-1">
-                          {run.files.map((file) => (
-                            <IconButton
-                              key={file}
-                              label={`下载 ${file.split('/').pop()}`}
-                              icon={Download}
-                              onClick={() =>
-                                void downloadFile(
-                                  `/api/v1/exports/file?path=${encodeURIComponent(file)}`,
-                                  file.split('/').pop(),
-                                )
-                              }
-                            />
-                          ))}
+                          <DownloadButton files={run.files.map(downloadOption)} />
                         </div>
                       </td>
                     </tr>
@@ -594,27 +604,32 @@ export function ExportsPage() {
             <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>导出格式</span>
               <div className="grid grid-cols-4 gap-2 max-sm:grid-cols-2">
-                {formats.map((format) => (
-                  <label
-                    className={cn(
-                      'flex h-10.5 items-center justify-center gap-1.5',
-                      'rounded-[5px] border text-[9px]',
-                      taskForm.formats.includes(format)
-                        ? 'border-blue-200 bg-blue-50 text-blue-700'
-                        : 'border-slate-200 bg-slate-50 text-slate-500',
-                    )}
-                    key={format}
-                  >
-                    <input
-                      className="sr-only"
-                      type="checkbox"
-                      checked={taskForm.formats.includes(format)}
-                      onChange={(event) => selectFormat(format, event.target.checked, 'task')}
-                    />
-                    <FileArchive size={17} />
-                    <strong>{format.toUpperCase()}</strong>
-                  </label>
-                ))}
+                {formats.map((format) => {
+                  const FormatIcon = formatIcons[format]
+
+                  return (
+                    <label
+                      className={cn(
+                        formatOptionClass,
+                        taskForm.formats.includes(format)
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
+                          : 'border-slate-200 bg-slate-50 text-slate-500',
+                      )}
+                      key={format}
+                    >
+                      <input
+                        className="sr-only"
+                        type="checkbox"
+                        checked={taskForm.formats.includes(format)}
+                        onChange={(event) => selectFormat(format, event.target.checked, 'task')}
+                      />
+                      <FormatIcon className="shrink-0" size={17} />
+                      <strong className="inline-flex items-center leading-none">
+                        {format.toUpperCase()}
+                      </strong>
+                    </label>
+                  )
+                })}
               </div>
             </div>
           </div>

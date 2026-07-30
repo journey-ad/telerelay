@@ -54,15 +54,15 @@ docker compose up -d --build
 
 ### 本地生产构建
 
-需要 Python 3.11+ 和 Node.js 22+。
+需要 Python 3.11+、Node.js 22+ 和 pnpm。
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cd frontend
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build
 cd ..
 python -m backend.main
 ```
@@ -79,8 +79,8 @@ python -m backend.main
 
 ```bash
 cd frontend
-npm ci
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
 Vite 在 `http://localhost:5173` 提供控制台，并将 `/api` 代理到 `http://127.0.0.1:8080`。
@@ -137,7 +137,7 @@ Vite 在 `http://localhost:5173` 提供控制台，并将 `/api` 代理到 `http
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/telerelay-pyc .venv/bin/python -m compileall -q backend tests
 .venv/bin/python -m unittest discover -s tests -v
-cd frontend && npm run build
+cd frontend && pnpm run build
 ```
 
 ## 项目结构

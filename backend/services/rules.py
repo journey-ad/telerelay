@@ -15,6 +15,26 @@ class ServiceError(ValueError):
         self.code = code
 
 
+def validate_regex_patterns(patterns: list[str]) -> list[dict[str, str]]:
+    errors = []
+    for pattern in patterns:
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            errors.append({"pattern": pattern, "error": str(exc)})
+    return errors
+
+
+def _ensure_valid_regex(patterns: list[str]) -> None:
+    errors = validate_regex_patterns(patterns)
+    if errors:
+        first = errors[0]
+        raise ServiceError(
+            "invalid_regex",
+            f"Invalid regex {first['pattern']!r}: {first['error']}",
+        )
+
+
 class RuleService:
     def __init__(self, config: Config, bot_manager):
         self.config = config
@@ -97,11 +117,7 @@ class RuleService:
             raise ServiceError("rule_source_required", "Enabled rules need a source chat")
         if payload.enabled and not payload.target_chats:
             raise ServiceError("rule_target_required", "Enabled rules need a target chat")
-        for pattern in payload.filters.regex_patterns:
-            try:
-                re.compile(pattern)
-            except re.error as exc:
-                raise ServiceError("invalid_regex", f"Invalid regex {pattern!r}: {exc}") from exc
+        _ensure_valid_regex(payload.filters.regex_patterns)
         return ForwardingRule.from_dict(payload.model_dump())
 
     def _button_rule(self, payload: ButtonActionRulePayload) -> ButtonActionRule:
@@ -112,11 +128,7 @@ class RuleService:
         if payload.enabled and not payload.button_texts:
             raise ServiceError("button_text_required", "Enabled button rules need button text")
         if payload.match_mode == "regex":
-            for pattern in payload.button_texts:
-                try:
-                    re.compile(pattern)
-                except re.error as exc:
-                    raise ServiceError("invalid_regex", f"Invalid regex {pattern!r}: {exc}") from exc
+            _ensure_valid_regex(payload.button_texts)
         return ButtonActionRule.from_dict(payload.model_dump())
 
     def _save_rules(self, rules: list[ForwardingRule]) -> None:
@@ -138,4 +150,3 @@ class RuleService:
     def _ensure_unique(name: str, existing_names: list[str]) -> None:
         if name.casefold() in {item.casefold() for item in existing_names}:
             raise ServiceError("duplicate_name", "Rule names must be unique")
-
