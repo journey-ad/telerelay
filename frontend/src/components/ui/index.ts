@@ -1,6 +1,7 @@
 export { Button, IconButton } from './button'
 export { Badge } from './badge'
 export { Dialog } from './dialog'
+export { ConfirmDialog } from './confirm-dialog'
 export { Select } from './select'
 export { Switch } from './switch'
 export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListClass } from './tabs'

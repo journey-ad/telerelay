@@ -404,26 +404,33 @@ class StatsDB:
             finally:
                 conn.close()
 
-    def get_daily_stats(self, days: int = 30) -> List[dict]:
+    def get_daily_stats(self, days: Optional[int] = 30) -> List[dict]:
         """
-        Get daily aggregated stats for the last N days.
+        Get daily aggregated stats for the last N days, or all recorded days.
 
         Returns:
             List of {date, forwarded, filtered} dicts, ordered by date ASC
         """
-        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         with self._lock:
             conn = self._get_conn()
             try:
-                cursor = conn.execute("""
+                query = """
                     SELECT date,
                            SUM(forwarded_count) as forwarded,
                            SUM(filtered_count) as filtered
                     FROM daily_stats
-                    WHERE date >= ?
+                """
+                parameters = ()
+                if days is not None:
+                    query += " WHERE date >= ?"
+                    parameters = (
+                        (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d"),
+                    )
+                query += """
                     GROUP BY date
                     ORDER BY date ASC
-                """, (since,))
+                """
+                cursor = conn.execute(query, parameters)
                 return [
                     {"date": row[0], "forwarded": row[1], "filtered": row[2]}
                     for row in cursor.fetchall()

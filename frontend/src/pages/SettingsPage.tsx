@@ -6,6 +6,7 @@ import { downloadFile } from '../api/downloads'
 import {
   Badge,
   Button,
+  ConfirmDialog,
   fieldClass,
   PageHeader,
   Panel,
@@ -23,6 +24,7 @@ export function SettingsPage() {
   const client = useQueryClient()
   const [rawConfig, setRawConfig] = useState('')
   const [authValue, setAuthValue] = useState('')
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
   const config = useQuery({
     queryKey: ['config'],
@@ -58,11 +60,13 @@ export function SettingsPage() {
     setAuthValue('')
     await auth.refetch()
   }
-  async function clearSession() {
-    if (!window.confirm('确定清除 Telegram 会话？运行中的节点会先停止。')) return
-    await request('/api/v1/telegram-auth/session', json('DELETE'))
-    await auth.refetch()
-  }
+  const clearSession = useMutation({
+    mutationFn: () => request('/api/v1/telegram-auth/session', json('DELETE')),
+    onSuccess: async () => {
+      setClearConfirmOpen(false)
+      await auth.refetch()
+    },
+  })
   async function importConfig(file?: File) {
     if (!file) return
     const data = new FormData()
@@ -148,7 +152,7 @@ export function SettingsPage() {
                 <Button icon={KeyRound} onClick={() => void startAuth()}>
                   开始认证
                 </Button>
-                <Button variant="danger" icon={Trash2} onClick={() => void clearSession()}>
+                <Button variant="danger" icon={Trash2} onClick={() => setClearConfirmOpen(true)}>
                   清除会话
                 </Button>
               </div>
@@ -237,6 +241,15 @@ export function SettingsPage() {
           </Panel>
         </TabsContent>
       </Tabs>
+      <ConfirmDialog
+        open={clearConfirmOpen}
+        onOpenChange={setClearConfirmOpen}
+        title="清除 Telegram 会话"
+        description="当前节点会先停止，本地 Telegram 登录会话将被清除，之后需要重新认证。"
+        confirmLabel="清除会话"
+        pending={clearSession.isPending}
+        onConfirm={() => clearSession.mutate()}
+      />
     </>
   )
 }

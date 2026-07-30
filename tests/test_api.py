@@ -138,6 +138,28 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertFalse(status.json()["is_running"])
 
+    def test_stats_accepts_date_limit_presets(self):
+        calls = []
+        database = SimpleNamespace(
+            get_rule_stats_detail=lambda: [],
+            get_daily_stats=lambda days: calls.append(days) or [{"days": days}],
+        )
+
+        with patch("backend.api.router.get_stats_db", return_value=database):
+            default = self.client.get("/api/v1/stats")
+            responses = {
+                date_limit: self.client.get(
+                    "/api/v1/stats", params={"date_limit": date_limit}
+                )
+                for date_limit in ("7day", "14day", "30day", "all")
+            }
+            invalid = self.client.get("/api/v1/stats", params={"date_limit": "90day"})
+
+        self.assertEqual(default.status_code, 200, default.text)
+        self.assertEqual(calls, [60, 14, 28, 60, None])
+        self.assertTrue(all(response.status_code == 200 for response in responses.values()))
+        self.assertEqual(invalid.status_code, 422)
+
     def test_telegram_account_create_list_and_activate_contracts(self):
         initial = self.client.get("/api/v1/telegram-accounts")
         self.assertEqual(initial.status_code, 200)

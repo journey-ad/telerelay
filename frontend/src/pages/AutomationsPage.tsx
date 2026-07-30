@@ -7,6 +7,7 @@ import { RegexField, useRegexValidation } from '../components/RegexField'
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Dialog,
   EmptyState,
   fieldClass,
@@ -36,6 +37,7 @@ export function AutomationsPage() {
   const client = useQueryClient()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [form, setForm] = useState<ButtonRule>(blankRule())
   const [buttons, setButtons] = useState('')
@@ -83,7 +85,10 @@ export function AutomationsPage() {
   })
   const remove = useMutation({
     mutationFn: (index: number) => request(`/api/v1/button-rules/${index}`, json('DELETE')),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ['button-rules'] }),
+    onSuccess: () => {
+      setDeletingIndex(null)
+      void client.invalidateQueries({ queryKey: ['button-rules'] })
+    },
   })
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -96,7 +101,7 @@ export function AutomationsPage() {
     })
   }
   function deleteRule(index: number) {
-    if (window.confirm('确定删除这条按钮自动化？')) remove.mutate(index)
+    setDeletingIndex(index)
   }
 
   return (
@@ -333,6 +338,19 @@ export function AutomationsPage() {
           </div>
         </form>
       </Dialog>
+      <ConfirmDialog
+        open={deletingIndex !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeletingIndex(null)
+        }}
+        title="删除按钮自动化"
+        description={`确定删除“${deletingIndex === null ? '' : (query.data?.[deletingIndex]?.name ?? '这条自动化')}”？删除后无法恢复。`}
+        confirmLabel="删除自动化"
+        pending={remove.isPending}
+        onConfirm={() => {
+          if (deletingIndex !== null) remove.mutate(deletingIndex)
+        }}
+      />
     </>
   )
 }

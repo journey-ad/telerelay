@@ -17,7 +17,7 @@ import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 import { AccountAvatar } from './AccountAvatar'
 import { clearAuthenticatedImages } from './AuthenticatedImage'
-import { Button, Dialog, fieldClass, IconButton } from './ui'
+import { Button, ConfirmDialog, Dialog, fieldClass, IconButton } from './ui'
 
 function accountSubtitle(account: TelegramAccount): string {
   if (account.username) return `@${account.username}`
@@ -29,6 +29,7 @@ function accountSubtitle(account: TelegramAccount): string {
 export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
   const client = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [deletingAccount, setDeletingAccount] = useState<TelegramAccount | null>(null)
   const [label, setLabel] = useState('')
   const [authValue, setAuthValue] = useState('')
   const [flowError, setFlowError] = useState<string | null>(null)
@@ -101,6 +102,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     mutationFn: (accountId: string) =>
       request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
     onSuccess: async () => {
+      setDeletingAccount(null)
       client.removeQueries({ queryKey: ['telegram-preview'] })
       clearAuthenticatedImages()
       await Promise.all([
@@ -149,11 +151,6 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     }
   }
 
-  async function deleteAccount(account: TelegramAccount) {
-    if (!window.confirm(`确定删除 Telegram 账号“${account.label}”及其本地会话？`)) return
-    deleting.mutate(account.id)
-  }
-
   return (
     <>
       <DropdownMenu.Root>
@@ -167,7 +164,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
         >
           <AccountAvatar
             account={active}
-            className="size-7.5 bg-blue-50"
+            className="size-7.5 rounded-full bg-blue-50"
             fallbackClassName="text-[9px] text-blue-700"
           />
           <span className="flex min-w-20 flex-1 flex-col items-start overflow-hidden max-md:hidden">
@@ -204,7 +201,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
               >
                 <AccountAvatar
                   account={account}
-                  className="size-7.5"
+                  className="size-7.5 rounded-full"
                   fallbackClassName="text-[8px]"
                 />
                 <span className="min-w-0">
@@ -224,7 +221,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
               onSelect={openAccountDialog}
             >
               <Plus size={15} />
-              添加或管理账号
+              添加账号
             </DropdownMenu.Item>
             <DropdownMenu.Item
               className="flex h-9 items-center gap-2 rounded px-2 text-[10px] text-slate-600 outline-none data-[highlighted]:bg-slate-50"
@@ -286,7 +283,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                   label={`删除 ${account.label}`}
                   icon={Trash2}
                   className="hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                  onClick={() => void deleteAccount(account)}
+                  onClick={() => setDeletingAccount(account)}
                   disabled={deleting.isPending || accounts.data.length === 1}
                 />
               </div>
@@ -368,6 +365,19 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
           </p>
         ) : null}
       </Dialog>
+      <ConfirmDialog
+        open={deletingAccount !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeletingAccount(null)
+        }}
+        title="删除 Telegram 账号"
+        description={`确定删除“${deletingAccount?.label ?? ''}”及其本地登录会话？该账号的预览缓存也会一并清除。`}
+        confirmLabel="删除账号"
+        pending={deleting.isPending}
+        onConfirm={() => {
+          if (deletingAccount) deleting.mutate(deletingAccount.id)
+        }}
+      />
     </>
   )
 }

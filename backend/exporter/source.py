@@ -46,6 +46,8 @@ def _display_name(entity) -> str:
 
 
 def _chat_kind(entity) -> str:
+    if isinstance(entity, types.User) and getattr(entity, "bot", False):
+        return "bot"
     if isinstance(entity, types.Chat):
         return "group"
     if isinstance(entity, types.Channel) and getattr(entity, "megagroup", False):
@@ -138,7 +140,8 @@ class TelegramExportSource:
         chats: List[ChatSummary] = []
         async for dialog in client.iter_dialogs():
             entity = dialog.entity
-            if not isinstance(entity, (types.Chat, types.Channel)):
+            is_bot = isinstance(entity, types.User) and getattr(entity, "bot", False)
+            if not isinstance(entity, (types.Chat, types.Channel)) and not is_bot:
                 continue
             chats.append(
                 ChatSummary(

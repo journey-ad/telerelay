@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
@@ -34,6 +34,14 @@ from backend.telegram_accounts import TelegramAccountError
 from backend.telegram_preview import TelegramPreviewError
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_auth)])
+
+StatsDateLimit = Literal["7day", "14day", "30day", "all"]
+STATS_DATE_LIMIT_DAYS: dict[StatsDateLimit, int | None] = {
+    "7day": 7,
+    "14day": 14,
+    "30day": 30,
+    "all": None,
+}
 
 
 def _error(code: str, message: str, status_code: int = 400) -> HTTPException:
@@ -482,11 +490,17 @@ async def delete_button_rule(
 
 
 @router.get("/stats")
-async def stats(days: int = Query(30, ge=1, le=365)) -> dict:
+async def stats(
+    date_limit: StatsDateLimit = "30day",
+) -> dict:
     database = get_stats_db()
+    report_days = STATS_DATE_LIMIT_DAYS[date_limit]
     details, daily = await asyncio.gather(
         asyncio.to_thread(database.get_rule_stats_detail),
-        asyncio.to_thread(database.get_daily_stats, days),
+        asyncio.to_thread(
+            database.get_daily_stats,
+            None if report_days is None else report_days * 2,
+        ),
     )
     return {"rules": details, "daily": daily}
 

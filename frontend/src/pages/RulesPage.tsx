@@ -7,6 +7,7 @@ import { RegexField, useRegexValidation } from '../components/RegexField'
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Dialog,
   EmptyState,
   fieldClass,
@@ -52,6 +53,7 @@ export function RulesPage() {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
+  const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
   const [form, setForm] = useState<ForwardingRule>(blankRule())
   const [text, setText] = useState({
     keywords: '',
@@ -118,7 +120,10 @@ export function RulesPage() {
   })
   const remove = useMutation({
     mutationFn: (index: number) => request(`/api/v1/rules/${index}`, json('DELETE')),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ['rules'] }),
+    onSuccess: () => {
+      setDeletingIndex(null)
+      void client.invalidateQueries({ queryKey: ['rules'] })
+    },
   })
   function submit(event: FormEvent) {
     event.preventDefault()
@@ -127,7 +132,7 @@ export function RulesPage() {
     })
   }
   function deleteRule(index: number) {
-    if (window.confirm('确定删除这条转发规则？')) remove.mutate(index)
+    setDeletingIndex(index)
   }
   const setForwarding = <K extends keyof ForwardingRule['forwarding']>(
     key: K,
@@ -401,6 +406,19 @@ export function RulesPage() {
           </div>
         </form>
       </Dialog>
+      <ConfirmDialog
+        open={deletingIndex !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeletingIndex(null)
+        }}
+        title="删除转发规则"
+        description={`确定删除“${deletingIndex === null ? '' : (rulesQuery.data?.[deletingIndex]?.name ?? '这条规则')}”？删除后无法恢复。`}
+        confirmLabel="删除规则"
+        pending={remove.isPending}
+        onConfirm={() => {
+          if (deletingIndex !== null) remove.mutate(deletingIndex)
+        }}
+      />
     </>
   )
 }

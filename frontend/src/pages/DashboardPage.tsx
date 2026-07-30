@@ -36,10 +36,16 @@ import type { BotStatus, Stats } from '../types'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 
-type ReportDays = 7 | 14 | 30
+type ReportPeriod = '7day' | '14day' | '30day' | 'all'
 type DailyStat = Stats['daily'][number] & { total: number }
 
-const periodOptions: ReportDays[] = [7, 14, 30]
+const periodOptions: Array<{ value: ReportPeriod; label: string }> = [
+  { value: '7day', label: '7 天' },
+  { value: '14day', label: '14 天' },
+  { value: '30day', label: '30 天' },
+  { value: 'all', label: '全部' },
+]
+const periodDays = { '7day': 7, '14day': 14, '30day': 30 } as const
 const metricTones = {
   blue: 'bg-blue-50 text-blue-600',
   amber: 'bg-amber-50 text-amber-600',
@@ -74,6 +80,14 @@ function fillDailySeries(source: Stats['daily'], days: number): DailyStat[] {
     const filtered = item?.filtered ?? 0
     return { date: key, forwarded, filtered, total: forwarded + filtered }
   })
+}
+
+function allTimeDays(source: Stats['daily']): number {
+  if (!source.length) return 1
+  const first = new Date(`${source[0].date}T12:00:00`)
+  const today = new Date()
+  today.setHours(12, 0, 0, 0)
+  return Math.max(1, Math.round((today.getTime() - first.getTime()) / 86_400_000) + 1)
 }
 
 function aggregateDaily(items: DailyStat[]) {
@@ -126,15 +140,17 @@ function TrendLabel({ value, fallback }: { value?: number; fallback?: string }) 
 
 export function DashboardPage() {
   const client = useQueryClient()
-  const [reportDays, setReportDays] = useState<ReportDays>(14)
+  const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('14day')
+  const reportDays = reportPeriod === 'all' ? null : periodDays[reportPeriod]
+  const allTime = reportDays === null
   const statusQuery = useQuery({
     queryKey: ['bot-status'],
     queryFn: () => request<BotStatus>('/api/v1/bot/status'),
     refetchInterval: 4000,
   })
   const statsQuery = useQuery({
-    queryKey: ['stats', reportDays * 2],
-    queryFn: () => request<Stats>(`/api/v1/stats?days=${reportDays * 2}`),
+    queryKey: ['stats', reportPeriod],
+    queryFn: () => request<Stats>(`/api/v1/stats?date_limit=${reportPeriod}`),
     refetchInterval: 15_000,
   })
   const refreshLiveData = useCallback(() => {
@@ -154,9 +170,11 @@ export function DashboardPage() {
     .filter(([key]) => key !== 'completed')
     .reduce((sum, [, value]) => sum + value, 0)
   const report = useMemo(() => {
-    const series = fillDailySeries(statsQuery.data?.daily ?? [], reportDays * 2)
-    const currentDaily = series.slice(-reportDays)
-    const previousDaily = series.slice(0, reportDays)
+    const source = statsQuery.data?.daily ?? []
+    const durationDays = reportDays ?? allTimeDays(source)
+    const series = fillDailySeries(source, allTime ? durationDays : reportDays * 2)
+    const currentDaily = allTime ? series : series.slice(-reportDays)
+    const previousDaily = allTime ? [] : series.slice(0, reportDays)
     const current = aggregateDaily(currentDaily)
     const previous = aggregateDaily(previousDaily)
     const peak = currentDaily.reduce<DailyStat | null>(
@@ -173,13 +191,14 @@ export function DashboardPage() {
       peak,
       activeDays,
       maxDailyTotal,
-      change: percentChange(current.total, previous.total),
-      forwardedChange: percentChange(current.forwarded, previous.forwarded),
-      filteredChange: percentChange(current.filtered, previous.filtered),
+      durationDays,
+      change: allTime ? undefined : percentChange(current.total, previous.total),
+      forwardedChange: allTime ? undefined : percentChange(current.forwarded, previous.forwarded),
+      filteredChange: allTime ? undefined : percentChange(current.filtered, previous.filtered),
       forwardRate: current.total ? (current.forwarded / current.total) * 100 : 0,
-      dailyAverage: current.total / reportDays,
+      dailyAverage: current.total / durationDays,
     }
-  }, [reportDays, statsQuery.data?.daily])
+  }, [allTime, reportDays, statsQuery.data?.daily])
   const rankedRules = useMemo(
     () => [...(statsQuery.data?.rules ?? [])].sort((left, right) => right.total - left.total),
     [statsQuery.data?.rules],
@@ -195,6 +214,7 @@ export function DashboardPage() {
       value: report.current.forwarded,
       icon: Send,
       trend: report.forwardedChange,
+      hint: allTime ? '全部时长累计' : undefined,
       tone: 'blue',
     },
     {
@@ -202,6 +222,7 @@ export function DashboardPage() {
       value: report.current.filtered,
       icon: Filter,
       trend: report.filteredChange,
+      hint: allTime ? '全部时长累计' : undefined,
       tone: 'amber',
     },
     {
@@ -209,6 +230,7 @@ export function DashboardPage() {
       value: report.current.total,
       icon: Activity,
       trend: report.change,
+      hint: allTime ? '全部时长累计' : undefined,
       tone: 'cyan',
     },
     {
@@ -216,6 +238,7 @@ export function DashboardPage() {
       value: activeQueue,
       icon: TimerReset,
       trend: undefined,
+      hint: '当前实时积压',
       tone: 'green',
     },
   ] as const
@@ -247,7 +270,7 @@ export function DashboardPage() {
       />
 
       <div className="mb-3 grid grid-cols-4 gap-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
-        {metrics.map(({ label, value, icon: Icon, trend, tone }) => (
+        {metrics.map(({ label, value, icon: Icon, trend, hint, tone }) => (
           <article
             className={cn(
               'grid min-w-0 grid-cols-[40px_1fr] grid-rows-[auto_auto_auto] gap-x-3',
@@ -279,7 +302,7 @@ export function DashboardPage() {
                       : 'text-slate-400',
               )}
             >
-              <TrendLabel value={trend} fallback="当前实时积压" />
+              <TrendLabel value={trend} fallback={hint} />
             </small>
           </article>
         ))}
@@ -299,20 +322,20 @@ export function DashboardPage() {
               role="group"
               aria-label="报表周期"
             >
-              {periodOptions.map((days) => (
+              {periodOptions.map((option) => (
                 <button
                   type="button"
-                  key={days}
+                  key={option.value}
                   className={cn(
                     'h-6 min-w-10 rounded border-0 px-2 text-[8px] font-semibold',
-                    days === reportDays
+                    option.value === reportPeriod
                       ? 'bg-white text-blue-700 shadow-sm'
                       : 'bg-transparent text-slate-400 hover:text-slate-600',
                   )}
-                  aria-pressed={days === reportDays}
-                  onClick={() => setReportDays(days)}
+                  aria-pressed={option.value === reportPeriod}
+                  onClick={() => setReportPeriod(option.value)}
                 >
-                  {days} 天
+                  {option.label}
                 </button>
               ))}
             </div>
@@ -396,28 +419,35 @@ export function DashboardPage() {
           </div>
         </Panel>
 
-        <Panel title="周期摘要" meta={<span>近 {reportDays} 天</span>}>
+        <Panel title="周期摘要" meta={<span>{allTime ? '全部时长' : `近 ${reportDays} 天`}</span>}>
           <div className="divide-y divide-slate-100">
             <div className="grid grid-cols-[32px_1fr_auto] items-center gap-3 py-3 first:pt-0">
               <span className="grid size-8 place-items-center rounded-[5px] bg-blue-50 text-blue-600">
                 <Gauge size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-[8px] text-slate-400">较上周期</small>
-                <strong className="mt-0.5 text-[10px] text-slate-700">总流量变化</strong>
+                <small className="text-[8px] text-slate-400">
+                  {allTime ? '累计范围' : '较上周期'}
+                </small>
+                <strong className="mt-0.5 text-[10px] text-slate-700">
+                  {allTime ? '总流量' : '总流量变化'}
+                </strong>
               </span>
               <b
                 className={cn(
                   'text-[12px]',
-                  report.change > 0
-                    ? 'text-emerald-600'
-                    : report.change < 0
-                      ? 'text-rose-500'
-                      : 'text-slate-500',
+                  report.change === undefined
+                    ? 'text-slate-700'
+                    : report.change > 0
+                      ? 'text-emerald-600'
+                      : report.change < 0
+                        ? 'text-rose-500'
+                        : 'text-slate-500',
                 )}
               >
-                {report.change > 0 ? '+' : ''}
-                {formatPercent(report.change)}
+                {report.change === undefined
+                  ? formatNumber(report.current.total)
+                  : `${report.change > 0 ? '+' : ''}${formatPercent(report.change)}`}
               </b>
             </div>
             <div className="grid grid-cols-[32px_1fr_auto] items-center gap-3 py-3">
@@ -453,7 +483,7 @@ export function DashboardPage() {
                 <strong className="mt-0.5 text-[10px] text-slate-700">周期覆盖率</strong>
               </span>
               <b className="text-[12px] text-slate-700">
-                {report.activeDays}/{reportDays}
+                {report.activeDays}/{report.durationDays}
               </b>
             </div>
           </div>

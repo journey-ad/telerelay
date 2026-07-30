@@ -18,6 +18,7 @@ import { DownloadButton } from '../components/DownloadButton'
 import {
   Badge,
   Button,
+  ConfirmDialog,
   Dialog,
   EmptyState,
   fieldClass,
@@ -67,6 +68,7 @@ export function ExportsPage() {
   const client = useQueryClient()
   const [jobId, setJobId] = useState('')
   const [taskOpen, setTaskOpen] = useState(false)
+  const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null)
   const [messageForm, setMessageForm] = useState({
     chat_id: '',
     start_at: '',
@@ -150,7 +152,10 @@ export function ExportsPage() {
   })
   const removeTask = useMutation({
     mutationFn: (id: number) => request(`/api/v1/exports/tasks/${id}`, json('DELETE')),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ['export-tasks'] }),
+    onSuccess: () => {
+      setDeletingTaskId(null)
+      void client.invalidateQueries({ queryKey: ['export-tasks'] })
+    },
   })
   async function runTask(id: number) {
     const result = await request<{ job_id: string }>(
@@ -453,11 +458,7 @@ export function ExportsPage() {
                           <IconButton
                             label="删除任务"
                             icon={Trash2}
-                            onClick={() => {
-                              if (window.confirm('确定删除该定时任务？')) {
-                                removeTask.mutate(task.id)
-                              }
-                            }}
+                            onClick={() => setDeletingTaskId(task.id)}
                           />
                         </div>
                       </td>
@@ -673,6 +674,19 @@ export function ExportsPage() {
           </div>
         </form>
       </Dialog>
+      <ConfirmDialog
+        open={deletingTaskId !== null}
+        onOpenChange={(next) => {
+          if (!next) setDeletingTaskId(null)
+        }}
+        title="删除定时任务"
+        description={`确定删除“${tasks.data?.find((task) => task.id === deletingTaskId)?.name ?? '这个定时任务'}”？已有导出文件不会被删除。`}
+        confirmLabel="删除任务"
+        pending={removeTask.isPending}
+        onConfirm={() => {
+          if (deletingTaskId !== null) removeTask.mutate(deletingTaskId)
+        }}
+      />
     </>
   )
 }
