@@ -158,6 +158,15 @@ class BotManager:
 
             # Connected
             self.is_connected = True
+            self._publish_event(
+                "telegram-account",
+                {
+                    "action": "connection",
+                    "account_id": self.account_id,
+                    "connected": True,
+                    "running": True,
+                },
+            )
             self.forwarders = []
             self.rule_forwarder_map = {}
             self._queue_forwarders = {}
@@ -197,6 +206,15 @@ class BotManager:
                 await self.client_manager.disconnect()
             self.is_connected = False
             self.is_running = False
+            self._publish_event(
+                "telegram-account",
+                {
+                    "action": "connection",
+                    "account_id": self.account_id,
+                    "connected": False,
+                    "running": False,
+                },
+            )
             logger.info(t("log.bot.stopped"))
 
     def _create_forwarder(self, rule: ForwardingRule) -> tuple[MessageFilter, MessageForwarder]:

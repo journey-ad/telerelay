@@ -20,7 +20,7 @@ import { DownloadButton } from '../components/DownloadButton'
 import {
   Badge,
   Button,
-  ConfirmDialog,
+  confirm,
   Dialog,
   EmptyState,
   fieldClass,
@@ -76,7 +76,6 @@ export function ExportsPage() {
   const client = useQueryClient()
   const [jobId, setJobId] = useState('')
   const [taskOpen, setTaskOpen] = useState(false)
-  const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null)
   const [messageForm, setMessageForm] = useState({
     chat_id: '',
     start_at: '',
@@ -157,10 +156,19 @@ export function ExportsPage() {
   const removeTask = useMutation({
     mutationFn: (id: number) => request(`/api/v1/exports/tasks/${id}`, json('DELETE')),
     onSuccess: () => {
-      setDeletingTaskId(null)
       void client.invalidateQueries({ queryKey: ['export-tasks'] })
     },
   })
+  async function deleteTask(id: number) {
+    await confirm({
+      title: t('exports.deleteTitle'),
+      description: t('exports.deleteConfirm', {
+        name: tasks.data?.find((task) => task.id === id)?.name ?? t('exports.fallbackTask'),
+      }),
+      confirmLabel: t('exports.deleteTask'),
+      onConfirm: () => removeTask.mutateAsync(id),
+    })
+  }
   async function runTask(id: number) {
     const result = await request<{ job_id: string }>(
       `/api/v1/exports/tasks/${id}/run`,
@@ -465,7 +473,7 @@ export function ExportsPage() {
                           <IconButton
                             label={t('exports.deleteTask')}
                             icon={Trash2}
-                            onClick={() => setDeletingTaskId(task.id)}
+                            onClick={() => void deleteTask(task.id)}
                           />
                         </div>
                       </td>
@@ -683,23 +691,6 @@ export function ExportsPage() {
           </div>
         </form>
       </Dialog>
-      <ConfirmDialog
-        open={deletingTaskId !== null}
-        onOpenChange={(next) => {
-          if (!next) setDeletingTaskId(null)
-        }}
-        title={t('exports.deleteTitle')}
-        description={t('exports.deleteConfirm', {
-          name:
-            tasks.data?.find((task) => task.id === deletingTaskId)?.name ??
-            t('exports.fallbackTask'),
-        })}
-        confirmLabel={t('exports.deleteTask')}
-        pending={removeTask.isPending}
-        onConfirm={() => {
-          if (deletingTaskId !== null) removeTask.mutate(deletingTaskId)
-        }}
-      />
     </>
   )
 }

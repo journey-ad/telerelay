@@ -100,7 +100,7 @@
     "switchTo": "Switch to {{name}}",
     "authenticate": "Authenticate {{name}}",
     "deleteNamed": "Delete {{name}}",
-    "deleteConfirm": "Delete “{{name}}” and its local login session? Its preview cache will also be removed."
+    "deleteConfirm": "Delete “{{name}}” and its local login session? Its cache data will also be removed."
   },
   "chatInput": {
     "unknown": "Unknown chat [{{id}}]",
@@ -420,7 +420,29 @@
     "saving": "Saving...",
     "save": "Save configuration",
     "clearTitle": "Clear Telegram session",
-    "clearDescription": "Stop the node and clear the local session; re-authentication required."
+    "clearDescription": "Stop the node and clear the local session; re-authentication required.",
+    "about": "About",
+    "versionLabel": "Current version: {{version}}",
+    "repository": "GitHub source repository",
+    "updateCheck": "Update check",
+    "updateCheckDetail": "Check whether a new version is available.",
+    "checkUpdate": "Check for updates",
+    "checking": "Checking...",
+    "checkFailed": "Update check failed",
+    "upToDate": "You're on the latest version",
+    "updateAvailable": "New version {{version}} available",
+    "viewRelease": "View release",
+    "authState": {
+      "idle": "Idle",
+      "connecting": "Connecting",
+      "waitingPhone": "Waiting for phone",
+      "waitingCode": "Waiting for code",
+      "waitingPassword": "Waiting for password",
+      "success": "Authenticated",
+      "error": "Authentication failed",
+      "notRequired": "Not required",
+      "unknown": "Unknown"
+    }
   },
   "exports": {
     "eyebrow": "Archive pipeline",

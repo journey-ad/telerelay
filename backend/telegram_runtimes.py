@@ -60,7 +60,12 @@ class TelegramRuntimeRegistry:
             if runtime is not None:
                 return runtime
 
-            auth = self.auth_factory(input_timeout=self.auth_timeout)
+            auth = self.auth_factory(
+                input_timeout=self.auth_timeout,
+                on_state_change=lambda state, error="", target=account_id: self._publish_auth_state(
+                    target, state, error
+                ),
+            )
             runtime = self.bot_factory(
                 self.config,
                 auth,
@@ -329,6 +334,13 @@ class TelegramRuntimeRegistry:
     def _authenticated(self, account_id: str, identity: dict[str, Any]) -> None:
         if self.on_user_authenticated:
             self.on_user_authenticated(account_id, identity)
+
+    def _publish_auth_state(self, account_id: str, state: str, error: str = "") -> None:
+        if self.events:
+            self.events.publish(
+                "telegram-auth",
+                {"state": state, "error": error, "account_id": account_id},
+            )
 
     async def _start_one(self, account_id: str, *, restart: bool = False) -> bool:
         runtime = self.ensure_runtime(account_id)

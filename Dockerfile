@@ -22,5 +22,7 @@ ENV PYTHONUNBUFFERED=1 \
 COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY config/*.example ./config/
+ARG GIT_SHA=""
+RUN echo "${GIT_SHA}" > ./backend/.commit
 EXPOSE 8080
 CMD ["python", "-m", "backend.main"]

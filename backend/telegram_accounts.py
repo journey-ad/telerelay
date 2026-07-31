@@ -373,6 +373,10 @@ class TelegramAccountService:
                 self.store.update_avatar(account_id, identity["avatar_bytes"])
             except (OSError, TelegramAccountError) as exc:
                 logger.warning(t("log.account.avatar_cache_failed", error=str(exc)))
+        events = getattr(self.runtimes, "events", None)
+        if events:
+            events.publish("telegram-account", {"action": "authenticated", "account_id": account_id})
+            events.publish("telegram-auth", {"state": "success", "account_id": account_id})
 
     def get_auth(self):
         return self.runtimes.get_auth(self.store.active_account_id)

@@ -100,7 +100,7 @@
     "switchTo": "切换到 {{name}}",
     "authenticate": "认证 {{name}}",
     "deleteNamed": "删除 {{name}}",
-    "deleteConfirm": "确定删除“{{name}}”及其本地登录会话？该账号的预览缓存也会一并清除"
+    "deleteConfirm": "确定删除“{{name}}”及其本地登录会话？该账号的缓存数据也会一并清除"
   },
   "chatInput": {
     "unknown": "未知会话 [{{id}}]",
@@ -420,7 +420,29 @@
     "saving": "正在保存...",
     "save": "保存配置",
     "clearTitle": "清除 Telegram 会话",
-    "clearDescription": "停止节点并清除本地会话，之后需重新认证"
+    "clearDescription": "停止节点并清除本地会话，之后需重新认证",
+    "about": "关于",
+    "versionLabel": "当前版本: {{version}}",
+    "repository": "GitHub 源码仓库",
+    "updateCheck": "更新检查",
+    "updateCheckDetail": "检查是否有新版本可用",
+    "checkUpdate": "检查更新",
+    "checking": "检查中...",
+    "checkFailed": "更新检查失败",
+    "upToDate": "当前已是最新版本",
+    "updateAvailable": "发现新版本 {{version}}",
+    "viewRelease": "查看发布页",
+    "authState": {
+      "idle": "等待认证",
+      "connecting": "连接中",
+      "waitingPhone": "等待手机号",
+      "waitingCode": "等待验证码",
+      "waitingPassword": "等待两步验证密码",
+      "success": "已认证",
+      "error": "认证失败",
+      "notRequired": "无需认证",
+      "unknown": "未知"
+    }
   },
   "exports": {
     "eyebrow": "归档管线",

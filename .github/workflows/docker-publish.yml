@@ -3,12 +3,7 @@ name: Build and Push Docker Image
 on:
   push:
     branches: [ main, dev, next ]
-    # Optional: trigger only when Dockerfile or related files change
-    # paths:
-    #   - 'Dockerfile'
-    #   - 'backend/**'
-    #   - 'frontend/**'
-    #   - 'requirements.txt'
+    tags: [ 'v*' ]
 
 env:
   REGISTRY: ghcr.io
@@ -39,6 +34,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
+            type=ref,event=tag
             type=sha,prefix=
             type=raw,value=latest,enable={{is_default_branch}}
 
@@ -52,5 +48,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

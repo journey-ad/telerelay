@@ -63,6 +63,12 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
       if (event.type === 'stats') {
         void queryClient.invalidateQueries({ queryKey: ['stats'] })
       }
+      if (event.type === 'telegram-account') {
+        void queryClient.invalidateQueries({ queryKey: ['telegram-accounts'] })
+      }
+      if (event.type === 'telegram-auth') {
+        void queryClient.invalidateQueries({ queryKey: ['telegram-auth'] })
+      }
     },
     [queryClient],
   )

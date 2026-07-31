@@ -1,0 +1,63 @@
+name: Deploy Version Info to GitHub Pages
+
+on:
+  release:
+    types: [published]
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build version.json
+        run: |
+          mkdir -p _site
+          TAG="${{ github.event.release.tag_name || github.ref_name }}"
+          REPO="${{ github.repository }}"
+          PUBLISHED="${{ github.event.release.published_at }}"
+          DATE="${PUBLISHED:0:10}"
+          if [ -z "$DATE" ]; then
+            DATE="$(date -u +%Y-%m-%d)"
+          fi
+          URL="${{ github.event.release.html_url || format('https://github.com/{0}/releases/tag/{1}', github.repository, github.ref_name) }}"
+          cat > _site/version.json <<EOF
+          {
+            "version": "${TAG}",
+            "tag_name": "${TAG}",
+            "date": "${DATE}",
+            "published_at": "${PUBLISHED}",
+            "url": "${URL}",
+            "homepage": "https://github.com/${REPO}",
+            "repository": "https://github.com/${REPO}.git",
+            "image": "ghcr.io/${REPO}:${TAG}"
+          }
+          EOF
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

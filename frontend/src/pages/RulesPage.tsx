@@ -10,7 +10,7 @@ import { useTelegramChats } from '../hooks/useTelegramChats'
 import {
   Badge,
   Button,
-  ConfirmDialog,
+  confirm,
   Dialog,
   EmptyState,
   fieldClass,
@@ -57,7 +57,6 @@ export function RulesPage() {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
-  const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
   const [form, setForm] = useState<ForwardingRule>(blankRule())
   const [regex, setRegex] = useState('')
   const regexValidation = useRegexValidation()
@@ -110,7 +109,6 @@ export function RulesPage() {
   const remove = useMutation({
     mutationFn: (index: number) => request(`/api/v1/rules/${index}`, json('DELETE')),
     onSuccess: () => {
-      setDeletingIndex(null)
       void client.invalidateQueries({ queryKey: ['rules'] })
     },
   })
@@ -120,8 +118,15 @@ export function RulesPage() {
       if (valid) save.mutate()
     })
   }
-  function deleteRule(index: number) {
-    setDeletingIndex(index)
+  async function deleteRule(index: number) {
+    await confirm({
+      title: t('rules.deleteTitle'),
+      description: t('rules.deleteConfirm', {
+        name: rulesQuery.data?.[index]?.name ?? t('rules.fallbackName'),
+      }),
+      confirmLabel: t('rules.delete'),
+      onConfirm: () => remove.mutateAsync(index),
+    })
   }
   const setForwarding = <K extends keyof ForwardingRule['forwarding']>(
     key: K,
@@ -431,24 +436,6 @@ export function RulesPage() {
           </div>
         </form>
       </Dialog>
-      <ConfirmDialog
-        open={deletingIndex !== null}
-        onOpenChange={(next) => {
-          if (!next) setDeletingIndex(null)
-        }}
-        title={t('rules.deleteTitle')}
-        description={t('rules.deleteConfirm', {
-          name:
-            deletingIndex === null
-              ? ''
-              : (rulesQuery.data?.[deletingIndex]?.name ?? t('rules.fallbackName')),
-        })}
-        confirmLabel={t('rules.delete')}
-        pending={remove.isPending}
-        onConfirm={() => {
-          if (deletingIndex !== null) remove.mutate(deletingIndex)
-        }}
-      />
     </>
   )
 }

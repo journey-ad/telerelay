@@ -20,6 +20,9 @@ frontend/*.tsbuildinfo
 .env
 config/config.yaml
 
+# Build-injected metadata
+backend/.commit
+
 # Telegram session files
 data/
 

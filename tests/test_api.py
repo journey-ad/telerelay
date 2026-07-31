@@ -196,6 +196,45 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertFalse(status.json()["is_running"])
 
+    def test_meta_contract(self):
+        meta = self.client.get("/api/v1/meta")
+        self.assertEqual(meta.status_code, 200)
+        body = meta.json()
+        self.assertIsInstance(body["version"], str)
+        self.assertIn("commit", body)
+        self.assertTrue(body["repository"].startswith("https://github.com/"))
+
+    def test_update_check_contract(self):
+        from backend.meta import UpdateInfo
+
+        with patch(
+            "backend.api.router.check_update",
+            return_value=UpdateInfo(
+                current_version="2.0.0",
+                latest_tag="v2.1.0",
+                latest_version="2.1.0",
+                update_available=True,
+                release_url="https://github.com/journey-ad/telerelay/releases/tag/v2.1.0",
+                published_at="2026-07-31T00:00:00Z",
+            ),
+        ):
+            body = self.client.get("/api/v1/update-check").json()
+        self.assertEqual(body["current_version"], "2.0.0")
+        self.assertEqual(body["latest_tag"], "v2.1.0")
+        self.assertTrue(body["update_available"])
+        self.assertIsNone(body["error"])
+
+    def test_update_check_reports_failure_contract(self):
+        from backend.meta import UpdateInfo
+
+        with patch(
+            "backend.api.router.check_update",
+            return_value=UpdateInfo(current_version="2.0.0", error="HTTP 403"),
+        ):
+            body = self.client.get("/api/v1/update-check").json()
+        self.assertFalse(body["update_available"])
+        self.assertEqual(body["error"], "HTTP 403")
+
     def test_queue_preview_contract_and_limit_validation(self):
         calls = []
         expected = [

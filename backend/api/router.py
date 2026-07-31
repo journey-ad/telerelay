@@ -24,6 +24,7 @@ from backend.api.dependencies import get_context, require_auth
 from backend.application import ApplicationContext
 from backend.client import TelegramClientManager
 from backend.exporter.service import ExportError
+from backend.meta import REPOSITORY_URL, check_update, current_commit, current_version
 from backend.schemas import (
     ApiMessage,
     AuthValue,
@@ -345,6 +346,20 @@ async def delete_telegram_account(
     return ApiMessage(code="telegram_account_deleted")
 
 
+@router.get("/meta")
+async def meta() -> dict:
+    return {
+        "version": current_version(),
+        "commit": await asyncio.to_thread(current_commit),
+        "repository": REPOSITORY_URL,
+    }
+
+
+@router.get("/update-check")
+async def update_check() -> dict:
+    return (await asyncio.to_thread(check_update)).to_dict()
+
+
 @router.get("/bot/status")
 async def bot_status(context: ApplicationContext = Depends(get_context)) -> dict:
     return await asyncio.to_thread(context.bot.get_status)
@@ -416,6 +431,7 @@ async def telegram_auth_start(context: ApplicationContext = Depends(get_context)
         if not valid:
             raise _error("invalid_connection_config", message, 422)
         await context.accounts.start_authentication()
+        context.events.publish("telegram-auth", {"state": "started", "account_id": account_id})
         return ApiMessage(code="auth_started")
     raise _error("not_user_mode", "Telegram authentication is only used in user mode", 409)
 
@@ -465,6 +481,8 @@ async def clear_telegram_session(
         if context.bot.is_running:
             await context.bot.stop()
         await asyncio.to_thread(TelegramClientManager(context.config).clear_session)
+    context.events.publish("telegram-account", {"action": "deauthenticated"})
+    context.events.publish("telegram-auth", {"state": "cleared"})
     return ApiMessage(code="telegram_session_cleared")
 
 

@@ -8,7 +8,7 @@ import { RegexField, useRegexValidation } from '../components/RegexField'
 import {
   Badge,
   Button,
-  ConfirmDialog,
+  confirm,
   Dialog,
   EmptyState,
   fieldClass,
@@ -39,7 +39,6 @@ export function AutomationsPage() {
   const client = useQueryClient()
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
-  const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [form, setForm] = useState<ButtonRule>(blankRule())
   const [buttons, setButtons] = useState('')
@@ -88,7 +87,6 @@ export function AutomationsPage() {
   const remove = useMutation({
     mutationFn: (index: number) => request(`/api/v1/button-rules/${index}`, json('DELETE')),
     onSuccess: () => {
-      setDeletingIndex(null)
       void client.invalidateQueries({ queryKey: ['button-rules'] })
     },
   })
@@ -102,8 +100,15 @@ export function AutomationsPage() {
       if (valid) save.mutate()
     })
   }
-  function deleteRule(index: number) {
-    setDeletingIndex(index)
+  async function deleteRule(index: number) {
+    await confirm({
+      title: t('automations.deleteTitle'),
+      description: t('automations.deleteConfirm', {
+        name: query.data?.[index]?.name ?? t('automations.fallbackName'),
+      }),
+      confirmLabel: t('automations.delete'),
+      onConfirm: () => remove.mutateAsync(index),
+    })
   }
 
   return (
@@ -354,24 +359,6 @@ export function AutomationsPage() {
           </div>
         </form>
       </Dialog>
-      <ConfirmDialog
-        open={deletingIndex !== null}
-        onOpenChange={(next) => {
-          if (!next) setDeletingIndex(null)
-        }}
-        title={t('automations.deleteTitle')}
-        description={t('automations.deleteConfirm', {
-          name:
-            deletingIndex === null
-              ? ''
-              : (query.data?.[deletingIndex]?.name ?? t('automations.fallbackName')),
-        })}
-        confirmLabel={t('automations.delete')}
-        pending={remove.isPending}
-        onConfirm={() => {
-          if (deletingIndex !== null) remove.mutate(deletingIndex)
-        }}
-      />
     </>
   )
 }

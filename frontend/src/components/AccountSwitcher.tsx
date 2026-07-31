@@ -19,7 +19,7 @@ import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 import { AccountAvatar } from './AccountAvatar'
 import { clearAuthenticatedImages } from './AuthenticatedImage'
-import { Button, ConfirmDialog, Dialog, fieldClass, IconButton } from './ui'
+import { Button, confirm, Dialog, fieldClass, IconButton } from './ui'
 
 function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   const identity = account.username ? `@${account.username}` : ''
@@ -36,20 +36,18 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
   const { t } = useTranslation()
   const client = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [deletingAccount, setDeletingAccount] = useState<TelegramAccount | null>(null)
   const [label, setLabel] = useState('')
   const [authValue, setAuthValue] = useState('')
   const [flowError, setFlowError] = useState<string | null>(null)
   const accounts = useQuery({
     queryKey: ['telegram-accounts'],
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
-    refetchInterval: 5000,
+    refetchInterval: 30_000,
   })
   const auth = useQuery({
     queryKey: ['telegram-auth'],
     queryFn: () => request<TelegramAuth>('/api/v1/telegram-auth'),
     enabled: dialogOpen,
-    refetchInterval: dialogOpen ? 1200 : false,
   })
   const active = useMemo(
     () => accounts.data?.find((account) => account.active) ?? accounts.data?.[0],
@@ -108,7 +106,6 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     mutationFn: (accountId: string) =>
       request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
     onSuccess: async () => {
-      setDeletingAccount(null)
       client.removeQueries({ queryKey: ['telegram-preview'] })
       clearAuthenticatedImages()
       await Promise.all([
@@ -119,6 +116,14 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     },
     onError: (error) => setFlowError(messageFrom(error)),
   })
+  async function confirmDeleteAccount(account: TelegramAccount) {
+    await confirm({
+      title: t('accounts.deleteTitle'),
+      description: t('accounts.deleteConfirm', { name: account.label }),
+      confirmLabel: t('accounts.delete'),
+      onConfirm: () => deleting.mutateAsync(account.id),
+    })
+  }
 
   useEffect(() => {
     if (auth.data?.state === 'success') {
@@ -287,7 +292,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                   label={t('accounts.deleteNamed', { name: account.label })}
                   icon={Trash2}
                   className="hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                  onClick={() => setDeletingAccount(account)}
+                  onClick={() => void confirmDeleteAccount(account)}
                   disabled={deleting.isPending || accounts.data.length === 1}
                 />
               </div>
@@ -371,21 +376,6 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
           </p>
         ) : null}
       </Dialog>
-      <ConfirmDialog
-        open={deletingAccount !== null}
-        onOpenChange={(next) => {
-          if (!next) setDeletingAccount(null)
-        }}
-        title={t('accounts.deleteTitle')}
-        description={t('accounts.deleteConfirm', {
-          name: deletingAccount?.label ?? '',
-        })}
-        confirmLabel={t('accounts.delete')}
-        pending={deleting.isPending}
-        onConfirm={() => {
-          if (deletingAccount) deleting.mutate(deletingAccount.id)
-        }}
-      />
     </>
   )
 }

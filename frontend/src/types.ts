@@ -248,6 +248,23 @@ export interface RelayEvent {
   payload: Record<string, unknown>
   at: string
 }
+export interface MetaInfo {
+  version: string
+  commit: string | null
+  repository: string
+}
+export interface UpdateInfo {
+  current_version: string
+  latest_tag: string | null
+  latest_version: string | null
+  update_available: boolean
+  release_url: string | null
+  published_at: string | null
+  homepage: string | null
+  repository: string | null
+  image: string | null
+  error: string | null
+}
 
 export interface ForwardQueueItem {
   id: number

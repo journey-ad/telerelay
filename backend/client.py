@@ -206,6 +206,8 @@ class TelegramClientManager:
 
         except Exception as e:
             logger.error(t("log.client.connect_failed", error=str(e)))
+            if self.auth_manager:
+                self.auth_manager.set_state("error", str(e))
             return False
     
     async def disconnect(self) -> None:

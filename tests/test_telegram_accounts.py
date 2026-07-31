@@ -156,6 +156,54 @@ class TelegramAccountStoreTests(unittest.TestCase):
 
         self.assertEqual(store.get_avatar_path("default").read_bytes(), b"avatar-bytes")
 
+    def test_identity_update_publishes_account_and_auth_events(self):
+        from backend.events import EventBus
+
+        store = TelegramAccountStore(self.root)
+        events = EventBus()
+        registry = TelegramRuntimeRegistry(
+            SimpleNamespace(
+                forward_queue_db_path=str(store.data_dir / "forward_queue.db")
+            ),
+            store,
+            auth_timeout=1,
+            bot_factory=FakeRuntime,
+            events=events,
+        )
+        service = TelegramAccountService(store, registry)
+
+        service.update_identity("default", {"display_name": "User", "telegram_user_id": 1})
+
+        auth_events = events.recent(10, {"telegram-auth"})
+        self.assertEqual(auth_events[0]["payload"]["state"], "success")
+        self.assertEqual(auth_events[0]["payload"]["account_id"], "default")
+        self.assertIn(
+            "telegram-account",
+            {event["type"] for event in events.recent(10)},
+        )
+
+    def test_auth_state_changes_publish_events(self):
+        from backend.events import EventBus
+
+        store = TelegramAccountStore(self.root)
+        events = EventBus()
+        registry = TelegramRuntimeRegistry(
+            SimpleNamespace(
+                forward_queue_db_path=str(store.data_dir / "forward_queue.db")
+            ),
+            store,
+            auth_timeout=1,
+            bot_factory=FakeRuntime,
+            events=events,
+        )
+
+        auth = registry.get_auth("default")
+        auth.set_state("waiting_phone")
+
+        event = events.recent(1, {"telegram-auth"})[0]
+        self.assertEqual(event["payload"]["state"], "waiting_phone")
+        self.assertEqual(event["payload"]["account_id"], "default")
+
 
 class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

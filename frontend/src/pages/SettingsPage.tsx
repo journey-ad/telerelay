@@ -1,5 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, KeyRound, Save, Settings, ShieldCheck, Trash2, Upload } from 'lucide-react'
+import {
+  Download,
+  ExternalLink,
+  Github,
+  Info,
+  KeyRound,
+  RefreshCw,
+  Save,
+  Settings,
+  ShieldCheck,
+  Trash2,
+  Upload,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
@@ -7,7 +19,7 @@ import { downloadFile } from '../api/downloads'
 import {
   Badge,
   Button,
-  ConfirmDialog,
+  confirm,
   fieldClass,
   PageHeader,
   Panel,
@@ -17,7 +29,7 @@ import {
   TabsTrigger,
   tabsListClass,
 } from '../components/ui'
-import type { AppConfig, TelegramAuth } from '../types'
+import type { AppConfig, MetaInfo, TelegramAccount, TelegramAuth, UpdateInfo } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 
@@ -26,7 +38,6 @@ export function SettingsPage() {
   const client = useQueryClient()
   const [rawConfig, setRawConfig] = useState('')
   const [authValue, setAuthValue] = useState('')
-  const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
   const config = useQuery({
     queryKey: ['config'],
@@ -35,7 +46,36 @@ export function SettingsPage() {
   const auth = useQuery({
     queryKey: ['telegram-auth'],
     queryFn: () => request<TelegramAuth>('/api/v1/telegram-auth'),
-    refetchInterval: 1800,
+    refetchInterval: (query) =>
+      ['connecting', 'waiting_phone', 'waiting_code', 'waiting_password'].includes(
+        query.state.data?.state ?? '',
+      )
+        ? 1000
+        : false,
+  })
+  const accounts = useQuery({
+    queryKey: ['telegram-accounts'],
+    queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
+    enabled: Boolean(auth.data && auth.data.state !== 'not_required'),
+  })
+  const activeAccount = accounts.data?.find((account) => account.active)
+  const deleteAccount = useMutation({
+    mutationFn: (accountId: string) =>
+      request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
+    onSuccess: async () => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['telegram-accounts'] }),
+        client.invalidateQueries({ queryKey: ['telegram-auth'] }),
+        client.removeQueries({ queryKey: ['telegram-preview'] }),
+      ])
+    },
+  })
+  const meta = useQuery({
+    queryKey: ['meta'],
+    queryFn: () => request<MetaInfo>('/api/v1/meta'),
+  })
+  const checkUpdate = useMutation({
+    mutationFn: () => request<UpdateInfo>('/api/v1/update-check'),
   })
   useEffect(() => {
     if (config.data) setRawConfig(JSON.stringify(config.data.config, null, 2))
@@ -65,10 +105,26 @@ export function SettingsPage() {
   const clearSession = useMutation({
     mutationFn: () => request('/api/v1/telegram-auth/session', json('DELETE')),
     onSuccess: async () => {
-      setClearConfirmOpen(false)
       await auth.refetch()
     },
   })
+  async function handleClearSession() {
+    await confirm({
+      title: t('settings.clearTitle'),
+      description: t('settings.clearDescription'),
+      confirmLabel: t('settings.clearSession'),
+      onConfirm: () => clearSession.mutateAsync(),
+    })
+  }
+  async function handleDeleteAccount() {
+    if (!activeAccount) return
+    await confirm({
+      title: t('accounts.deleteTitle'),
+      description: t('accounts.deleteConfirm', { name: activeAccount.label }),
+      confirmLabel: t('accounts.delete'),
+      onConfirm: () => deleteAccount.mutateAsync(activeAccount.id),
+    })
+  }
   async function importConfig(file?: File) {
     if (!file) return
     const data = new FormData()
@@ -76,6 +132,16 @@ export function SettingsPage() {
     await request('/api/v1/config/import', { method: 'POST', body: data })
     await config.refetch()
   }
+  const authStateLabels = {
+    idle: 'settings.authState.idle',
+    connecting: 'settings.authState.connecting',
+    waiting_phone: 'settings.authState.waitingPhone',
+    waiting_code: 'settings.authState.waitingCode',
+    waiting_password: 'settings.authState.waitingPassword',
+    success: 'settings.authState.success',
+    error: 'settings.authState.error',
+    not_required: 'settings.authState.notRequired',
+  } as const
   const authSuccess = auth.data?.state === 'success'
 
   return (
@@ -95,6 +161,10 @@ export function SettingsPage() {
             <Settings size={16} />
             {t('settings.advanced')}
           </TabsTrigger>
+          <TabsTrigger value="about">
+            <Info size={16} />
+            {t('settings.about')}
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="session" className="outline-none">
           <div
@@ -106,7 +176,12 @@ export function SettingsPage() {
             <Panel
               title={t('settings.telegramSession')}
               meta={
-                <Badge tone={authSuccess ? 'green' : 'gray'}>{auth.data?.state ?? 'unknown'}</Badge>
+                <Badge tone={authSuccess ? 'green' : auth.data?.state === 'error' ? 'red' : 'gray'}>
+                  {t(
+                    authStateLabels[auth.data?.state as keyof typeof authStateLabels] ??
+                      'settings.authState.unknown',
+                  )}
+                </Badge>
               }
             >
               <div
@@ -154,10 +229,25 @@ export function SettingsPage() {
                 <Button icon={KeyRound} onClick={() => void startAuth()}>
                   {t('settings.startAuth')}
                 </Button>
-                <Button variant="danger" icon={Trash2} onClick={() => setClearConfirmOpen(true)}>
+                <Button variant="danger" icon={Trash2} onClick={() => void handleClearSession()}>
                   {t('settings.clearSession')}
                 </Button>
+                {activeAccount ? (
+                  <Button variant="danger" icon={Trash2} onClick={() => void handleDeleteAccount()}>
+                    {t('accounts.delete')}
+                  </Button>
+                ) : null}
               </div>
+              {deleteAccount.error ? (
+                <p
+                  className={cn(
+                    'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
+                    'text-[13px] text-rose-700',
+                  )}
+                >
+                  {messageFrom(deleteAccount.error)}
+                </p>
+              ) : null}
             </Panel>
             <Panel title={t('settings.backup')} meta={<span>{t('settings.backupMeta')}</span>}>
               <div
@@ -242,16 +332,118 @@ export function SettingsPage() {
             </div>
           </Panel>
         </TabsContent>
+        <TabsContent value="about" className="outline-none">
+          <Panel title={t('settings.about')}>
+            <div
+              className={cn(
+                'flex items-center gap-3 rounded-[5px] border border-slate-100',
+                'bg-slate-50 p-3',
+              )}
+            >
+              <span
+                className={cn(
+                  'grid size-11 shrink-0 place-items-center rounded-[5px] border',
+                  'border-blue-100 bg-blue-50 text-blue-600',
+                )}
+              >
+                <Github size={24} />
+              </span>
+              <div className="min-w-0">
+                <strong className="text-[13px] text-slate-700">TeleRelay</strong>
+                <p className="mt-1 text-[13px] leading-4 text-slate-500">
+                  {t('settings.versionLabel', { version: meta.data?.version ?? '-' })}
+                  {meta.data?.commit ? ` (${meta.data.commit})` : ''}
+                </p>
+              </div>
+            </div>
+            <div className="mt-4">
+              <a
+                href={meta.data?.repository}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+              >
+                {t('settings.repository')}
+                <ExternalLink size={14} />
+              </a>
+            </div>
+            <div className="mt-5 border-t border-slate-100 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <strong className="text-[13px] text-slate-700">
+                    {t('settings.updateCheck')}
+                  </strong>
+                  <p className="mt-1 text-[13px] leading-4 text-slate-500">
+                    {t('settings.updateCheckDetail')}
+                  </p>
+                </div>
+                <Button
+                  icon={RefreshCw}
+                  onClick={() => checkUpdate.mutate()}
+                  disabled={checkUpdate.isPending}
+                >
+                  {t(checkUpdate.isPending ? 'settings.checking' : 'settings.checkUpdate')}
+                </Button>
+              </div>
+              {checkUpdate.isError ? (
+                <p
+                  className={cn(
+                    'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
+                    'text-[13px] text-rose-700',
+                  )}
+                >
+                  {t('settings.checkFailed')}
+                </p>
+              ) : checkUpdate.data ? (
+                checkUpdate.data.error ? (
+                  <p
+                    className={cn(
+                      'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
+                      'text-[13px] text-rose-700',
+                    )}
+                  >
+                    {t('settings.checkFailed')}: {checkUpdate.data.error}
+                  </p>
+                ) : checkUpdate.data.update_available ? (
+                  <div
+                    className={cn(
+                      'mt-3 flex flex-wrap items-center justify-between gap-3 rounded-[5px]',
+                      'border border-amber-100 bg-amber-50 p-3 text-[13px] text-amber-800',
+                    )}
+                  >
+                    <span>
+                      {t('settings.updateAvailable', {
+                        version:
+                          checkUpdate.data.latest_version ?? checkUpdate.data.latest_tag ?? '',
+                      })}
+                    </span>
+                    {checkUpdate.data.release_url ? (
+                      <a
+                        href={checkUpdate.data.release_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-semibold text-amber-700 hover:underline"
+                      >
+                        {t('settings.viewRelease')}
+                        <ExternalLink size={13} />
+                      </a>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p
+                    className={cn(
+                      'mt-3 rounded-[5px] border border-emerald-100 bg-emerald-50 p-2',
+                      'text-[13px] text-emerald-700',
+                    )}
+                  >
+                    {t('settings.upToDate')}
+                  </p>
+                )
+              ) : null}
+            </div>
+          </Panel>
+        </TabsContent>
       </Tabs>
-      <ConfirmDialog
-        open={clearConfirmOpen}
-        onOpenChange={setClearConfirmOpen}
-        title={t('settings.clearTitle')}
-        description={t('settings.clearDescription')}
-        confirmLabel={t('settings.clearSession')}
-        pending={clearSession.isPending}
-        onConfirm={() => clearSession.mutate()}
-      />
     </>
   )
 }

@@ -1,6 +1,7 @@
 """Async Telegram user authentication challenge state."""
 
 import asyncio
+from collections.abc import Callable
 from typing import Optional
 
 from backend.i18n import t
@@ -17,13 +18,18 @@ class AuthManager:
     the value, so no cross-thread queue or second event loop is needed.
     """
 
-    def __init__(self, input_timeout: int = 300):
+    def __init__(
+        self,
+        input_timeout: int = 300,
+        on_state_change: Callable[[str, str], None] | None = None,
+    ):
         self._auth_state = "idle"
         self._error_message = ""
         self._user_info = ""
         self._input_timeout = input_timeout
         self._pending_kind: Optional[str] = None
         self._pending_future: Optional[asyncio.Future[str]] = None
+        self._on_state_change = on_state_change
 
     def get_state(self) -> dict:
         return {
@@ -37,6 +43,8 @@ class AuthManager:
         self._auth_state = state
         self._error_message = error
         logger.debug(t("log.auth.state_updated", state=state, error=f"({error})" if error else ""))
+        if self._on_state_change:
+            self._on_state_change(state, error)
 
     def set_user_info(self, user_info: str) -> None:
         self._user_info = user_info

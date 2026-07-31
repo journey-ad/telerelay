@@ -650,7 +650,7 @@ export function TelegramPreviewPage() {
   const accounts = useQuery({
     queryKey: ['telegram-accounts'],
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
-    refetchInterval: 5000,
+    refetchInterval: 30_000,
   })
   const active = accounts.data?.find((account) => account.active)
   const accountId = active?.id ?? ''
