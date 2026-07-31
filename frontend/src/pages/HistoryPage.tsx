@@ -149,7 +149,11 @@ export function HistoryPage() {
                   <td>
                     <Linkify
                       as="p"
-                      options={{ target: '_blank', rel: 'noopener noreferrer', className: 'linkified' }}
+                      options={{
+                        target: '_blank',
+                        rel: 'noopener noreferrer',
+                        className: 'linkified',
+                      }}
                       className="m-0 line-clamp-2 max-w-108 leading-4"
                     >
                       {item.content || t('history.noText')}

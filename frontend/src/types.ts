@@ -268,6 +268,7 @@ export interface UpdateInfo {
   homepage: string | null
   repository: string | null
   image: string | null
+  commit: string | null
   error: string | null
 }
 

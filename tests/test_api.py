@@ -223,12 +223,14 @@ class ApiContractTests(unittest.TestCase):
                 update_available=True,
                 release_url="https://github.com/journey-ad/telerelay/releases/tag/v2.1.0",
                 published_at="2026-07-31T00:00:00Z",
+                commit="abcdef0",
             ),
         ):
             body = self.client.get("/api/v1/update-check").json()
         self.assertEqual(body["current_version"], "2.0.0")
         self.assertEqual(body["latest_tag"], "v2.1.0")
         self.assertTrue(body["update_available"])
+        self.assertEqual(body["commit"], "abcdef0")
         self.assertIsNone(body["error"])
 
     def test_update_check_reports_failure_contract(self):

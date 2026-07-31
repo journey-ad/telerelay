@@ -79,6 +79,7 @@ class UpdateInfo:
     homepage: str | None = None
     repository: str | None = None
     image: str | None = None
+    commit: str | None = None
     error: str | None = None
 
     def to_dict(self) -> dict:
@@ -92,6 +93,7 @@ class UpdateInfo:
             "homepage": self.homepage,
             "repository": self.repository,
             "image": self.image,
+            "commit": self.commit,
             "error": self.error,
         }
 
@@ -122,5 +124,6 @@ def check_update(timeout: float = 8.0) -> UpdateInfo:
     info.homepage = release.get("homepage")
     info.repository = release.get("repository")
     info.image = release.get("image")
+    info.commit = release.get("commit")
     info.update_available = latest_version > _version_tuple(current)
     return info

@@ -90,6 +90,7 @@ class UpdateCheckTests(unittest.TestCase):
         release = {
             "version": "v2.1.0",
             "tag_name": "v2.1.0",
+            "commit": "abcdef0",
             "date": "2026-07-31",
             "published_at": "2026-07-31T00:00:00Z",
             "url": "https://github.com/journey-ad/telerelay/releases/tag/v2.1.0",
@@ -102,6 +103,7 @@ class UpdateCheckTests(unittest.TestCase):
         ):
             info = check_update()
         self.assertTrue(info.update_available)
+        self.assertEqual(info.commit, "abcdef0")
         self.assertEqual(info.latest_tag, "v2.1.0")
         self.assertEqual(info.latest_version, "2.1.0")
         self.assertEqual(info.published_at, "2026-07-31")
