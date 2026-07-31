@@ -1,5 +1,6 @@
 """FastAPI entry point for the TeleRelay control plane."""
 
+import argparse
 import asyncio
 import logging
 import threading
@@ -144,6 +145,13 @@ app = create_app()
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the TeleRelay API server")
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="reload the server when backend Python files change",
+    )
+    args = parser.parse_args()
     config = create_config()
     uvicorn.run(
         "backend.main:app",
@@ -151,6 +159,8 @@ def main() -> None:
         port=config.web_port,
         workers=1,
         log_config=None,
+        reload=args.reload,
+        reload_dirs=[str(Path(__file__).resolve().parent)] if args.reload else None,
     )
 
 

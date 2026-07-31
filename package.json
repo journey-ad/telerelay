@@ -1,0 +1,18 @@
+{
+  "name": "telerelay",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others --names backend,frontend --prefix-colors blue,green \"pnpm dev:backend\" \"pnpm dev:frontend\"",
+    "dev:backend": "uv run --with-requirements requirements.txt python -m backend.main --reload",
+    "dev:frontend": "pnpm --dir frontend dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

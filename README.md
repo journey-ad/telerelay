@@ -61,34 +61,28 @@ Open `http://localhost:8080`. Configuration, sessions, databases, exports, and l
 
 ### Local Build
 
-Requires Python 3.11+, Node.js 22+, pnpm.
+Requires Python 3.11+, Node.js 22+, and pnpm. `uv` is recommended for local development.
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cd frontend
 pnpm install --frozen-lockfile
-pnpm run build
-cd ..
+pnpm --dir frontend build
 python -m backend.main
 ```
 
 Open `http://localhost:8080`.
 
-### Frontend Dev
+### Local Development
 
 ```bash
-python -m backend.main       # terminal 1
+pnpm dev
 ```
 
-```bash
-cd frontend
-pnpm install --frozen-lockfile
-pnpm run dev                 # terminal 2
-```
+This uses `uv` to prepare Python dependencies and `concurrently` to manage both servers. Backend code changes trigger Uvicorn reloads, while Vite HMR updates the frontend immediately. Vite defaults to `http://localhost:5173` and selects the next available port when needed; `/api` is proxied to the backend port configured by `WEB_PORT` in the root `.env` file. Make sure another development environment is not already running before starting it.
 
-Vite serves port 5173 and proxies `/api` to `http://127.0.0.1:8080`.
+Use `pnpm dev:backend` and `pnpm dev:frontend` to run either side separately.
 
 ## Configuration
 

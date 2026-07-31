@@ -35,8 +35,8 @@ README.md
 *.md
 docs/
 
-# Frontend build artifacts
-frontend/node_modules/
+# Node and frontend build artifacts
+**/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
 

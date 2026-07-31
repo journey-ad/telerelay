@@ -61,34 +61,28 @@ docker compose up -d --build
 
 ### 本地构建
 
-需要 Python 3.11+、Node.js 22+、pnpm。
+需要 Python 3.11+、Node.js 22+、pnpm。本地开发推荐安装 `uv`。
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cd frontend
 pnpm install --frozen-lockfile
-pnpm run build
-cd ..
+pnpm --dir frontend build
 python -m backend.main
 ```
 
 打开 `http://localhost:8080`。
 
-### 前端开发
+### 本地开发
 
 ```bash
-python -m backend.main       # 终端 1
+pnpm dev
 ```
 
-```bash
-cd frontend
-pnpm install --frozen-lockfile
-pnpm run dev                 # 终端 2
-```
+该命令通过 `uv` 准备 Python 依赖，并由 `concurrently` 同时管理后端和前端。后端代码变更会触发 Uvicorn 自动重载，前端由 Vite HMR 即时更新。Vite 默认在 `http://localhost:5173` 提供服务，端口被占用时会自动顺延；`/api` 根据根目录 `.env` 的 `WEB_PORT` 代理到后端。启动前请确保没有重复运行开发环境。
 
-Vite 在 `http://localhost:5173` 提供服务，`/api` 代理到 `http://127.0.0.1:8080`。
+也可以用 `pnpm dev:backend`、`pnpm dev:frontend` 分别启动。
 
 ## 配置
 
