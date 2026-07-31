@@ -132,6 +132,10 @@ class FakeExports:
     def create_preview_token(self, zip_path):
         return "preview-token-123"
 
+    def delete_run(self, run_id):
+        if int(run_id) == 999:
+            raise KeyError("missing")
+
 
 def make_app(context: ApplicationContext) -> FastAPI:
     app = FastAPI()
@@ -245,6 +249,14 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["token"], "preview-token-123")
+
+    def test_delete_export_run_contract(self):
+        ok = self.client.delete("/api/v1/exports/runs/1")
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["code"], "export_run_deleted")
+
+        missing = self.client.delete("/api/v1/exports/runs/999")
+        self.assertEqual(missing.status_code, 404)
 
     def test_queue_preview_contract_and_limit_validation(self):
         calls = []

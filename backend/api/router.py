@@ -801,6 +801,18 @@ async def export_runs(
     return [_dataclass(run) for run in context.exports.list_runs(limit)]
 
 
+@router.delete("/exports/runs/{run_id}", response_model=ApiMessage)
+async def delete_export_run(
+    run_id: int,
+    context: ApplicationContext = Depends(get_context),
+) -> ApiMessage:
+    try:
+        context.exports.delete_run(run_id)
+    except KeyError as exc:
+        raise _error("not_found", "Export run does not exist", 404) from exc
+    return ApiMessage(code="export_run_deleted")
+
+
 @router.get("/exports/file")
 async def export_file(
     path: str,

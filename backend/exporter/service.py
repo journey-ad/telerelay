@@ -989,6 +989,20 @@ class ExportService:
     def list_runs(self, limit: int = 50):
         return self.store.list_runs(limit)
 
+    def delete_run(self, run_id: int) -> None:
+        run_id = int(run_id)
+        run = self.store.get_run(run_id)
+        if run is None:
+            raise KeyError(f"Export run {run_id} does not exist")
+        roots = [self.export_root.resolve(), self.message_db_root.resolve()]
+        for file in run.files:
+            candidate = Path(file).resolve()
+            if candidate.is_file() and any(
+                candidate == root or root in candidate.parents for root in roots
+            ):
+                candidate.unlink(missing_ok=True)
+        self.store.delete_run(run_id)
+
     @staticmethod
     def _html_labels() -> Dict[str, str]:
         keys = (

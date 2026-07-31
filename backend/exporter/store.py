@@ -298,3 +298,17 @@ class ExportStore:
                 (max(1, min(int(limit), 500)),),
             ).fetchall()
         return [self._run_from_row(row) for row in rows]
+
+    def get_run(self, run_id: int) -> Optional[ExportRun]:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM export_runs WHERE id = ?",
+                (int(run_id),),
+            ).fetchone()
+        return self._run_from_row(row) if row else None
+
+    def delete_run(self, run_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute("DELETE FROM export_runs WHERE id = ?", (int(run_id),))
+            if cursor.rowcount == 0:
+                raise KeyError(f"Export run {run_id} does not exist")

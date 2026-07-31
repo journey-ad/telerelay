@@ -530,7 +530,10 @@
       "failed": "执行失败",
       "cancelled": "已取消"
     },
-    "allHistoryLabel": "全部历史"
+    "allHistoryLabel": "全部历史",
+    "deleteRun": "删除记录",
+    "deleteRunTitle": "删除导出记录",
+    "deleteRunConfirm": "该导出记录及其导出文件将被永久删除"
   },
   "telegramPreview": {
     "eyebrow": "Telegram 阅读器",

@@ -99,6 +99,18 @@ function jobLabel(job: ExportJob, t: TFunction): string {
   return job.id
 }
 
+function runFormats(files: string[]): string[] {
+  const formats = new Set<string>()
+  for (const file of files) {
+    const name = file.split('/').pop() ?? file
+    if (name.endsWith('.html.zip')) formats.add('HTML')
+    else if (name.endsWith('.json')) formats.add('JSON')
+    else if (name.endsWith('.csv')) formats.add('CSV')
+    else if (name.endsWith('.sqlite3')) formats.add('SQLite')
+  }
+  return [...formats]
+}
+
 function jobProgress(job: ExportJob): number {
   if (job.status === 'completed') return 100
   if (job.total) return Math.min(100, (job.processed / job.total) * 100)
@@ -130,9 +142,11 @@ function ExportFilesRow({ files }: { files: string[] }) {
       <div className="flex flex-wrap items-center gap-2">
         <DownloadButton files={files.map(downloadOption)} />
         {previewFile ? (
-          <Button icon={Eye} onClick={() => void openPreview(previewFile)}>
-            {t('exports.preview')}
-          </Button>
+          <IconButton
+            label={t('exports.preview')}
+            icon={Eye}
+            onClick={() => void openPreview(previewFile)}
+          />
         ) : null}
       </div>
       {previewUrl ? (
@@ -197,6 +211,20 @@ export function ExportsPage() {
     queryFn: () => request<ExportRun[]>('/api/v1/exports/runs?limit=30'),
     refetchInterval: 10_000,
   })
+  const deleteRun = useMutation({
+    mutationFn: (runId: number) => request(`/api/v1/exports/runs/${runId}`, json('DELETE')),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['export-runs'] })
+    },
+  })
+  async function handleDeleteRun(run: ExportRun) {
+    await confirm({
+      title: t('exports.deleteRunTitle'),
+      description: t('exports.deleteRunConfirm'),
+      confirmLabel: t('exports.deleteRun'),
+      onConfirm: () => deleteRun.mutateAsync(run.id),
+    })
+  }
   const job = useQuery({
     queryKey: ['export-job', jobId],
     queryFn: () => request<ExportJob>(`/api/v1/exports/jobs/${jobId}`),
@@ -586,7 +614,8 @@ export function ExportsPage() {
                     <th>{t('exports.columns.chat')}</th>
                     <th>{t('exports.columns.status')}</th>
                     <th>{t('exports.columns.messages')}</th>
-                    <th>{t('exports.columns.files')}</th>
+                    <th>{t('exports.columns.format')}</th>
+                    <th>{t('common.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -596,7 +625,9 @@ export function ExportsPage() {
                         {shortDate(run.started_at)}
                       </td>
                       <td>
-                        {t(`exports.runType.${run.run_type}`, { defaultValue: run.run_type })}
+                        <Badge tone="gray">
+                          {t(`exports.runType.${run.run_type}`, { defaultValue: run.run_type })}
+                        </Badge>
                       </td>
                       <td>{run.chat_title || run.chat_id || '-'}</td>
                       <td>
@@ -614,8 +645,22 @@ export function ExportsPage() {
                       </td>
                       <td>{run.message_count}</td>
                       <td>
+                        <div className="flex flex-wrap gap-1">
+                          {runFormats(run.files).map((format) => (
+                            <Badge key={format} tone="blue">
+                              {format}
+                            </Badge>
+                          ))}
+                        </div>
+                      </td>
+                      <td>
                         <div className="flex justify-end gap-1">
                           <ExportFilesRow files={run.files} />
+                          <IconButton
+                            label={t('exports.deleteRun')}
+                            icon={Trash2}
+                            onClick={() => void handleDeleteRun(run)}
+                          />
                         </div>
                       </td>
                     </tr>
