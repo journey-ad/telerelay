@@ -107,10 +107,10 @@ export function LogsPage() {
             onValueChange={setLevelFilter}
             options={[
               { value: 'all', label: t('logs.allLevels') },
-              { value: 'info', label: 'Info' },
-              { value: 'warning', label: 'Warning' },
-              { value: 'error', label: 'Error' },
-              { value: 'debug', label: 'Debug' },
+              { value: 'info', label: t('logs.level.info') },
+              { value: 'warning', label: t('logs.level.warning') },
+              { value: 'error', label: t('logs.level.error') },
+              { value: 'debug', label: t('logs.level.debug') },
             ]}
           />
         </div>

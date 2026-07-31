@@ -399,6 +399,12 @@
     "refresh": "Refresh logs",
     "filter": "Filter log content",
     "allLevels": "All levels",
+    "level": {
+      "info": "Info",
+      "warning": "Warning",
+      "error": "Error",
+      "debug": "Debug"
+    },
     "resume": "Resume scrolling",
     "pause": "Pause scrolling",
     "paused": "Paused",

@@ -265,7 +265,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             }
           >
             <Icon size={19} />
-            <span>{item.label}</span>
+            <span>{t(item.label)}</span>
           </NavLink>
         ))}
         <button

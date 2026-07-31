@@ -399,6 +399,12 @@
     "refresh": "刷新日志",
     "filter": "筛选日志内容",
     "allLevels": "全部级别",
+    "level": {
+      "info": "信息",
+      "warning": "警告",
+      "error": "错误",
+      "debug": "调试"
+    },
     "resume": "继续滚动",
     "pause": "暂停滚动",
     "paused": "已暂停",
