@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Filter,
   Gauge,
+  ListChecks,
   Minus,
   Pause,
   Play,
@@ -17,7 +18,7 @@ import {
   TimerReset,
   Trophy,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Area,
@@ -34,7 +35,7 @@ import {
 import { json, request } from '../api/client'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
-import type { BotStatus, RelayEvent, Stats } from '../types'
+import type { BotStatus, ForwardQueueItem, RelayEvent, Stats } from '../types'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 
@@ -61,7 +62,9 @@ const chartTooltipStyle = {
   boxShadow: '0 12px 32px rgba(22, 63, 116, .12)',
   fontSize: 11,
 }
-const liveEventLimit = 12
+const liveEventLimit = 50
+const initialEventLimit = 10
+const queuePreviewLimit = 50
 const intensitySampleLimit = 48
 const eventTypeKeys = {
   ready: 'dashboard.events.types.ready',
@@ -70,6 +73,9 @@ const eventTypeKeys = {
   stats: 'dashboard.events.types.stats',
   'telegram-account': 'dashboard.events.types.telegramAccount',
   'telegram-auth': 'dashboard.events.types.telegramAuth',
+  forward: 'dashboard.events.types.forward',
+  'button-action': 'dashboard.events.types.buttonAction',
+  'scheduled-export': 'dashboard.events.types.scheduledExport',
 } as const
 const eventActionKeys = {
   create: 'dashboard.events.actions.create',
@@ -83,7 +89,34 @@ const eventActionKeys = {
   code: 'dashboard.events.actions.code',
   password: 'dashboard.events.actions.password',
 } as const
-const dashboardEventTypes = new Set(['bot', 'stats', 'telegram-account', 'telegram-auth'])
+const eventStatusKeys = {
+  completed: 'dashboard.events.statuses.completed',
+  retrying: 'dashboard.events.statuses.retrying',
+  delayed: 'dashboard.events.statuses.delayed',
+  failed: 'dashboard.events.statuses.failed',
+  started: 'dashboard.events.statuses.started',
+  skipped: 'dashboard.events.statuses.skipped',
+  cancelled: 'dashboard.events.statuses.cancelled',
+} as const
+const queueStatusKeys = {
+  processing: 'dashboard.queuePreview.statuses.processing',
+  waiting: 'dashboard.queuePreview.statuses.waiting',
+  pending: 'dashboard.queuePreview.statuses.pending',
+} as const
+const dashboardEventTypeList = [
+  'bot',
+  'stats',
+  'telegram-account',
+  'telegram-auth',
+  'forward',
+  'button-action',
+  'scheduled-export',
+]
+const dashboardEventTypes = new Set(dashboardEventTypeList)
+const recentEventsPath = `/api/v1/events/recent?${new URLSearchParams([
+  ['limit', String(initialEventLimit)],
+  ...dashboardEventTypeList.map((type) => ['types', type]),
+]).toString()}`
 
 function eventTypeLabel(type: string, t: TFunction): string {
   const key = eventTypeKeys[type as keyof typeof eventTypeKeys]
@@ -100,7 +133,73 @@ function eventDetail(event: RelayEvent, t: TFunction): string {
     return key ? t(key) : action
   }
 
+  const statusValue = event.payload.status
+  const statusKey =
+    typeof statusValue === 'string'
+      ? eventStatusKeys[statusValue as keyof typeof eventStatusKeys]
+      : undefined
+  const status = statusKey ? t(statusKey) : t('dashboard.statusUpdate')
+  if (event.type === 'forward') {
+    const sourceChatId = String(event.payload.source_chat_id ?? '-')
+    const sourceChatName = event.payload.source_chat_name
+    const sourceChat =
+      typeof sourceChatName === 'string' && sourceChatName
+        ? `${sourceChatName} (${sourceChatId})`
+        : sourceChatId
+    return t('dashboard.events.details.forward', {
+      rule: String(event.payload.rule ?? '-'),
+      source: `${sourceChat}/${String(event.payload.source_message_id ?? '-')}`,
+      status,
+    })
+  }
+  if (event.type === 'button-action') {
+    const buttons = Array.isArray(event.payload.buttons)
+      ? event.payload.buttons.map(String).join(', ')
+      : '-'
+    return t('dashboard.events.details.buttonAction', {
+      rule: String(event.payload.rule ?? '-'),
+      buttons,
+      status,
+    })
+  }
+  if (event.type === 'scheduled-export') {
+    return t('dashboard.events.details.scheduledExport', {
+      task: String(event.payload.task_name ?? event.payload.task_id ?? '-'),
+      chat: String(event.payload.chat_title ?? event.payload.chat_id ?? '-'),
+      status,
+    })
+  }
+
   return t('dashboard.statusUpdate')
+}
+
+function eventMarkerClass(type: string): string {
+  if (type === 'forward') return 'border-blue-100 bg-blue-500'
+  if (type === 'button-action') return 'border-cyan-100 bg-cyan-500'
+  if (type === 'scheduled-export') return 'border-amber-100 bg-amber-500'
+  return 'border-slate-200 bg-slate-400'
+}
+
+function queueState(item: ForwardQueueItem): 'processing' | 'waiting' | 'pending' {
+  if (item.status === 'processing') return 'processing'
+  return item.available_at > Date.now() / 1000 ? 'waiting' : 'pending'
+}
+
+function queueTime(value: number, locale: string): string {
+  return new Date(value * 1000).toLocaleString(locale, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+function queueSource(item: ForwardQueueItem): string {
+  const chat = item.source_chat_name
+    ? `${item.source_chat_name} (${item.source_chat_id})`
+    : String(item.source_chat_id)
+  return `${chat}/${item.source_message_id}`
 }
 
 function shouldStoreDashboardEvent(event: RelayEvent): boolean {
@@ -213,19 +312,43 @@ export function DashboardPage() {
   const locale = i18n.resolvedLanguage ?? 'zh-CN'
   const client = useQueryClient()
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('14day')
+  const [queuePreviewOpen, setQueuePreviewOpen] = useState(false)
   const reportDays = reportPeriod === 'all' ? null : periodDays[reportPeriod]
   const allTime = reportDays === null
   const statusQuery = useQuery({
     queryKey: ['bot-status'],
     queryFn: () => request<BotStatus>('/api/v1/bot/status'),
   })
+  const queueQuery = useQuery({
+    queryKey: ['forward-queue-items'],
+    queryFn: () => request<ForwardQueueItem[]>(`/api/v1/queue/items?limit=${queuePreviewLimit}`),
+    enabled: queuePreviewOpen,
+    refetchInterval: queuePreviewOpen ? 5_000 : false,
+  })
   const statsQuery = useQuery({
     queryKey: ['stats', reportPeriod],
     queryFn: () => request<Stats>(`/api/v1/stats?date_limit=${reportPeriod}`),
     refetchInterval: 15_000,
   })
-  const { recent, connected } = useEvents(undefined, {
+  const eventHistoryQuery = useQuery({
+    queryKey: ['dashboard-events', initialEventLimit],
+    queryFn: () => request<RelayEvent[]>(recentEventsPath),
+    refetchOnMount: 'always',
+    gcTime: 0,
+  })
+  const handleDashboardEvent = useCallback(
+    (event: RelayEvent) => {
+      if (event.type === 'forward') {
+        void client.invalidateQueries({ queryKey: ['forward-queue-items'] })
+        void client.invalidateQueries({ queryKey: ['bot-status'] })
+        void client.invalidateQueries({ queryKey: ['stats'] })
+      }
+    },
+    [client],
+  )
+  const { recent, connected } = useEvents(handleDashboardEvent, {
     maxRecent: liveEventLimit,
+    initialRecent: eventHistoryQuery.data,
     shouldStore: shouldStoreDashboardEvent,
   })
   const control = useMutation({
@@ -244,8 +367,9 @@ export function DashboardPage() {
         })
       : t(status.is_connected ? 'dashboard.telegramConnected' : 'dashboard.telegramDisconnected')
   const runtimeStats = status.stats ?? {}
+  const queueItems = queueQuery.data ?? []
   const activeQueue = Object.entries(status.queue?.counts ?? {})
-    .filter(([key]) => key !== 'completed')
+    .filter(([key]) => key === 'pending' || key === 'processing')
     .reduce((sum, [, value]) => sum + value, 0)
   const report = useMemo(() => {
     const source = statsQuery.data?.daily ?? []
@@ -296,6 +420,7 @@ export function DashboardPage() {
       trend: report.forwardedChange,
       hint: allTime ? t('dashboard.allTimeTotal') : undefined,
       tone: 'blue',
+      queueAction: false,
     },
     {
       label: t('dashboard.periodFiltered'),
@@ -304,6 +429,7 @@ export function DashboardPage() {
       trend: report.filteredChange,
       hint: allTime ? t('dashboard.allTimeTotal') : undefined,
       tone: 'amber',
+      queueAction: false,
     },
     {
       label: t('dashboard.totalTraffic'),
@@ -312,6 +438,7 @@ export function DashboardPage() {
       trend: report.change,
       hint: allTime ? t('dashboard.allTimeTotal') : undefined,
       tone: 'cyan',
+      queueAction: false,
     },
     {
       label: t('dashboard.queuePending'),
@@ -320,6 +447,7 @@ export function DashboardPage() {
       trend: undefined,
       hint: t('dashboard.liveBacklog'),
       tone: 'green',
+      queueAction: true,
     },
   ] as const
 
@@ -350,7 +478,7 @@ export function DashboardPage() {
       />
 
       <div className="mb-3 grid grid-cols-4 gap-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
-        {metrics.map(({ label, value, icon: Icon, trend, hint, tone }) => (
+        {metrics.map(({ label, value, icon: Icon, trend, hint, tone, queueAction }) => (
           <article
             className={cn(
               'grid min-w-0 grid-cols-[40px_1fr] grid-rows-[auto_auto_auto] gap-x-3',
@@ -370,23 +498,164 @@ export function DashboardPage() {
             <strong className="font-display my-0.5 text-[23px] text-slate-700">
               {formatNumber(value)}
             </strong>
-            <small
-              className={cn(
-                'flex items-center gap-0.5 text-xs',
-                trend === undefined
-                  ? 'text-slate-400'
-                  : trend > 0
-                    ? 'text-emerald-600'
-                    : trend < 0
-                      ? 'text-rose-500'
-                      : 'text-slate-400',
-              )}
-            >
-              <TrendLabel value={trend} fallback={hint} t={t} />
-            </small>
+            {queueAction ? (
+              <small className="flex items-center gap-1.5 text-xs text-slate-400">
+                <span>{hint}</span>
+                <button
+                  type="button"
+                  className="rounded border-0 bg-transparent p-0 text-xs text-blue-600 transition hover:text-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                  aria-expanded={queuePreviewOpen}
+                  aria-controls="forward-queue-preview"
+                  onClick={() => setQueuePreviewOpen((current) => !current)}
+                >
+                  {t('dashboard.queuePreview.show')}
+                </button>
+              </small>
+            ) : (
+              <small
+                className={cn(
+                  'flex items-center gap-0.5 text-xs',
+                  trend === undefined
+                    ? 'text-slate-400'
+                    : trend > 0
+                      ? 'text-emerald-600'
+                      : trend < 0
+                        ? 'text-rose-500'
+                        : 'text-slate-400',
+                )}
+              >
+                <TrendLabel value={trend} fallback={hint} t={t} />
+              </small>
+            )}
           </article>
         ))}
       </div>
+
+      {queuePreviewOpen ? (
+        <Panel
+          className="mb-3"
+          title={t('dashboard.queuePreview.title')}
+          meta={
+            <button
+              type="button"
+              className="rounded border-0 bg-transparent p-0 text-xs text-slate-400 transition hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+              onClick={() => setQueuePreviewOpen(false)}
+            >
+              {t('dashboard.queuePreview.hide')}
+            </button>
+          }
+        >
+          <div id="forward-queue-preview">
+            <p className="mb-3 text-right text-xs text-slate-400">
+              {t('dashboard.queuePreview.meta', {
+                shown: queueItems.length,
+                total: activeQueue,
+              })}
+            </p>
+            {queueQuery.isPending ? (
+              <div className="py-8 text-center text-[13px] text-slate-400">
+                {t('dashboard.queuePreview.loading')}
+              </div>
+            ) : queueQuery.error ? (
+              <EmptyState
+                icon={ListChecks}
+                title={t('dashboard.queuePreview.loadFailed')}
+                detail={messageFrom(queueQuery.error)}
+              />
+            ) : queueItems.length ? (
+              <div className="overflow-x-auto">
+                <div className="min-w-225">
+                  <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
+                    <span>{t('dashboard.queuePreview.columns.account')}</span>
+                    <span>{t('dashboard.queuePreview.columns.rule')}</span>
+                    <span>{t('dashboard.queuePreview.columns.source')}</span>
+                    <span>{t('dashboard.queuePreview.columns.status')}</span>
+                    <span>{t('dashboard.queuePreview.columns.progress')}</span>
+                    <span className="text-right">
+                      {t('dashboard.queuePreview.columns.retries')}
+                    </span>
+                    <span>{t('dashboard.queuePreview.columns.waiting')}</span>
+                  </div>
+                  {queueItems.map((item) => {
+                    const state = queueState(item)
+                    return (
+                      <div
+                        className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)] items-center gap-3 border-b border-slate-100 py-3 last:border-0"
+                        key={`${item.account_id}-${item.id}`}
+                      >
+                        <div className="min-w-0">
+                          <strong className="block truncate text-[13px] text-slate-700">
+                            {item.account_label}
+                          </strong>
+                          <small className="mt-0.5 block truncate text-xs text-slate-400">
+                            {item.account_id}
+                          </small>
+                        </div>
+                        <strong className="truncate text-[13px] text-slate-600">
+                          {item.rule_name}
+                        </strong>
+                        <span className="font-mono text-xs text-slate-500">
+                          {queueSource(item)}
+                        </span>
+                        <span
+                          className={cn(
+                            'w-fit rounded px-2 py-1 text-xs font-semibold',
+                            state === 'processing'
+                              ? 'bg-blue-50 text-blue-700'
+                              : state === 'waiting'
+                                ? 'bg-amber-50 text-amber-700'
+                                : 'bg-slate-100 text-slate-600',
+                          )}
+                        >
+                          {t(queueStatusKeys[state])}
+                        </span>
+                        <div className="min-w-0">
+                          <span className="mb-1 block text-xs text-slate-500">
+                            {t('dashboard.queuePreview.targetProgress', {
+                              current: Math.min(item.next_target_index, item.target_count),
+                              total: item.target_count,
+                            })}
+                          </span>
+                          <div className="h-1.5 overflow-hidden rounded-sm bg-slate-100">
+                            <i
+                              className="block h-full bg-blue-500"
+                              style={{
+                                width: `${item.target_count ? Math.min(100, (item.next_target_index / item.target_count) * 100) : 0}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <strong className="text-right text-xs text-slate-600">
+                          {item.failure_count}
+                        </strong>
+                        <div className="min-w-0">
+                          <span className="block text-xs text-slate-500">
+                            {queueTime(item.available_at, locale)}
+                          </span>
+                          {item.last_error ? (
+                            <small
+                              className="mt-0.5 block truncate text-xs text-rose-500"
+                              title={item.last_error}
+                            >
+                              {item.last_error}
+                            </small>
+                          ) : null}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                icon={ListChecks}
+                title={t('dashboard.queuePreview.empty')}
+                detail={t('dashboard.queuePreview.emptyDetail')}
+              />
+            )}
+          </div>
+        </Panel>
+      ) : null}
 
       <div
         className={cn(
@@ -869,15 +1138,17 @@ export function DashboardPage() {
           }
         >
           <div className="flex max-h-72 flex-col gap-3 overflow-y-auto overscroll-contain pr-1">
-            {recent.map((event, index) => (
+            {recent.map((event) => (
               <div
                 className={cn(
                   'grid grid-cols-[7px_1fr_auto] items-start gap-2 border-b',
                   'border-slate-100 pb-2.5 last:border-0',
                 )}
-                key={`${event.at}-${event.type}-${index}`}
+                key={event.id}
               >
-                <span className="mt-1 size-2 rounded-full border-2 border-blue-100 bg-blue-400" />
+                <span
+                  className={cn('mt-1 size-2 rounded-full border-2', eventMarkerClass(event.type))}
+                />
                 <div className="min-w-0">
                   <strong className="text-[13px] text-slate-600 uppercase">
                     {eventTypeLabel(event.type, t)}

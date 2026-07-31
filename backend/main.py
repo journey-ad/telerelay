@@ -45,16 +45,16 @@ async def lifespan(app: FastAPI):
 
     account_store = TelegramAccountStore() if config.session_type == "user" else None
     if account_store:
-        bot = TelegramRuntimeRegistry(config, account_store, auth_timeout=300)
+        bot = TelegramRuntimeRegistry(config, account_store, auth_timeout=300, events=events)
     else:
-        bot = BotManager(config)
+        bot = BotManager(config, events=events)
     bot.bind_loop(asyncio.get_running_loop())
     accounts = TelegramAccountService(account_store, bot) if account_store else None
     telegram_chats = TelegramChatService(bot, account_store) if account_store else None
     telegram_preview = TelegramPreviewService(bot, account_store) if account_store else None
     if accounts:
         bot.on_user_authenticated = accounts.update_identity
-    exports = ExportService(config, bot)
+    exports = ExportService(config, bot, events=events)
     scheduler = ExportScheduler(exports)
     rules = RuleService(config, bot)
     context = ApplicationContext(

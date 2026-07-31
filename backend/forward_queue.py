@@ -41,6 +41,7 @@ class ForwardQueueItem:
     rule_data: dict[str, Any]
     rule_fingerprint: str
     source_chat_id: int
+    source_chat_name: Optional[str]
     source_message_id: int
     sender_id: Optional[int]
     grouped_id: Optional[str]
@@ -89,6 +90,7 @@ class ForwardQueueStore:
                     rule_data TEXT NOT NULL,
                     rule_fingerprint TEXT NOT NULL,
                     source_chat_id INTEGER NOT NULL,
+                    source_chat_name TEXT,
                     source_message_id INTEGER NOT NULL,
                     sender_id INTEGER,
                     grouped_id TEXT,
@@ -124,6 +126,10 @@ class ForwardQueueStore:
                 conn.execute(
                     "ALTER TABLE forward_queue ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
                 )
+            if "source_chat_name" not in columns:
+                conn.execute(
+                    "ALTER TABLE forward_queue ADD COLUMN source_chat_name TEXT"
+                )
         try:
             self.db_path.chmod(0o600)
         except OSError:
@@ -138,6 +144,7 @@ class ForwardQueueStore:
             rule_data=json.loads(row["rule_data"]),
             rule_fingerprint=row["rule_fingerprint"],
             source_chat_id=row["source_chat_id"],
+            source_chat_name=row["source_chat_name"],
             source_message_id=row["source_message_id"],
             sender_id=row["sender_id"],
             grouped_id=row["grouped_id"],
@@ -161,6 +168,21 @@ class ForwardQueueStore:
         with self._lock, self._connect() as conn:
             return self._get(conn, item_id)
 
+    def list_active(self, limit: int = 50) -> list[ForwardQueueItem]:
+        """Return a bounded operational view of unfinished queue items."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM forward_queue
+                WHERE status IN ('pending', 'processing')
+                ORDER BY CASE status WHEN 'processing' THEN 0 ELSE 1 END,
+                         available_at ASC, id ASC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 100)),),
+            ).fetchall()
+            return [self._row_to_item(row) for row in rows]
+
     def enqueue(
         self,
         *,
@@ -169,6 +191,7 @@ class ForwardQueueStore:
         source_message_id: int,
         sender_id: Optional[int],
         grouped_id: Optional[int | str],
+        source_chat_name: Optional[str] = None,
         settle_seconds: float = 1.0,
     ) -> tuple[ForwardQueueItem, bool]:
         """Insert a message, merging subsequent updates from the same album."""
@@ -185,9 +208,9 @@ class ForwardQueueStore:
                 """
                 INSERT OR IGNORE INTO forward_queue
                 (dedup_key, rule_name, rule_data, rule_fingerprint, source_chat_id,
-                 source_message_id, sender_id, grouped_id, status, available_at,
-                 created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                 source_chat_name, source_message_id, sender_id, grouped_id, status,
+                 available_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
                 """,
                 (
                     dedup_key,
@@ -195,6 +218,7 @@ class ForwardQueueStore:
                     encoded_rule,
                     fingerprint,
                     int(source_chat_id),
+                    str(source_chat_name) if source_chat_name else None,
                     int(source_message_id),
                     sender_id,
                     group_text,
@@ -210,18 +234,40 @@ class ForwardQueueStore:
                     """
                     UPDATE forward_queue
                     SET source_message_id = MIN(source_message_id, ?),
+                        source_chat_name = COALESCE(?, source_chat_name),
                         sender_id = COALESCE(sender_id, ?),
                         available_at = CASE WHEN status = 'pending'
                             THEN MAX(available_at, ?) ELSE available_at END,
                         updated_at = ?
                     WHERE dedup_key = ? AND status = 'pending' AND next_target_index = 0
                     """,
-                    (int(source_message_id), sender_id, available_at, now, dedup_key),
+                    (
+                        int(source_message_id),
+                        str(source_chat_name) if source_chat_name else None,
+                        sender_id,
+                        available_at,
+                        now,
+                        dedup_key,
+                    ),
                 )
             item_id = conn.execute(
                 "SELECT id FROM forward_queue WHERE dedup_key = ?", (dedup_key,)
             ).fetchone()[0]
             return self._get(conn, item_id), inserted
+
+    def update_source_chat_name(self, item_id: int, source_chat_name: str) -> None:
+        name = str(source_chat_name).strip()
+        if not name:
+            return
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE forward_queue
+                SET source_chat_name = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (name, time.time(), item_id),
+            )
 
     def recover_processing(self) -> int:
         """Make jobs left in ``processing`` available after a crash/restart."""
@@ -420,6 +466,8 @@ class ForwardQueue:
         flood_wait_buffer: float = 1.0,
         poll_interval: float = 1.0,
         completed_retention_days: int = 7,
+        on_outcome: Callable[[ForwardQueueItem, str, Optional[Exception]], None]
+        | None = None,
     ):
         self.store = store
         self.processor = processor
@@ -428,6 +476,7 @@ class ForwardQueue:
         self.flood_wait_buffer = max(0.0, float(flood_wait_buffer))
         self.poll_interval = max(0.05, float(poll_interval))
         self.completed_retention_days = max(1, int(completed_retention_days))
+        self.on_outcome = on_outcome
         self._wake = asyncio.Event()
         self._stop = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
@@ -501,6 +550,16 @@ class ForwardQueue:
         except asyncio.TimeoutError:
             pass
 
+    def _notify_outcome(
+        self, item: ForwardQueueItem, status: str, error: Optional[Exception] = None
+    ) -> None:
+        if not self.on_outcome:
+            return
+        try:
+            self.on_outcome(item, status, error)
+        except Exception:
+            logger.exception("Forward queue outcome callback failed")
+
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
@@ -548,6 +607,7 @@ class ForwardQueue:
                     **self._log_fields(item),
                 )
             )
+            self._notify_outcome(item, "delayed", exc)
         except Exception as exc:
             failure_count = item.failure_count + 1
             if failure_count >= self.max_retries:
@@ -560,6 +620,7 @@ class ForwardQueue:
                         **self._log_fields(item),
                     )
                 )
+                self._notify_outcome(item, "failed", exc)
             else:
                 delay = min(
                     3600.0,
@@ -579,7 +640,9 @@ class ForwardQueue:
                         **self._log_fields(item),
                     )
                 )
+                self._notify_outcome(item, "retrying", exc)
         else:
             self.store.mark_completed(item.id)
+            self._notify_outcome(item, "completed")
             if post_delay:
                 await self._wait_post_delay(float(post_delay))

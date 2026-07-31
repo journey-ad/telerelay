@@ -243,7 +243,28 @@ export interface AppConfig {
   runtime: { session_type: string }
 }
 export interface RelayEvent {
+  id: number
   type: string
   payload: Record<string, unknown>
   at: string
+}
+
+export interface ForwardQueueItem {
+  id: number
+  account_id: string
+  account_label: string
+  rule_name: string
+  source_chat_id: number
+  source_chat_name?: string | null
+  source_message_id: number
+  grouped_id?: string | null
+  status: 'pending' | 'processing'
+  attempt_count: number
+  failure_count: number
+  next_target_index: number
+  target_count: number
+  available_at: number
+  last_error?: string | null
+  created_at: number
+  updated_at: number
 }

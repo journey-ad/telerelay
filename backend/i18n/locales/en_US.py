@@ -35,7 +35,6 @@ TRANSLATIONS = {
             "stopped": "Bot stopped",
             "main_error": "Bot main logic error: {error}",
             "message_received": "Message received - source={chat} ({chat_id}), sender={sender} ({sender_id}), content={preview}",
-            "message_filtered": "Message filtered - rules={rules}",
             "not_running": "Bot is not running",
             "stopping": "Stopping Bot...",
             "stop_success": "✓ Bot stopped",

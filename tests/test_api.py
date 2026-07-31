@@ -196,6 +196,57 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertFalse(status.json()["is_running"])
 
+    def test_queue_preview_contract_and_limit_validation(self):
+        calls = []
+        expected = [
+            {
+                "id": 4,
+                "account_id": "default",
+                "account_label": "Default",
+                "rule_name": "news",
+                "source_chat_id": -1001,
+                "source_chat_name": "Release Room",
+                "source_message_id": 42,
+                "grouped_id": None,
+                "status": "pending",
+                "attempt_count": 1,
+                "failure_count": 1,
+                "next_target_index": 1,
+                "target_count": 2,
+                "available_at": 123.0,
+                "last_error": "temporary",
+                "created_at": 100.0,
+                "updated_at": 120.0,
+            }
+        ]
+        self.bot.list_queue_items = lambda limit: calls.append(limit) or expected
+
+        response = self.client.get("/api/v1/queue/items", params={"limit": 25})
+        invalid = self.client.get("/api/v1/queue/items", params={"limit": 101})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), expected)
+        self.assertEqual(calls, [25])
+        self.assertEqual(invalid.status_code, 422)
+
+    def test_recent_events_contract_filters_types_and_limits_results(self):
+        self.events.publish("bot", {"action": "start"})
+        self.events.publish("telegram-auth", {"submitted": "phone"})
+        self.events.publish("forward", {"status": "completed"})
+
+        response = self.client.get(
+            "/api/v1/events/recent",
+            params=[("limit", 2), ("types", "bot"), ("types", "forward")],
+        )
+        invalid = self.client.get("/api/v1/events/recent", params={"limit": 101})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            [event["type"] for event in response.json()], ["forward", "bot"]
+        )
+        self.assertEqual([event["id"] for event in response.json()], [3, 1])
+        self.assertEqual(invalid.status_code, 422)
+
     def test_stats_accepts_date_limit_presets(self):
         calls = []
         database = SimpleNamespace(

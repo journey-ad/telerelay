@@ -350,6 +350,14 @@ async def bot_status(context: ApplicationContext = Depends(get_context)) -> dict
     return await asyncio.to_thread(context.bot.get_status)
 
 
+@router.get("/queue/items")
+async def queue_items(
+    limit: int = Query(50, ge=1, le=100),
+    context: ApplicationContext = Depends(get_context),
+) -> list[dict]:
+    return await asyncio.to_thread(context.bot.list_queue_items, limit)
+
+
 @router.post("/bot/start", response_model=ApiMessage)
 async def bot_start(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
     valid, message = context.config.validate()
@@ -589,6 +597,16 @@ async def events(context: ApplicationContext = Depends(get_context)) -> Streamin
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/events/recent")
+async def recent_events(
+    limit: int = Query(10, ge=1, le=100),
+    types: list[str] | None = Query(None),
+    context: ApplicationContext = Depends(get_context),
+) -> list[dict]:
+    event_types = {value for value in (types or []) if value}
+    return context.events.recent(limit, event_types or None)
 
 
 @router.get("/exports/availability")

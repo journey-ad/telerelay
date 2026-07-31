@@ -35,7 +35,6 @@ TRANSLATIONS = {
             "stopped": "Bot 已停止",
             "main_error": "Bot 主逻辑出错: {error}",
             "message_received": "收到消息 - 来源={chat} ({chat_id}), 发送者={sender} ({sender_id}), 内容={preview}",
-            "message_filtered": "过滤消息 - 规则={rules}",
             "not_running": "Bot 未在运行",
             "stopping": "正在停止 Bot...",
             "stop_success": "✓ Bot 已停止",

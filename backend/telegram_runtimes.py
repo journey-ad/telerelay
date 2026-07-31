@@ -25,12 +25,14 @@ class TelegramRuntimeRegistry:
         auth_timeout: float = 300,
         bot_factory: Callable[..., Any] = BotManager,
         auth_factory: Callable[..., AuthManager] = AuthManager,
+        events: Any = None,
     ):
         self.config = config
         self.account_store = account_store
         self.auth_timeout = auth_timeout
         self.bot_factory = bot_factory
         self.auth_factory = auth_factory
+        self.events = events
         self.loop: asyncio.AbstractEventLoop | None = None
         self.on_user_authenticated: Callable[[str, dict[str, Any]], None] | None = None
         self._runtimes: dict[str, Any] = {}
@@ -66,6 +68,7 @@ class TelegramRuntimeRegistry:
                 queue_db_path=self.queue_db_path(account_id),
                 account_id=account_id,
             )
+            runtime.events = self.events
             runtime.on_user_authenticated = (
                 lambda identity, target=account_id: self._authenticated(target, identity)
             )
@@ -276,6 +279,28 @@ class TelegramRuntimeRegistry:
                 "pause_reason": "; ".join(pause_reasons) or None,
             },
         }
+
+    def list_queue_items(self, limit: int = 50) -> list[dict[str, Any]]:
+        accounts = {account["id"]: account for account in self.account_store.list_public()}
+        with self._state_lock:
+            runtimes = list(self._runtimes.items())
+        items = []
+        for account_id, runtime in runtimes:
+            store = getattr(runtime, "forward_queue_store", None)
+            if not store:
+                continue
+            account = accounts.get(account_id, {})
+            label = str(account.get("label") or account_id)
+            for item in store.list_active(limit):
+                items.append(BotManager._queue_item_data(item, account_id, label))
+        items.sort(
+            key=lambda item: (
+                item["status"] != "processing",
+                item["available_at"],
+                item["id"],
+            )
+        )
+        return items[: max(1, min(int(limit), 100))]
 
     def reset_stats(self) -> None:
         get_stats_db().reset_stats()

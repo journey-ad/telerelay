@@ -98,6 +98,7 @@ class ExportScheduler:
             job_id = self.service.start_task_export(task_id)
             if job_id is None:
                 logger.warning(t("log.export.task_overlap", task_id=task_id))
+                self.service.publish_scheduled_event(task_id, "skipped")
             else:
                 logger.debug(
                     t(
@@ -105,6 +106,9 @@ class ExportScheduler:
                         task_id=task_id,
                         job_id=job_id,
                     )
+                )
+                self.service.publish_scheduled_event(
+                    task_id, "started", job_id=job_id
                 )
         except Exception as exc:
             logger.error(
@@ -114,6 +118,9 @@ class ExportScheduler:
                     error=str(exc),
                 ),
                 exc_info=True,
+            )
+            self.service.publish_scheduled_event(
+                task_id, "failed", error=str(exc)
             )
             try:
                 task = self.store.get_task(task_id)

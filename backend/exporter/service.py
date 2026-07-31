@@ -59,11 +59,13 @@ class ExportService:
         bot_manager,
         store: Optional[ExportStore] = None,
         source: Optional[TelegramExportSource] = None,
+        events=None,
     ):
         self.config = config
         self.bot_manager = bot_manager
         self.store = store or ExportStore()
         self.source = source or TelegramExportSource(bot_manager)
+        self.events = events
         self.export_root = Path(config.export_root_dir)
         self.export_root.mkdir(parents=True, exist_ok=True)
         self.message_db_root = Path(
@@ -175,6 +177,23 @@ class ExportService:
             state = self._jobs[job_id]
             for key, value in values.items():
                 setattr(state, key, value)
+
+    def publish_scheduled_event(self, task_id: int, status: str, **values) -> None:
+        if not self.events:
+            return
+        try:
+            task = self.store.get_task(task_id)
+            payload = {
+                "status": status,
+                "task_id": task_id,
+                "task_name": task.name,
+                "chat_id": task.chat_id,
+                "chat_title": task.chat_title,
+                **values,
+            }
+        except KeyError:
+            payload = {"status": status, "task_id": task_id, **values}
+        self.events.publish_threadsafe("scheduled-export", payload)
 
     def get_job(self, job_id: Optional[str]) -> Optional[ExportJobSnapshot]:
         if not job_id:
@@ -637,6 +656,10 @@ class ExportService:
                     files=", ".join(files) or "-",
                 )
             )
+            if task_id:
+                self.publish_scheduled_event(
+                    task_id, "completed", job_id=job_id, message_count=count
+                )
         except ExportCancelled as exc:
             if writers:
                 writers.abort()
@@ -666,6 +689,14 @@ class ExportService:
                     count=count,
                 )
             )
+            if task_id:
+                self.publish_scheduled_event(
+                    task_id,
+                    "cancelled",
+                    job_id=job_id,
+                    message_count=count,
+                    error=str(exc),
+                )
         except Exception as exc:
             if writers:
                 writers.abort()
@@ -697,6 +728,14 @@ class ExportService:
                 error=str(exc),
                 finished_at=_date_text(_now_utc()),
             )
+            if task_id:
+                self.publish_scheduled_event(
+                    task_id,
+                    "failed",
+                    job_id=job_id,
+                    message_count=count,
+                    error=str(exc),
+                )
         finally:
             if task_id:
                 with self._lock:

@@ -50,6 +50,7 @@ class ForwardQueueStoreTests(unittest.TestCase):
             item, inserted = store.enqueue(
                 rule_data=rule_data(),
                 source_chat_id=-1001,
+                source_chat_name="Source Room",
                 source_message_id=42,
                 sender_id=7,
                 grouped_id=None,
@@ -66,8 +67,27 @@ class ForwardQueueStoreTests(unittest.TestCase):
             self.assertEqual(reopened.recover_processing(), 1)
             resumed = reopened.claim_next()
             self.assertEqual(resumed.id, item.id)
+            self.assertEqual(resumed.source_chat_name, "Source Room")
             self.assertEqual(resumed.next_target_index, 1)
             self.assertEqual(resumed.attempt_count, 2)
+
+    def test_source_chat_name_can_be_backfilled_for_existing_item(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            item, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=42,
+                sender_id=7,
+                grouped_id=None,
+            )
+            self.assertIsNone(item.source_chat_name)
+
+            store.update_source_chat_name(item.id, "Backfilled Room")
+
+            self.assertEqual(
+                store.get_item(item.id).source_chat_name, "Backfilled Room"
+            )
 
     def test_media_group_updates_merge_and_extend_settle_window(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -144,6 +164,39 @@ class ForwardQueueStoreTests(unittest.TestCase):
             store.mark_failed(second.id, "test")
             self.assertEqual(store.active_count(), 0)
 
+    def test_list_active_prioritizes_processing_and_excludes_terminal_items(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            processing, _ = store.enqueue(
+                rule_data=rule_data("processing"),
+                source_chat_id=-1001,
+                source_message_id=1,
+                sender_id=7,
+                grouped_id=None,
+            )
+            completed, _ = store.enqueue(
+                rule_data=rule_data("completed"),
+                source_chat_id=-1001,
+                source_message_id=2,
+                sender_id=7,
+                grouped_id=None,
+            )
+            pending, _ = store.enqueue(
+                rule_data=rule_data("pending"),
+                source_chat_id=-1001,
+                source_message_id=3,
+                sender_id=7,
+                grouped_id=None,
+            )
+            store.claim_next()
+            store.mark_completed(completed.id)
+
+            active = store.list_active(50)
+
+            self.assertEqual([item.id for item in active], [processing.id, pending.id])
+            self.assertEqual(active[0].status, "processing")
+            self.assertEqual([item.id for item in store.list_active(1)], [processing.id])
+
 
 class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
     async def test_floodwait_pauses_all_items_and_survives_restart(self):
@@ -205,6 +258,7 @@ class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
                 grouped_id=None,
             )
             calls = 0
+            outcomes = []
 
             async def processor(_item):
                 nonlocal calls
@@ -218,6 +272,9 @@ class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
                 processor,
                 retry_base_seconds=0.02,
                 poll_interval=0.01,
+                on_outcome=lambda item, status, error: outcomes.append(
+                    (item.id, status, str(error) if error else None)
+                ),
             )
             await queue.start()
             for _ in range(100):
@@ -230,6 +287,13 @@ class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved.status, "completed")
             self.assertEqual(saved.attempt_count, 2)
             self.assertEqual(saved.failure_count, 1)
+            self.assertEqual(
+                outcomes,
+                [
+                    (item.id, "retrying", "temporary"),
+                    (item.id, "completed", None),
+                ],
+            )
 
     async def test_retry_limit_retains_failed_item(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -359,6 +423,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manager.forward_queue.depth_calls, 1)
         queued = manager.forward_queue.calls[0]
         self.assertEqual(queued["source_chat_id"], -1001)
+        self.assertEqual(queued["source_chat_name"], "Source")
         self.assertEqual(queued["source_message_id"], 42)
         self.assertEqual(queued["rule_data"]["name"], rule.name)
         entry_log = log_info.call_args.args[0]

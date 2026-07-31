@@ -44,6 +44,7 @@ class BotManager:
         session_name: str | Path | None = None,
         queue_db_path: str | Path | None = None,
         account_id: str | None = None,
+        events: Any = None,
     ):
         """Initialize Bot Manager
 
@@ -56,6 +57,7 @@ class BotManager:
         self.session_name = Path(session_name) if session_name else Path("data/telegram_session")
         self.queue_db_path = Path(queue_db_path) if queue_db_path else None
         self.account_id = account_id
+        self.events = events
         self.on_user_authenticated: Callable[[dict[str, Any]], None] | None = None
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
@@ -181,6 +183,7 @@ class BotManager:
                 flood_wait_buffer=self.config.forward_queue_flood_wait_buffer,
                 poll_interval=self.config.forward_queue_poll_interval,
                 completed_retention_days=self.config.forward_queue_completed_retention_days,
+                on_outcome=self._queue_outcome,
             )
             await self.forward_queue.start()
 
@@ -282,15 +285,98 @@ class BotManager:
             raise RuntimeError(
                 f"Source message {item.source_chat_id}/{item.source_message_id} is no longer available"
             )
+        if not item.source_chat_name:
+            source_chat_name = self._chat_display_name(
+                getattr(message, "chat", None), item.source_chat_id
+            )
+            if source_chat_name != str(item.source_chat_id):
+                self.forward_queue_store.update_source_chat_name(
+                    item.id, source_chat_name
+                )
 
         await forwarder.forward_message(
             message,
             item.sender_id,
             skip_dedup=item.attempt_count > 1 or item.next_target_index > 0,
             start_target_index=item.next_target_index,
-            on_target_success=lambda index: self.forward_queue_store.update_target_index(item.id, index),
+            on_target_success=lambda index: self.forward_queue_store.update_target_index(
+                item.id, index
+            ),
         )
         return max(0.0, float(forwarder.rule.delay))
+
+    def _queue_outcome(
+        self, item: ForwardQueueItem, status: str, error: Exception | None
+    ) -> None:
+        if self.forward_queue_store:
+            try:
+                item = self.forward_queue_store.get_item(item.id)
+            except KeyError:
+                pass
+        self._publish_event(
+            "forward",
+            self._forward_event_payload(
+                item, status=status, error=str(error) if error else None
+            ),
+        )
+
+    def list_queue_items(self, limit: int = 50) -> list[dict[str, Any]]:
+        store = self.forward_queue_store
+        if not store:
+            return []
+        account_id = self.account_id or "default"
+        return [
+            self._queue_item_data(item, account_id, account_id)
+            for item in store.list_active(limit)
+        ]
+
+    def _forward_event_payload(
+        self, item: ForwardQueueItem, *, status: str, error: str | None = None
+    ) -> dict[str, Any]:
+        payload = {
+            "status": status,
+            "account_id": self.account_id,
+            "rule": item.rule_name,
+            "source_chat_id": item.source_chat_id,
+            "source_chat_name": item.source_chat_name,
+            "source_message_id": item.source_message_id,
+            "target_count": len(item.rule_data.get("target_chats") or []),
+            "completed_target_count": item.next_target_index,
+            "attempt_count": item.attempt_count,
+            "failure_count": item.failure_count,
+        }
+        if error:
+            payload["error"] = error
+        return payload
+
+    @staticmethod
+    def _queue_item_data(
+        item: ForwardQueueItem, account_id: str, account_label: str
+    ) -> dict[str, Any]:
+        targets = item.rule_data.get("target_chats") or []
+        return {
+            "id": item.id,
+            "account_id": account_id,
+            "account_label": account_label,
+            "rule_name": item.rule_name,
+            "source_chat_id": item.source_chat_id,
+            "source_chat_name": item.source_chat_name,
+            "source_message_id": item.source_message_id,
+            "grouped_id": item.grouped_id,
+            "status": item.status,
+            "attempt_count": item.attempt_count,
+            "failure_count": item.failure_count,
+            "next_target_index": item.next_target_index,
+            "target_count": len(targets),
+            "available_at": item.available_at,
+            "last_error": item.last_error,
+            "created_at": item.created_at,
+            "updated_at": item.updated_at,
+        }
+
+    def _publish_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        if self.events:
+            self.events.publish(event_type, payload)
 
     def submit_telegram(
         self,
@@ -326,7 +412,7 @@ class BotManager:
 
         # Inline entity resolution — no API calls during ingestion.
         chat = getattr(event, "chat", None) or getattr(message, "chat", None)
-        chat_title = getattr(chat, 'title', None) or str(chat_id)
+        chat_title = self._chat_display_name(chat, chat_id)
         sender = getattr(event, "sender", None) or getattr(message, "sender", None)
         if sender:
             sender_name = ' '.join(filter(None, [
@@ -361,8 +447,6 @@ class BotManager:
                     filtered_by.append((rule.name, forwarder))
 
         if not matched_rules:
-            rules_str = ', '.join(name for name, _ in filtered_by) if filtered_by else t("misc.no_match_rules")
-            logger.debug(t("log.bot.message_filtered", rules=rules_str))
             # Bump filter counts
             for _, forwarder in filtered_by:
                 forwarder.filtered_count += 1
@@ -378,6 +462,9 @@ class BotManager:
             _, inserted = self.forward_queue.enqueue(
                 rule_data=rule.to_dict(),
                 source_chat_id=chat_id,
+                source_chat_name=(
+                    chat_title if chat_title != str(chat_id) else None
+                ),
                 source_message_id=message.id,
                 sender_id=sender_id,
                 grouped_id=message.grouped_id,
@@ -421,6 +508,22 @@ class BotManager:
                     )
 
     @staticmethod
+    def _chat_display_name(chat: Any, chat_id: int) -> str:
+        title = getattr(chat, "title", None)
+        if title:
+            return str(title)
+        name = " ".join(
+            filter(
+                None,
+                [
+                    getattr(chat, "first_name", None),
+                    getattr(chat, "last_name", None),
+                ],
+            )
+        )
+        return str(name or getattr(chat, "username", None) or chat_id)
+
+    @staticmethod
     def _message_source_label(chat_title: Any, chat_id: int, message_id: int) -> str:
         title = str(chat_title or chat_id)
         if title == str(chat_id):
@@ -454,6 +557,17 @@ class BotManager:
                         content=content,
                     )
                 )
+                self._publish_event(
+                    "button-action",
+                    {
+                        "status": "completed",
+                        "account_id": self.account_id,
+                        "rule": rule_name,
+                        "buttons": button_texts,
+                        "chat_id": event.chat_id,
+                        "message_id": message.id,
+                    },
+                )
         except Exception as exc:
             logger.error(
                 t(
@@ -463,6 +577,16 @@ class BotManager:
                     error=str(exc),
                 ),
                 exc_info=True,
+            )
+            self._publish_event(
+                "button-action",
+                {
+                    "status": "failed",
+                    "account_id": self.account_id,
+                    "chat_id": getattr(event, "chat_id", None),
+                    "message_id": getattr(getattr(event, "message", None), "id", None),
+                    "error": str(exc),
+                },
             )
     
     async def stop(self) -> bool:
