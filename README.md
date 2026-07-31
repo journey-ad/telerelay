@@ -2,45 +2,44 @@
 
 # TeleRelay
 
-TeleRelay is a self-hosted Telegram relay and archive tool. It uses a FastAPI backend and a Vue 3 control console, with persistent forwarding queues, rule-based filtering, callback-button automation, and message exports.
+Self-hosted Telegram relay and archive. FastAPI backend, React console, persistent forwarding queues, rule-based filtering, callback-button automation, and message exports.
 
 ## Features
 
-- Multiple independent forwarding rules with source, target, filter, ignore, and forwarding options
-- Persistent SQLite forwarding queue with retry, FloodWait handling, and restart recovery
+- Multi-rule forwarding with source, target, filter, ignore, and forwarding options
+- Persistent SQLite queue with retry, FloodWait handling, and restart recovery
 - User session and Bot Token modes
-- Exact, contains, and regex matching for Telegram callback-button automation in User mode
-- JSON, CSV, SQLite, and offline HTML message exports
+- Parallel multi-account runtimes in User mode
+- Exact, contains, and regex callback-button automation
+- JSON, CSV, SQLite, and offline HTML exports
 - Hourly, daily, and weekly incremental export tasks
-- Live runtime status and logs over Server-Sent Events
-- HTTP Basic authentication for the management API and console
-- Optional Telegram Admin Bot controls
+- Live runtime status and logs over SSE
+- HTTP Basic Auth for API and console
+- Optional Telegram Admin Bot
 
 ## Architecture
 
-TeleRelay is intentionally deployed as one service:
+Single-service deployment:
 
-- `backend/`: FastAPI, Telethon runtime, application services, SQLite stores, and REST/SSE API
-- `frontend/`: Vue 3, TypeScript, Vite, Pinia, TanStack Query, and ECharts
-- FastAPI serves the production frontend from `frontend/dist`
-- Uvicorn runs with one worker so the Telegram client, scheduler, and in-memory jobs are created once
+- `backend/`: FastAPI, Telethon runtime, application services, SQLite stores, REST/SSE API
+- `frontend/`: React 19, TypeScript, Vite, TanStack Query, Recharts, i18next
+- FastAPI serves `frontend/dist` in production
+- Uvicorn runs with one worker
 
-REST endpoints are under `/api/v1`, OpenAPI documentation is available at `/api/docs`, and `/api/v1/events` provides the SSE stream.
+REST endpoints: `/api/v1`. OpenAPI docs: `/api/docs`. SSE stream: `/api/v1/events`.
 
 ## Quick Start
 
 ### Configuration
-
-Create local configuration files from the examples:
 
 ```bash
 cp .env.example .env
 cp config/config.yaml.example config/config.yaml
 ```
 
-At minimum, set `API_ID` and `API_HASH` in `.env`. Set `BOT_TOKEN` when using `SESSION_TYPE=bot`. For a remotely accessible console, also set `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD`.
+Set `API_ID` and `API_HASH` in `.env`. For Bot mode, also set `BOT_TOKEN`. Enable `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` when the console is network-accessible.
 
-Telegram API credentials are available from [my.telegram.org](https://my.telegram.org). Bot tokens are created with [@BotFather](https://t.me/BotFather).
+Telegram API credentials: [my.telegram.org](https://my.telegram.org). Bot tokens: [@BotFather](https://t.me/BotFather).
 
 ### Docker Compose
 
@@ -48,13 +47,11 @@ Telegram API credentials are available from [my.telegram.org](https://my.telegra
 docker compose up -d --build
 ```
 
-Open `http://localhost:8080`. Compose persists configuration, Telegram sessions, databases, exports, and logs through the `config/`, `data/`, and `logs/` mounts.
+Open `http://localhost:8080`. Configuration, sessions, databases, exports, and logs persist through `config/`, `data/`, and `logs/` mounts.
 
-To use the published image instead of a local build, remove `build: .` from `docker-compose.yml` and keep `image: ghcr.io/journey-ad/telerelay:latest`.
+### Local Build
 
-### Local Production Build
-
-Requirements: Python 3.11+, Node.js 22+, and pnpm.
+Requires Python 3.11+, Node.js 22+, pnpm.
 
 ```bash
 python -m venv .venv
@@ -69,68 +66,62 @@ python -m backend.main
 
 Open `http://localhost:8080`.
 
-### Frontend Development
-
-Run the API and Vite server in separate terminals:
+### Frontend Dev
 
 ```bash
-python -m backend.main
+python -m backend.main       # terminal 1
 ```
 
 ```bash
 cd frontend
 pnpm install --frozen-lockfile
-pnpm run dev
+pnpm run dev                 # terminal 2
 ```
 
-Vite serves the console at `http://localhost:5173` and proxies `/api` to `http://127.0.0.1:8080`.
+Vite serves port 5173 and proxies `/api` to `http://127.0.0.1:8080`.
 
-## Configuration Ownership
+## Configuration
 
-`.env` contains process credentials and runtime settings:
+`.env` — credentials and runtime settings: API credentials, `SESSION_TYPE`, proxy, host, port, log level, runtime language, Web Basic Auth, Admin Bot and Mini App settings.
 
-- Telegram credentials and `SESSION_TYPE`
-- proxy, host, port, log level, and runtime language
-- Web Basic Auth credentials
-- optional Admin Bot and Mini App settings
+`config/config.yaml` — mutable application config: forwarding and button rules, filter and forwarding options, queue settings, export directories, timezone, and concurrency.
 
-`config/config.yaml` contains mutable application configuration:
+The console can import/export YAML config. `.env` secrets are never included.
 
-- forwarding and callback-button rules
-- filtering, ignore, and forwarding options
-- forwarding queue settings
-- export directories, timezone, and concurrency
+## Data
 
-The console can import or export the YAML configuration. Credentials remain in `.env` and are not included in these backups.
+```text
+data/telegram_session.session    # Default account session
+data/telegram_sessions/          # Additional account sessions
+data/telegram_accounts.json      # Account registry
+data/telegram_avatars/           # Cached avatars
+data/forward_queue.db            # Default account queue
+data/forward_queues/             # Additional account queues
+data/stats.db                    # Forwarding statistics
+data/exports.db                  # Export tasks
+data/db/msg_export_{chat_id}.sqlite3
+data/exports/                    # Generated files
+logs/telerelay.log               # Rotating log
+```
 
-## Persistent Data
+Back up `config/`, `data/`, and `.env` together. `.env` and session files are secrets.
 
-- `data/telegram_session.session`: Telegram user session
-- `data/forward_queue.db`: pending forwarding work and deduplication tombstones
-- `data/stats.db`: forwarding statistics and history
-- `data/exports.db`: export tasks and run history
-- `data/db/msg_export_{chat_id}.sqlite3`: canonical message archives
-- `data/exports/`: generated JSON, CSV, SQLite, and HTML files
-- `logs/telerelay.log`: rotating application log
+## User Mode
 
-Back up `config/`, `data/`, and `.env` together. Treat `.env` and Telegram session files as secrets.
+With `SESSION_TYPE=user`, add and authenticate accounts from the account menu. Each account gets an isolated client, auth state, and forwarding queue, all running concurrently on the event loop.
 
-## User Authentication Flow
-
-With `SESSION_TYPE=user`, open Settings and start Telegram authentication. Submit the phone number, login code, and 2FA password when requested. The async challenge is managed by the API; no terminal input is required.
-
-With `SESSION_TYPE=bot`, configure `BOT_TOKEN`. Callback-button automation and account-wide export discovery are unavailable because they require a user session.
+With `SESSION_TYPE=bot`, configure `BOT_TOKEN`. Button automation and account-wide export discovery require User mode.
 
 ## Admin Bot
 
-Set `ADMIN_BOT_TOKEN` and `ADMIN_CHAT_ID` to enable remote commands:
+Set `ADMIN_BOT_TOKEN` and `ADMIN_CHAT_ID`:
 
 - `/status`
 - `/bot start|stop|restart`
 - `/rule list|detail|add|del|rename|toggle|set`
 - `/webapp`
 
-The Admin Bot uses a separate Telegram token. Its control commands are submitted to the FastAPI runtime loop.
+The Admin Bot uses a separate token.
 
 ## Development Checks
 
@@ -144,17 +135,17 @@ cd frontend && pnpm run build
 
 ```text
 telerelay/
-├── backend/              # FastAPI API and Telegram runtime
+├── backend/              # FastAPI and Telegram runtime
 │   ├── api/              # REST and SSE routes
 │   ├── exporter/         # Export engine and scheduler
-│   ├── forwarder/        # Message forwarding pipeline
+│   ├── forwarder/        # Forwarding pipeline
 │   ├── schemas/          # HTTP request contracts
-│   ├── services/         # UI-independent application services
-│   └── main.py           # FastAPI/Uvicorn entry point
-├── frontend/             # Vue 3 + TypeScript console
+│   ├── services/         # Application services
+│   └── main.py           # Entry point
+├── frontend/             # React + TypeScript console
 │   └── src/
-├── config/               # Mutable YAML configuration
-├── data/                 # Sessions, SQLite databases, and exports
+├── config/               # YAML configuration
+├── data/                 # Sessions, databases, exports
 ├── logs/                 # Rotating logs
 ├── tests/
 ├── Dockerfile
@@ -163,10 +154,9 @@ telerelay/
 
 ## Security
 
-- Enable Web Basic Auth whenever port 8080 is reachable by other machines.
-- Terminate HTTPS at a reverse proxy; Basic Auth credentials must not travel over plain public HTTP.
-- Restrict access to `.env`, `data/*.session`, databases, exports, and backups.
-- Keep Uvicorn at one worker. Multiple workers would start duplicate Telegram clients and schedulers.
+- Enable Web Basic Auth whenever port 8080 is network-accessible.
+- Terminate HTTPS at a reverse proxy; never send Basic Auth over plain HTTP.
+- Uvicorn must run with one worker.
 
 ## License
 

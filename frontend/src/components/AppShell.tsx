@@ -69,6 +69,14 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
   useEvents(invalidateLiveData)
   const current = navigation.find((item) => item.to === location.pathname) ?? navigation[0]
   const online = Boolean(statusQuery.data?.is_connected)
+  const nodeLabel =
+    typeof statusQuery.data?.connected_account_count === 'number' &&
+    typeof statusQuery.data?.authenticated_account_count === 'number'
+      ? t('node.accountsConnected', {
+          connected: statusQuery.data.connected_account_count,
+          total: statusQuery.data.authenticated_account_count,
+        })
+      : t(online ? 'node.connected' : 'node.waiting')
   const previewRoute =
     location.pathname === '/telegram' || location.pathname.startsWith('/telegram/')
 
@@ -106,9 +114,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           </span>
           <span className="flex min-w-0 flex-col">
             <small className="text-xs font-bold text-slate-400">{t('node.title')}</small>
-            <strong className="mt-0.5 truncate text-[13px] text-slate-700">
-              {t(online ? 'node.connected' : 'node.waiting')}
-            </strong>
+            <strong className="mt-0.5 truncate text-[13px] text-slate-700">{nodeLabel}</strong>
           </span>
           <span
             className={cn(

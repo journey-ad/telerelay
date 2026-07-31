@@ -22,7 +22,7 @@ def resolve_export_directory(root: Path, subdirectory: str) -> Path:
         raise ExportPathError("The export directory is outside the configured root.") from exc
 
     resolved_directory.mkdir(parents=True, exist_ok=True)
-    # Re-resolve after creation so a symlink introduced in an existing parent is caught.
+    # Re-resolve to catch symlinks in existing parents.
     final_directory = resolved_directory.resolve()
     try:
         final_directory.relative_to(resolved_root)

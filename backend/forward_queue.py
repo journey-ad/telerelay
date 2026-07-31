@@ -205,8 +205,7 @@ class ForwardQueueStore:
             )
             inserted = cursor.rowcount == 1
             if not inserted and group_text is not None:
-                # Album updates commonly arrive as separate Telegram events.
-                # Keep the earliest ID and wait until the group settles.
+                # Album updates arrive separately; wait for the group to settle.
                 conn.execute(
                     """
                     UPDATE forward_queue

@@ -13,17 +13,18 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.api import router
 from backend.application import ApplicationContext
-from backend.auth_manager import AuthManager
 from backend.bot_manager import BotManager
 from backend.config import create_config
 from backend.events import EventBus, EventLogHandler
 from backend.exporter.scheduler import ExportScheduler
 from backend.exporter.service import ExportService
+from backend.forwarder.downloader import MediaDownloader
 from backend.i18n import set_language
 from backend.logger import get_logger, setup_logger
 from backend.services import RuleService
 from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
 from backend.telegram_preview import TelegramPreviewService
+from backend.telegram_runtimes import TelegramRuntimeRegistry
 
 
 @asynccontextmanager
@@ -41,24 +42,21 @@ async def lifespan(app: FastAPI):
     )
     logger.addHandler(log_handler)
 
-    auth = AuthManager(input_timeout=300) if config.session_type == "user" else None
-    account_store = TelegramAccountStore() if auth else None
-    bot = BotManager(
-        config,
-        auth,
-        session_name=account_store.active_session_name if account_store else None,
-    )
+    account_store = TelegramAccountStore() if config.session_type == "user" else None
+    if account_store:
+        bot = TelegramRuntimeRegistry(config, account_store, auth_timeout=300)
+    else:
+        bot = BotManager(config)
     bot.bind_loop(asyncio.get_running_loop())
-    accounts = TelegramAccountService(account_store, bot, auth) if account_store and auth else None
+    accounts = TelegramAccountService(account_store, bot) if account_store else None
     telegram_preview = TelegramPreviewService(bot, account_store) if account_store else None
     if accounts:
-        bot.on_user_authenticated = accounts.update_active_identity
+        bot.on_user_authenticated = accounts.update_identity
     exports = ExportService(config, bot)
     scheduler = ExportScheduler(exports)
     rules = RuleService(config, bot)
     context = ApplicationContext(
         config=config,
-        auth=auth,
         bot=bot,
         exports=exports,
         scheduler=scheduler,
@@ -70,9 +68,11 @@ async def lifespan(app: FastAPI):
     )
     app.state.context = context
 
+    await asyncio.to_thread(MediaDownloader.purge_temp_dir)
     scheduler.start()
-    session_file = Path(f"{bot.session_name}.session")
-    if session_file.exists():
+    if account_store:
+        await bot.start()
+    elif Path(f"{bot.session_name}.session").exists():
         await bot.start()
 
     if config.admin_bot_token and config.admin_chat_id:

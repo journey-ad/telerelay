@@ -42,6 +42,8 @@ class BotManager:
         config: Config,
         auth_manager: Optional['AuthManager'] = None,
         session_name: str | Path | None = None,
+        queue_db_path: str | Path | None = None,
+        account_id: str | None = None,
     ):
         """Initialize Bot Manager
 
@@ -52,6 +54,8 @@ class BotManager:
         self.config = config
         self.auth_manager = auth_manager
         self.session_name = Path(session_name) if session_name else Path("data/telegram_session")
+        self.queue_db_path = Path(queue_db_path) if queue_db_path else None
+        self.account_id = account_id
         self.on_user_authenticated: Callable[[dict[str, Any]], None] | None = None
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
@@ -73,12 +77,6 @@ class BotManager:
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Bind lifecycle operations to FastAPI's owning event loop."""
         self.loop = loop
-
-    def set_session_name(self, session_name: str | Path) -> None:
-        """Select the session used by the next runtime start."""
-        if self.is_running:
-            raise RuntimeError("Cannot change Telegram session while runtime is active")
-        self.session_name = Path(session_name)
 
     @property
     def is_running(self) -> bool:
@@ -115,7 +113,7 @@ class BotManager:
             self._is_running = True
             self._task = self.loop.create_task(
                 self._bot_main(),
-                name="telerelay-telegram-runtime",
+                name=f"telerelay-telegram-runtime-{self.account_id or 'primary'}",
             )
         await asyncio.sleep(0)
         return True
@@ -132,20 +130,16 @@ class BotManager:
             logger.warning(t("log.bot.already_running"))
             return
         try:
-            # Purge residual temp files from previous runs
-            from backend.forwarder.downloader import MediaDownloader
-            MediaDownloader.purge_temp_dir()
-
-            # Mark as running (even during connection/authentication phase)
+            # Running
             self.is_running = True
 
-            # Validate configuration
+            # Validate config
             is_valid, error_msg = self.config.validate_connection()
             if not is_valid:
                 logger.error(t("log.bot.config_validation_failed", error=error_msg))
                 return
 
-            # Initialize client
+            # Init client
             self.client_manager = TelegramClientManager(
                 self.config,
                 self.auth_manager,
@@ -158,10 +152,8 @@ class BotManager:
                 logger.error(t("log.bot.connect_failed"))
                 return
 
-            # Mark as connected
+            # Connected
             self.is_connected = True
-
-            # Create filter and forwarder for each enabled rule
             rules = self.config.get_enabled_rules()
             self.forwarders = []
             self.rule_forwarder_map = {}
@@ -177,9 +169,10 @@ class BotManager:
                 all_source_chats.update(rule.source_chats)
                 logger.debug(t("log.bot.rule_registered", rule=rule.name, count=len(rule.source_chats)))
 
-            # Start the durable consumer before accepting new updates. Pending
-            # jobs use their stored rule snapshot, even if configuration changed.
-            self.forward_queue_store = ForwardQueueStore(self.config.forward_queue_db_path)
+            # Start queue before accepting updates; pending jobs use stored rule snapshots.
+            self.forward_queue_store = ForwardQueueStore(
+                self.queue_db_path or self.config.forward_queue_db_path
+            )
             self.forward_queue = ForwardQueue(
                 self.forward_queue_store,
                 self._process_queue_item,
@@ -191,7 +184,7 @@ class BotManager:
             )
             await self.forward_queue.start()
 
-            # Register single central message handler (handles all source chats)
+            # Single handler covers all source chats
             if all_source_chats:
                 self.client_manager.add_message_handler(
                     callback=self._central_message_handler,
@@ -331,8 +324,7 @@ class BotManager:
         chat_id = event.chat_id
         sender_id = event.sender_id
 
-        # Use entities already attached to the update. The ingestion path must
-        # not add Telegram API calls that could block durable enqueueing.
+        # Inline entity resolution — no API calls during ingestion.
         chat = getattr(event, "chat", None) or getattr(message, "chat", None)
         chat_title = getattr(chat, 'title', None) or str(chat_id)
         sender = getattr(event, "sender", None) or getattr(message, "sender", None)
@@ -344,23 +336,23 @@ class BotManager:
         else:
             sender_name = str(sender_id)
 
-        # Get message preview
+        # Preview
         raw_text = message.text or get_media_description(message)
         raw_text = raw_text.replace('\n', ' ')
         message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
 
-        # Output "message received" log
+        # Log received
         logger.debug(t("log.bot.message_received",
                        chat=chat_title, chat_id=chat_id,
                        sender=sender_name, sender_id=sender_id,
                        preview=message_preview))
 
-        # Find all rules matching this message
+        # Match rules
         matched_rules = []
-        filtered_by = []  # Record which rules filtered it
+        filtered_by = []
         for rule, msg_filter, forwarder in self.rule_forwarder_map.values():
             if chat_id in rule.source_chats:
-                # Skip filtering for media group messages (text may be on any message, need complete group to judge)
+                # Media groups need the full album to judge
                 if message.grouped_id:
                     matched_rules.append((rule, forwarder))
                 elif msg_filter.should_forward(message, sender_id=sender_id):
@@ -371,7 +363,7 @@ class BotManager:
         if not matched_rules:
             rules_str = ', '.join(name for name, _ in filtered_by) if filtered_by else t("misc.no_match_rules")
             logger.debug(t("log.bot.message_filtered", rules=rules_str))
-            # Update filter count for each rule
+            # Bump filter counts
             for _, forwarder in filtered_by:
                 forwarder.filtered_count += 1
                 forwarder._stats_db.increment_filtered(forwarder.rule.name)
@@ -381,8 +373,7 @@ class BotManager:
         if not self.forward_queue:
             raise RuntimeError("Forward queue is not running")
 
-        # Persist all matching rules. Media group events share one durable key
-        # and extend a short settle window instead of creating duplicate jobs.
+        # Media group events share one durable key with a settle window.
         for rule, forwarder in matched_rules:
             _, inserted = self.forward_queue.enqueue(
                 rule_data=rule.to_dict(),

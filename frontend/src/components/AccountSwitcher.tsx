@@ -22,8 +22,12 @@ import { clearAuthenticatedImages } from './AuthenticatedImage'
 import { Button, ConfirmDialog, Dialog, fieldClass, IconButton } from './ui'
 
 function accountSubtitle(account: TelegramAccount, t: TFunction): string {
-  if (account.username) return `@${account.username}`
-  if (account.connected) return t('accounts.connected')
+  const identity = account.username ? `@${account.username}` : ''
+  if (account.connected) {
+    return identity ? `${identity} · ${t('accounts.connected')}` : t('accounts.connected')
+  }
+  if (account.running) return t('accounts.running')
+  if (identity) return identity
   if (account.authenticated) return t('accounts.saved')
   return t('accounts.awaitingAuth')
 }

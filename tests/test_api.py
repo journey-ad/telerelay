@@ -16,14 +16,27 @@ from backend.config import Config
 from backend.events import EventBus
 from backend.services import RuleService
 from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
+from backend.telegram_runtimes import TelegramRuntimeRegistry
 
 
 class FakeBot:
-    def __init__(self):
+    def __init__(
+        self,
+        config=None,
+        auth_manager=None,
+        session_name=None,
+        queue_db_path=None,
+        account_id=None,
+    ):
         self.is_running = False
         self.is_connected = False
         self.restarts = 0
-        self.session_name = Path("data/telegram_session")
+        self.session_name = Path(session_name or "data/telegram_session")
+        self.queue_db_path = Path(queue_db_path) if queue_db_path else None
+        self.account_id = account_id
+        self.client_manager = None
+        self.forwarders = []
+        self.on_user_authenticated = None
 
     async def start(self):
         if self.is_running:
@@ -42,8 +55,8 @@ class FakeBot:
         self.is_running = True
         return True
 
-    def set_session_name(self, session_name):
-        self.session_name = Path(session_name)
+    def bind_loop(self, loop):
+        self.loop = loop
 
     def get_status(self):
         return {
@@ -107,16 +120,29 @@ class ApiContractTests(unittest.TestCase):
             env_file=str(root / "missing.env"),
             config_file=str(root / "config.yaml"),
         )
-        self.bot = FakeBot()
-        self.auth = AuthManager(input_timeout=1)
+        self.account_store = TelegramAccountStore(root / "data")
+        self.bot = TelegramRuntimeRegistry(
+            self.config,
+            self.account_store,
+            auth_timeout=1,
+            bot_factory=FakeBot,
+        )
+        self.auth = self.bot.get_auth()
         self.events = EventBus()
         self.rules = RuleService(self.config, self.bot)
-        self.account_store = TelegramAccountStore(root / "data")
-        self.accounts = TelegramAccountService(self.account_store, self.bot, self.auth)
+        self.accounts = TelegramAccountService(self.account_store, self.bot)
+        self.stats_patch = patch(
+            "backend.telegram_runtimes.get_stats_db",
+            return_value=SimpleNamespace(
+                get_all_stats=dict,
+                reset_stats=lambda: None,
+            ),
+        )
+        self.stats_patch.start()
+        self.addCleanup(self.stats_patch.stop)
         self.telegram_preview = FakeTelegramPreview()
         self.context = ApplicationContext(
             config=self.config,
-            auth=self.auth,
             bot=self.bot,
             exports=SimpleNamespace(),
             scheduler=SimpleNamespace(),
@@ -141,7 +167,7 @@ class ApiContractTests(unittest.TestCase):
     def test_stats_accepts_date_limit_presets(self):
         calls = []
         database = SimpleNamespace(
-            get_rule_stats_detail=lambda: [],
+            get_rule_stats_detail=list,
             get_daily_stats=lambda days: calls.append(days) or [{"days": days}],
         )
 

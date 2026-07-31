@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import base64
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -20,6 +20,8 @@ from typing import Any
 
 from telethon import utils
 from telethon.tl import types
+
+from backend.telegram_accounts import TelegramAccountError
 
 
 class TelegramPreviewError(RuntimeError):
@@ -181,22 +183,28 @@ class TelegramPreviewService:
         self._last_cache_prune = 0.0
 
     def _active_account(self, account_id: str | None = None) -> str:
-        active_id = self.account_store.active_account_id
-        if account_id is not None and account_id != active_id:
+        target = account_id or self.account_store.active_account_id
+        try:
+            self.account_store.get_public(target)
+        except TelegramAccountError as exc:
             raise TelegramPreviewError(
-                "inactive_account",
-                "The requested Telegram account is no longer active",
-            )
-        return active_id
+                "account_not_found",
+                "Telegram account does not exist",
+            ) from exc
+        return target
 
     def _client(self, account_id: str | None = None):
-        self._active_account(account_id)
-        manager = self.bot_manager.client_manager
+        target = self._active_account(account_id)
+        try:
+            runtime = self.bot_manager.get_runtime(target)
+        except TelegramAccountError as exc:
+            raise TelegramPreviewError(exc.code, str(exc)) from exc
+        manager = runtime.client_manager
         client = manager.get_client() if manager else None
-        if not self.bot_manager.is_connected or client is None:
+        if not runtime.is_connected or client is None:
             raise TelegramPreviewError(
                 "telegram_not_connected",
-                "The active Telegram account is not connected",
+                "The requested Telegram account is not connected",
             )
         return client
 

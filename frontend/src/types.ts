@@ -17,6 +17,7 @@ export interface TelegramAccount {
   created_at: string
   active: boolean
   authenticated: boolean
+  running: boolean
   connected: boolean
   status: 'connected' | 'authenticated' | 'needs_auth'
   avatar_version?: string | null
@@ -153,6 +154,11 @@ export interface ButtonRule {
 export interface BotStatus {
   is_connected?: boolean
   is_running?: boolean
+  running_account_count?: number
+  connected_account_count?: number
+  authenticated_account_count?: number
+  running_account_ids?: string[]
+  connected_account_ids?: string[]
   stats?: { forwarded?: number; filtered?: number; total?: number }
   queue?: { counts?: Record<string, number>; pause_reason?: string }
 }

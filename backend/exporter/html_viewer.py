@@ -67,8 +67,7 @@ def prepare_archive(
         if remaining_children[parent_index] == 0:
             ready.append(parent_index)
 
-    # Telegram replies are acyclic. For malformed cycles, expose direct children
-    # without allowing a corrupt record to block archive creation.
+    # Handle malformed reply cycles without blocking archive creation.
     for index, remaining in enumerate(remaining_children):
         if remaining:
             descendant_counts[index] = max(

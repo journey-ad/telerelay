@@ -86,7 +86,7 @@ class StatsDB:
             finally:
                 conn.close()
 
-    # ===== Original rule_stats methods =====
+    # -- Rule stats --
 
     def get_stats(self, rule_name: str) -> dict:
         """Get statistics for a specific rule"""
@@ -209,7 +209,7 @@ class StatsDB:
             finally:
                 conn.close()
 
-    # ===== Message history methods =====
+    # -- Message history --
 
     def insert_history(
         self,
@@ -383,7 +383,7 @@ class StatsDB:
                 ])
             return output.getvalue()
 
-    # ===== Daily stats methods =====
+    # -- Daily stats --
 
     def increment_daily(self, rule_name: str, is_forwarded: bool) -> None:
         """Increment today's daily counter for a rule"""

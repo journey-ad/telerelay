@@ -114,7 +114,6 @@ class AdminBotManager:
 
         logger.info(t("log.admin_bot.started"))
 
-        # Set Menu Button to Mini App if webapp_url is configured
         await self._set_menu_button()
 
         await self.client.run_until_disconnected()
@@ -136,7 +135,7 @@ class AdminBotManager:
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            # Send welcome message with Mini App button if configured
+            # Welcome message
             webapp_url = self.config.webapp_url
             if webapp_url:
                 buttons = ReplyInlineMarkup(
@@ -212,7 +211,7 @@ class AdminBotManager:
 
     def _parse_args(self, text: str, command: str) -> List[str]:
         """Parse command arguments using shlex (handles quoted strings)"""
-        # Remove the command prefix (e.g., "/bot " or "/rule ")
+        # Strip command prefix
         rest = text[len(command):].strip()
         if not rest:
             return []
@@ -223,7 +222,7 @@ class AdminBotManager:
             # Fallback to simple split if shlex fails
             return rest.split()
 
-    # ===== Status Command =====
+    # -- Status --
 
     async def _handle_status(self, event) -> None:
         """Handle /status command"""
@@ -249,7 +248,7 @@ class AdminBotManager:
 
         await event.reply(msg, parse_mode='md')
 
-    # ===== Bot Control Commands =====
+    # -- Bot control --
 
     async def _handle_bot_cmd(self, event) -> None:
         """Handle /bot <start|stop|restart> commands"""
@@ -295,7 +294,7 @@ class AdminBotManager:
         else:
             await event.reply(t("bot_cmd.bot_usage"), parse_mode='md')
 
-    # ===== Rule Commands =====
+    # -- Rules --
 
     async def _handle_rule_cmd(self, event) -> None:
         """Handle /rule <subcommand> commands"""
@@ -394,7 +393,7 @@ class AdminBotManager:
 
         rule_name = args[0]
 
-        # Check if rule with this name already exists
+        # Check duplicate
         if self._find_rule(rule_name):
             await event.reply(t("bot_cmd.rule_exists", name=rule_name))
             return
@@ -468,7 +467,7 @@ class AdminBotManager:
             await event.reply(t("bot_cmd.rule_not_found", name=old_name))
             return
 
-        # Check if new name already exists
+        # Check duplicate
         if self._find_rule(new_name):
             await event.reply(t("bot_cmd.rule_exists", name=new_name))
             return
@@ -588,7 +587,7 @@ class AdminBotManager:
         except Exception as e:
             await event.reply(t("bot_cmd.rule_set_error", error=str(e)))
 
-    # ===== Stats Command =====
+    # -- Stats --
 
     async def _handle_stats_cmd(self, event) -> None:
         """Handle /stats <subcommand> commands"""
@@ -606,7 +605,7 @@ class AdminBotManager:
         else:
             await event.reply(t("bot_cmd.stats_usage"), parse_mode='md')
 
-    # ===== History Command =====
+    # -- History --
 
     async def _handle_history_cmd(self, event) -> None:
         """Handle /history [rule_name] [N] - show recent N forwarding history"""
@@ -639,7 +638,7 @@ class AdminBotManager:
 
         await event.reply("\n".join(lines), parse_mode='md')
 
-    # ===== Config Command =====
+    # -- Config --
 
     async def _handle_config_cmd(self, event) -> None:
         """Handle /config <export|import> commands"""
@@ -663,7 +662,7 @@ class AdminBotManager:
                 await event.reply(t("bot_cmd.config_not_found"))
 
         elif subcmd == "import":
-            # Check if the message is a reply to a file
+            # Must reply to a file
             reply_msg = await event.get_reply_message()
             if not reply_msg or not reply_msg.file:
                 await event.reply(t("bot_cmd.config_import_usage"))
@@ -705,7 +704,7 @@ class AdminBotManager:
         else:
             await event.reply(t("bot_cmd.config_usage"), parse_mode='md')
 
-    # ===== Mini App Methods =====
+    # -- Mini App --
 
     async def _handle_webapp(self, event) -> None:
         """Handle /webapp command - send a button to open WebUI Mini App"""
@@ -754,7 +753,7 @@ class AdminBotManager:
         except Exception as e:
             logger.warning(t("log.admin_bot.menu_button_failed", error=str(e)))
 
-    # ===== Helper Methods =====
+    # -- Helpers --
 
     def _find_rule(self, name: str) -> Optional[ForwardingRule]:
         """Find a rule by name"""

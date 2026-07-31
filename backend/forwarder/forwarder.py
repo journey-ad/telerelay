@@ -86,7 +86,7 @@ class MessageForwarder:
         if not targets:
             raise RuntimeError(t("log.forward.no_target"))
 
-        # 1. Preprocessing: get messages, deduplicate, filter
+        # 1. Preprocess
         messages = await self.media_group.get_messages(message)
         is_media_group = len(messages) > 1
 
@@ -108,7 +108,7 @@ class MessageForwarder:
 
         target_labels = await self._resolve_target_labels(targets)
 
-        # 2. Prepare resources: check if download is needed
+        # 2. Prepare
         is_noforwards = getattr(message.chat, 'noforwards', False) if message.chat else False
         need_download = is_noforwards and self.rule.force_forward
 
@@ -165,7 +165,7 @@ class MessageForwarder:
                 if not downloaded_files:
                     raise RuntimeError(t("log.forward.download_failed"))
 
-            # Execute forwarding: loop through all targets
+            # Execute forwarding
             source_data = self._get_source_data(message) if self.rule.hide_sender else None
             source_text = self._build_source_text(message) if not self.rule.hide_sender else ""
             for i in range(max(0, start_target_index), len(targets)):
@@ -188,15 +188,14 @@ class MessageForwarder:
                 if on_target_success:
                     on_target_success(i + 1)
 
-                # Delay between multiple targets. The queue applies the final
-                # per-rule delay only after the item has been committed.
+        # Delay between targets; per-rule delay is applied after commit.
                 if self.rule.delay > 0 and i < len(targets) - 1:
                     await asyncio.sleep(self.rule.delay)
         finally:
             if session_dir:
                 MediaDownloader.cleanup(session_dir)
 
-        # Statistics and logging
+        # Log result
         self._log_result(
             message,
             messages,
@@ -205,7 +204,7 @@ class MessageForwarder:
             target_labels,
         )
 
-    # ===== Forwarding strategies =====
+    # -- Forwarding --
 
     async def _forward_normal(
         self, messages: List[Message], target, source_data: dict, source_text: str, is_noforwards: bool
@@ -344,7 +343,7 @@ class MessageForwarder:
             labels.append(label)
         return labels
 
-    # ===== Helper methods =====
+    # -- Source info --
 
     def _get_source_data(self, message: Message) -> dict:
         """
@@ -363,7 +362,7 @@ class MessageForwarder:
         else:
             date_str = datetime.datetime.now().astimezone().strftime("%Y-%m-%d %H-%M-%S")
         
-        # 1. Determine the main subject (priority given to forward source)
+        # 1. Determine subject (prefer forward source)
         target = None
         is_forward = False
         if message.forward:
@@ -375,7 +374,7 @@ class MessageForwarder:
         if not target:
             return {"name": name, "link": link, "date": date_str}
 
-        # 2. Extract the name
+        # 2. Extract name
         username = getattr(target, 'username', None)
         if username:
             name = f"@{username}"
@@ -387,7 +386,7 @@ class MessageForwarder:
             else:
                 name = getattr(target, 'title', "Unknown")
 
-        # 3. Construct the link
+        # 3. Build link
         msg_id = None
         if is_forward:
             msg_id = getattr(message.forward, 'channel_post', getattr(message.forward, 'msg_id', None))
@@ -397,13 +396,13 @@ class MessageForwarder:
         is_chat = hasattr(target, 'title') or (message.chat and hasattr(message.chat, 'title'))
         
         if username:
-            # Public channel/group, deep link to message
+            # Public
             if is_chat and msg_id:
                 link = f"https://t.me/{username}/{msg_id}"
             else:
                 link = f"https://t.me/{username}"
         elif is_chat and msg_id:
-            # Private group/channel
+            # Private
             chat_id = getattr(target, 'id', None)
             if chat_id:
                 clean_id = str(chat_id).replace("-100", "", 1) if str(chat_id).startswith("-100") else str(chat_id)

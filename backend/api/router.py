@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
@@ -86,6 +95,8 @@ def _telegram_preview(context: ApplicationContext):
 def _preview_error(exc: TelegramPreviewError) -> HTTPException:
     status = {
         "avatar_not_found": 404,
+        "account_not_found": 404,
+        "account_unavailable": 409,
         "chat_not_found": 404,
         "visual_media_not_found": 404,
         "message_not_found": 404,
@@ -338,32 +349,36 @@ async def reset_stats(context: ApplicationContext = Depends(get_context)) -> Api
 
 @router.get("/telegram-auth")
 async def telegram_auth_state(context: ApplicationContext = Depends(get_context)) -> dict:
-    if not context.auth:
-        return {"state": "not_required", "error": "", "user_info": ""}
-    return {
-        **context.auth.get_state(),
-        "account_id": context.accounts.store.active_account_id if context.accounts else None,
-    }
+    if context.accounts:
+        auth = context.accounts.get_auth()
+        return {
+            **auth.get_state(),
+            "account_id": context.accounts.store.active_account_id,
+        }
+    return {"state": "not_required", "error": "", "user_info": ""}
 
 
 @router.post("/telegram-auth/start", response_model=ApiMessage)
 async def telegram_auth_start(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
-    if not context.auth:
-        raise _error("not_user_mode", "Telegram authentication is only used in user mode", 409)
-    if context.bot.is_running:
-        return ApiMessage(code="auth_in_progress")
-    context.auth.reset()
-    valid, message = context.config.validate_connection()
-    if not valid:
-        raise _error("invalid_connection_config", message, 422)
-    await context.bot.start()
-    return ApiMessage(code="auth_started")
+    if context.accounts:
+        account_id = context.accounts.store.active_account_id
+        if context.accounts.runtimes.is_account_running(account_id):
+            return ApiMessage(code="auth_in_progress")
+        auth = context.accounts.get_auth()
+        auth.reset()
+        valid, message = context.config.validate_connection()
+        if not valid:
+            raise _error("invalid_connection_config", message, 422)
+        await context.accounts.start_authentication()
+        return ApiMessage(code="auth_started")
+    raise _error("not_user_mode", "Telegram authentication is only used in user mode", 409)
 
 
 def _submit_auth(context: ApplicationContext, kind: str, value: str) -> ApiMessage:
-    if not context.auth:
+    if not context.accounts:
         raise _error("not_user_mode", "Telegram authentication is only used in user mode", 409)
-    submitter = getattr(context.auth, f"submit_{kind}")
+    auth = context.accounts.get_auth()
+    submitter = getattr(auth, f"submit_{kind}")
     if not submitter(value):
         raise _error("auth_value_rejected", f"No {kind} challenge is waiting", 409)
     context.events.publish("telegram-auth", {"submitted": kind})
@@ -404,8 +419,6 @@ async def clear_telegram_session(
         if context.bot.is_running:
             await context.bot.stop()
         await asyncio.to_thread(TelegramClientManager(context.config).clear_session)
-    if context.auth:
-        context.auth.reset()
     return ApiMessage(code="telegram_session_cleared")
 
 

@@ -235,6 +235,14 @@ export function DashboardPage() {
   })
 
   const status = statusQuery.data ?? {}
+  const telegramStatusLabel =
+    typeof status.connected_account_count === 'number' &&
+    typeof status.authenticated_account_count === 'number'
+      ? t('dashboard.telegramAccountsConnected', {
+          connected: status.connected_account_count,
+          total: status.authenticated_account_count,
+        })
+      : t(status.is_connected ? 'dashboard.telegramConnected' : 'dashboard.telegramDisconnected')
   const runtimeStats = status.stats ?? {}
   const activeQueue = Object.entries(status.queue?.counts ?? {})
     .filter(([key]) => key !== 'completed')
@@ -336,11 +344,7 @@ export function DashboardPage() {
                 status.is_connected ? 'bg-emerald-500' : 'bg-slate-300',
               )}
             />
-            {t(
-              status.is_connected
-                ? 'dashboard.telegramConnected'
-                : 'dashboard.telegramDisconnected',
-            )}
+            {telegramStatusLabel}
           </div>
         }
       />
@@ -717,11 +721,7 @@ export function DashboardPage() {
                 <strong className="mb-1 block text-[13px] text-slate-700">
                   {t(status.is_running ? 'dashboard.relayRunning' : 'dashboard.relayStopped')}
                 </strong>
-                <p className="m-0 text-[13px] leading-4 text-slate-500">
-                  {status.is_connected
-                    ? t('dashboard.clientConnected')
-                    : t('dashboard.clientWaiting')}
-                </p>
+                <p className="m-0 text-[13px] leading-4 text-slate-500">{telegramStatusLabel}</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">

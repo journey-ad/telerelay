@@ -211,7 +211,7 @@ class MessageFilter:
         Returns:
             Whether to forward
         """
-        # Compatibility: support passing string (old calling method)
+        # Support string or Message object
         if isinstance(message, str):
             text = message
             msg_obj = None
@@ -219,26 +219,25 @@ class MessageFilter:
             text = message.text or ""
             msg_obj = message
 
-        # 1. Check ignore list first
+        # 1. Ignore
         if self.is_ignored(text, sender_id):
             return False
 
-        # 2. Check media type (only when Message object is passed)
+        # 2. Media
         if msg_obj and not self.check_media_type(msg_obj):
             return False
 
-        # 3. Check file size
+        # 3. File size
         if msg_obj and not self.check_file_size(msg_obj):
             return False
 
-        # 4. Text matching rules
-        # If no rules configured, whitelist mode - don't forward, blacklist mode - forward
+        # 4. Text
         if not self.compiled_patterns and not self.keywords:
             return self.mode == "blacklist"
 
         matches = self.matches_text(text)
 
         if self.mode == "whitelist":
-            return matches  # Whitelist: forward only if matched
+            return matches  # Forward on match
         else:
             return not matches  # Blacklist: forward only if not matched

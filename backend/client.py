@@ -47,11 +47,11 @@ class TelegramClientManager:
         self.client: Optional[TelegramClient] = None
         self.is_connected = False
 
-        # Ensure session directory exists
+        # Ensure session dir
         session_dir = Path("data")
         session_dir.mkdir(exist_ok=True)
 
-        # Session file path
+        # Session path
         self.session_name = Path(session_name) if session_name else session_dir / "telegram_session"
         self.session_name.parent.mkdir(parents=True, exist_ok=True)
     
@@ -107,16 +107,14 @@ class TelegramClientManager:
             Whether successfully connected
         """
         try:
-            # Parse proxy configuration
+            # Init client
             proxy = self._parse_proxy()
 
-            # Create client
             if self.config.session_type == "bot":
-                # Bot mode
                 if not self.config.bot_token:
                     logger.error(t("log.client.bot_token_required"))
                     return False
-                
+
                 self.client = TelegramClient(
                     str(self.session_name),
                     self.config.api_id,
@@ -135,18 +133,17 @@ class TelegramClientManager:
                     proxy=proxy
                 )
 
-                # Check if session file exists
+                # Check session
                 from pathlib import Path
                 session_file = Path(f"{self.session_name}.session")
                 has_session = session_file.exists()
 
                 try:
-                    # If session exists, set "connecting" state; otherwise state will be set in callback
                     if has_session:
                         self.auth_manager.set_state("connecting", "")
                         logger.debug(t("log.client.session_detected"))
 
-                    # Use callback for authentication
+                    # Auth with callbacks
                     await self.client.start(
                         phone=self.auth_manager.phone_callback,
                         code_callback=self.auth_manager.code_callback,
@@ -157,7 +154,6 @@ class TelegramClientManager:
                     me: User = await self.client.get_me()
                     logger.info(t("log.client.user_logged_in", name=me.first_name, username=me.username))
 
-                    # Build user info (including first and last name)
                     full_name = ' '.join(filter(None, [me.first_name, me.last_name]))
                     user_info = full_name
                     if me.username:
@@ -165,7 +161,6 @@ class TelegramClientManager:
                     if me.id:
                         user_info += f" [ID: {me.id}]"
 
-                    # Save user info to AuthManager
                     self.auth_manager.set_user_info(user_info)
 
                     if self.on_user_authenticated:
@@ -184,7 +179,6 @@ class TelegramClientManager:
                             logger.warning("Failed to refresh Telegram profile photo: %s", exc)
                         self.on_user_authenticated(identity)
 
-                    # Set authentication success state
                     self.auth_manager.set_state("success")
 
                 except PhoneNumberInvalidError:
@@ -239,7 +233,6 @@ class TelegramClientManager:
             logger.error(t("log.client.client_not_initialized"))
             return
         
-        # Register new message event handler
         @self.client.on(events.NewMessage(chats=chats, incoming=incoming))
         async def handler(event):
             try:

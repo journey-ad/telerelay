@@ -1,11 +1,12 @@
-import unittest
 import tempfile
+import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from backend.telegram_preview import TelegramPreviewError, TelegramPreviewService
 from telethon.tl import types
+
+from backend.telegram_preview import TelegramPreviewError, TelegramPreviewService
 
 
 def entity(peer_id, name, **values):
@@ -119,26 +120,34 @@ class FakeClient:
         return next((item for item in values if item.id == ids), None)
 
 
+def preview_dependencies(client, data_dir):
+    manager = SimpleNamespace(get_client=lambda: client)
+    runtime = SimpleNamespace(is_connected=True, client_manager=manager)
+    registry = SimpleNamespace(get_runtime=lambda account_id: runtime)
+    store = SimpleNamespace(
+        active_account_id="work",
+        data_dir=data_dir,
+        get_public=lambda account_id: {"id": account_id},
+    )
+    return registry, store
+
+
 class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.client = FakeClient()
-        manager = SimpleNamespace(get_client=lambda: self.client)
-        bot = SimpleNamespace(is_connected=True, client_manager=manager)
-        store = SimpleNamespace(active_account_id="work", data_dir=self.temp_dir.name)
-        self.service = TelegramPreviewService(bot, store)
+        registry, store = preview_dependencies(self.client, self.temp_dir.name)
+        self.service = TelegramPreviewService(registry, store)
 
     async def test_first_cache_key_creation_discards_plaintext_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             cache_file = Path(temp_dir) / "telegram_preview_cache" / "account" / "avatar.jpg"
             cache_file.parent.mkdir(parents=True)
             cache_file.write_bytes(b"plaintext")
-            manager = SimpleNamespace(get_client=lambda: self.client)
-            bot = SimpleNamespace(is_connected=True, client_manager=manager)
-            store = SimpleNamespace(active_account_id="work", data_dir=temp_dir)
+            registry, store = preview_dependencies(self.client, temp_dir)
 
-            service = TelegramPreviewService(bot, store)
+            service = TelegramPreviewService(registry, store)
 
             self.assertFalse(service.cache_root.exists())
             self.assertEqual(len(service.cache_key_path.read_bytes()), service.CACHE_KEY_BYTES)
@@ -202,13 +211,13 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
             [name for name, _ in self.client.calls],
         )
 
-    async def test_rejects_requests_for_an_inactive_account(self):
-        with self.assertRaises(TelegramPreviewError) as raised:
-            await self.service.list_dialogs(
-                account_id="personal", folder="main", limit=40, cursor=None
-            )
+    async def test_explicit_account_id_is_not_limited_to_active_selection(self):
+        result = await self.service.list_dialogs(
+            account_id="personal", folder="main", limit=40, cursor=None
+        )
 
-        self.assertEqual(raised.exception.code, "inactive_account")
+        self.assertEqual(result["account_id"], "personal")
+        self.assertEqual([item["title"] for item in result["items"]], ["项目群"])
 
     async def test_inline_thumbnail_uses_embedded_telegram_bytes(self):
         media_message = self.client.messages[101][-1]

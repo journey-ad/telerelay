@@ -13,10 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from backend.auth_manager import AuthManager
 from backend.client import TelegramClientManager
 from backend.logger import get_logger
-
 
 logger = get_logger()
 
@@ -63,20 +61,40 @@ class TelegramAccountStore:
     def active_session_name(self) -> Path:
         return self.session_name(self.active_account_id)
 
-    def list_public(self, connected: bool = False) -> list[dict[str, Any]]:
+    def list_public(
+        self,
+        connected: bool = False,
+        *,
+        connected_account_ids: set[str] | None = None,
+        running_account_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
         with self._lock:
             active_id = self._active_account_id
             accounts = list(self._accounts)
         return [
-            self._public(account, account.id == active_id, connected)
+            self._public(
+                account,
+                account.id == active_id,
+                account.id in connected_account_ids
+                if connected_account_ids is not None
+                else bool(connected and account.id == active_id),
+                account.id in running_account_ids
+                if running_account_ids is not None
+                else bool(connected and account.id == active_id),
+            )
             for account in accounts
         ]
 
-    def get_public(self, account_id: str, connected: bool = False) -> dict[str, Any]:
+    def get_public(
+        self,
+        account_id: str,
+        connected: bool = False,
+        running: bool | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             account = self._find(account_id)
             active = account.id == self._active_account_id
-        return self._public(account, active, connected)
+        return self._public(account, active, connected, connected if running is None else running)
 
     def create(self, label: str) -> TelegramAccount:
         label = self.validate_label(label)
@@ -201,18 +219,20 @@ class TelegramAccountStore:
         account: TelegramAccount,
         active: bool,
         connected: bool,
+        running: bool,
     ) -> dict[str, Any]:
         authenticated = self.has_session(account.id) and (
             account.id == self.DEFAULT_ACCOUNT_ID or account.telegram_user_id is not None
         )
         avatar_path = self.avatar_path(account.id)
         avatar_version = str(avatar_path.stat().st_mtime_ns) if avatar_path.is_file() else None
-        status = "connected" if active and connected else "authenticated" if authenticated else "needs_auth"
+        status = "connected" if connected else "authenticated" if authenticated else "needs_auth"
         return {
             **asdict(account),
             "active": active,
             "authenticated": authenticated,
-            "connected": bool(active and connected),
+            "running": bool(running),
+            "connected": bool(connected),
             "status": status,
             "avatar_version": avatar_version,
         }
@@ -284,64 +304,68 @@ class TelegramAccountStore:
 
 
 class TelegramAccountService:
-    """Serialize account changes with the single active Telegram runtime."""
+    """Coordinate account metadata with isolated parallel runtimes."""
 
-    def __init__(self, store: TelegramAccountStore, bot, auth: AuthManager):
+    def __init__(self, store: TelegramAccountStore, runtimes):
         self.store = store
-        self.bot = bot
-        self.auth = auth
-        self._switch_lock = asyncio.Lock()
+        self.runtimes = runtimes
+        self._mutation_lock = asyncio.Lock()
 
     def list_accounts(self) -> list[dict[str, Any]]:
-        return self.store.list_public(connected=self.bot.is_connected)
+        account_ids = [account["id"] for account in self.store.list_public()]
+        connected_ids = {
+            account_id
+            for account_id in account_ids
+            if self.runtimes.is_account_connected(account_id)
+        }
+        running_ids = {
+            account_id
+            for account_id in account_ids
+            if self.runtimes.is_account_running(account_id)
+        }
+        return self.store.list_public(
+            connected_account_ids=connected_ids,
+            running_account_ids=running_ids,
+        )
 
     async def create(self, label: str) -> dict[str, Any]:
-        async with self._switch_lock:
+        async with self._mutation_lock:
             label = self.store.validate_label(label)
-            await self._stop_runtime()
             account = self.store.create(label)
-            self.bot.set_session_name(self.store.session_name(account.id))
-            return self.store.get_public(account.id)
+            self.runtimes.ensure_runtime(account.id)
+            return self._public(account.id)
 
     async def activate(self, account_id: str) -> dict[str, Any]:
-        async with self._switch_lock:
-            current_id = self.store.active_account_id
-            if current_id == account_id:
-                return self.store.get_public(account_id, connected=self.bot.is_connected)
-            self.store.get_public(account_id)
-            await self._stop_runtime()
-            account = self.store.set_active(account_id)
-            self.bot.set_session_name(self.store.session_name(account.id))
-            if self.store.has_session(account.id):
-                await self.bot.start()
-            return self.store.get_public(account.id, connected=self.bot.is_connected)
+        async with self._mutation_lock:
+            self.store.set_active(account_id)
+            self.runtimes.ensure_runtime(account_id)
+            return self._public(account_id)
 
     async def delete(self, account_id: str) -> None:
-        async with self._switch_lock:
-            deleting_active = self.store.active_account_id == account_id
+        async with self._mutation_lock:
             self.store.validate_delete(account_id)
-            if deleting_active:
-                await self._stop_runtime()
-            session_name, _ = self.store.delete(account_id)
-            await asyncio.to_thread(TelegramClientManager.clear_session_files, session_name)
-            await asyncio.to_thread(self.store.clear_avatar, account_id)
-            if deleting_active:
-                self.bot.set_session_name(self.store.active_session_name)
-                if self.store.has_session(self.store.active_account_id):
-                    await self.bot.start()
+            session_name = self.store.session_name(account_id)
+            self.runtimes.block_account(account_id)
+            try:
+                await self.runtimes.remove_runtime(account_id, clear_queue=True)
+                await asyncio.to_thread(TelegramClientManager.clear_session_files, session_name)
+                await asyncio.to_thread(self.store.clear_avatar, account_id)
+                self.store.delete(account_id)
+            finally:
+                self.runtimes.unblock_account(account_id)
 
     async def clear_active_session(self) -> None:
-        async with self._switch_lock:
-            await self._stop_runtime()
+        async with self._mutation_lock:
+            account_id = self.store.active_account_id
+            await self.runtimes.stop_account(account_id)
             await asyncio.to_thread(
                 TelegramClientManager.clear_session_files,
-                self.store.active_session_name,
+                self.store.session_name(account_id),
             )
-            self.store.clear_identity(self.store.active_account_id)
-            await asyncio.to_thread(self.store.clear_avatar, self.store.active_account_id)
+            self.store.clear_identity(account_id)
+            await asyncio.to_thread(self.store.clear_avatar, account_id)
 
-    def update_active_identity(self, identity: dict[str, Any]) -> None:
-        account_id = self.store.active_account_id
+    def update_identity(self, account_id: str, identity: dict[str, Any]) -> None:
         self.store.update_identity(account_id, identity)
         if "avatar_bytes" in identity:
             try:
@@ -349,7 +373,17 @@ class TelegramAccountService:
             except (OSError, TelegramAccountError) as exc:
                 logger.warning("Failed to cache Telegram account avatar: %s", exc)
 
-    async def _stop_runtime(self) -> None:
-        if self.bot.is_running:
-            await self.bot.stop()
-        self.auth.reset()
+    def get_auth(self):
+        return self.runtimes.get_auth(self.store.active_account_id)
+
+    async def start_authentication(self) -> bool:
+        account_id = self.store.active_account_id
+        self.get_auth().reset()
+        return await self.runtimes.start_account(account_id)
+
+    def _public(self, account_id: str) -> dict[str, Any]:
+        return self.store.get_public(
+            account_id,
+            connected=self.runtimes.is_account_connected(account_id),
+            running=self.runtimes.is_account_running(account_id),
+        )

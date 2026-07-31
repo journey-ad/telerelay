@@ -3,8 +3,6 @@
 from dataclasses import dataclass
 from threading import Thread
 
-from backend.auth_manager import AuthManager
-from backend.bot_manager import BotManager
 from backend.config import Config
 from backend.events import EventBus, EventLogHandler
 from backend.exporter.scheduler import ExportScheduler
@@ -17,8 +15,7 @@ from backend.telegram_preview import TelegramPreviewService
 @dataclass
 class ApplicationContext:
     config: Config
-    auth: AuthManager | None
-    bot: BotManager
+    bot: object
     exports: ExportService
     scheduler: ExportScheduler
     rules: RuleService
