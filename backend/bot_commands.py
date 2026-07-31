@@ -730,7 +730,7 @@ class AdminBotManager:
                 buttons=buttons,
             )
         except Exception as e:
-            logger.error(f"Failed to send WebApp button: {e}")
+            logger.error(t("log.admin_bot.webapp_failed", error=str(e)))
             await event.reply(t("bot_cmd.webapp_url_invalid", error=str(e)))
 
     async def _set_menu_button(self) -> None:

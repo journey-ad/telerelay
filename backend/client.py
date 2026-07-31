@@ -176,7 +176,7 @@ class TelegramClientManager:
                                 download_big=False,
                             )
                         except Exception as exc:
-                            logger.warning("Failed to refresh Telegram profile photo: %s", exc)
+                            logger.warning(t("log.client.photo_refresh_failed", error=str(exc)))
                         self.on_user_authenticated(identity)
 
                     self.auth_manager.set_state("success")

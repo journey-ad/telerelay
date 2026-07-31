@@ -15,6 +15,7 @@ from typing import Any
 
 from backend.client import TelegramClientManager
 from backend.logger import get_logger
+from backend.i18n import t
 
 logger = get_logger()
 
@@ -371,7 +372,7 @@ class TelegramAccountService:
             try:
                 self.store.update_avatar(account_id, identity["avatar_bytes"])
             except (OSError, TelegramAccountError) as exc:
-                logger.warning("Failed to cache Telegram account avatar: %s", exc)
+                logger.warning(t("log.account.avatar_cache_failed", error=str(exc)))
 
     def get_auth(self):
         return self.runtimes.get_auth(self.store.active_account_id)

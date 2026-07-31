@@ -19,7 +19,7 @@ from backend.events import EventBus, EventLogHandler
 from backend.exporter.scheduler import ExportScheduler
 from backend.exporter.service import ExportService
 from backend.forwarder.downloader import MediaDownloader
-from backend.i18n import set_language
+from backend.i18n import set_language, t
 from backend.logger import get_logger, setup_logger
 from backend.services import RuleService
 from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
@@ -86,7 +86,7 @@ async def lifespan(app: FastAPI):
         )
         context.admin_thread.start()
 
-    logger.info("TeleRelay API ready on %s:%s", config.web_host, config.web_port)
+    logger.info(t("log.main.api_ready", host=config.web_host, port=config.web_port))
     try:
         yield
     finally:

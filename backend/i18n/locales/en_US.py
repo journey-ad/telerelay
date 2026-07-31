@@ -18,6 +18,7 @@ TRANSLATIONS = {
             "shutdown": "\\nShutdown signal received, closing...",
             "error": "Program error: {error}",
             "admin_bot_started": "✓ Admin Bot started",
+            "api_ready": "TeleRelay API ready on {host}:{port}",
         },
 
         # log.bot.* - bot_manager.py logs
@@ -86,6 +87,7 @@ TRANSLATIONS = {
             "session_deleted": "Session file deleted: {file}",
             "session_cleared": "Session files cleared",
             "session_clear_failed": "Failed to clear session files: {error}",
+            "photo_refresh_failed": "Failed to refresh Telegram profile photo: {error}",
         },
 
         # log.forward.* - forwarder related logs
@@ -119,6 +121,7 @@ TRANSLATIONS = {
                 "group_complete": "⬇️ Media group download complete - files={count}",
                 "cleanup": "Temporary files cleaned - path={path}",
                 "cleanup_failed": "Failed to clean up temporary files: {path}, {error}",
+                "purge_failed": "Failed to purge temp directory: {error}",
             },
 
             # media_group
@@ -185,8 +188,14 @@ TRANSLATIONS = {
             "error": "Admin Bot error: {error}",
             "proxy_failed": "Admin Bot proxy parse failed: {error}",
             "retry": "Admin Bot connection retry ({attempt}): {error}",
+            "webapp_failed": "Failed to send WebApp button: {error}",
             "menu_button_set": "✓ Bot menu button set to Mini App",
             "menu_button_failed": "Failed to set Bot menu button: {error}",
+        },
+
+        # log.account.* - telegram_accounts.py logs
+        "account": {
+            "avatar_cache_failed": "Failed to cache Telegram account avatar: {error}",
         },
 
         # log.stats.* - statistics logs

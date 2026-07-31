@@ -18,6 +18,7 @@ TRANSLATIONS = {
             "shutdown": "\\n收到终止信号，正在关闭...",
             "error": "程序运行出错: {error}",
             "admin_bot_started": "✓ 管理 Bot 已启动",
+            "api_ready": "TeleRelay API 已就绪 {host}:{port}",
         },
 
         # log.bot.* - bot_manager.py 的日志
@@ -86,6 +87,7 @@ TRANSLATIONS = {
             "session_deleted": "已删除 session 文件: {file}",
             "session_cleared": "Session 文件已清除",
             "session_clear_failed": "清除 session 文件失败: {error}",
+            "photo_refresh_failed": "刷新 Telegram 头像失败: {error}",
         },
 
         # log.forward.* - forwarder 相关的日志
@@ -119,6 +121,7 @@ TRANSLATIONS = {
                 "group_complete": "⬇️ 媒体组下载完成 - 文件={count}",
                 "cleanup": "清理临时文件 - 路径={path}",
                 "cleanup_failed": "清理临时文件失败: {path}, {error}",
+                "purge_failed": "清理临时目录失败: {error}",
             },
 
             # media_group
@@ -185,8 +188,14 @@ TRANSLATIONS = {
             "error": "管理 Bot 运行出错: {error}",
             "proxy_failed": "管理 Bot 代理解析失败: {error}",
             "retry": "管理 Bot 连接重试 ({attempt}): {error}",
+            "webapp_failed": "发送 WebApp 按钮失败: {error}",
             "menu_button_set": "✓ 已设置 Bot 菜单按钮为小程序入口",
             "menu_button_failed": "设置 Bot 菜单按钮失败: {error}",
+        },
+
+        # log.account.* - telegram_accounts.py 的日志
+        "account": {
+            "avatar_cache_failed": "缓存 Telegram 账号头像失败: {error}",
         },
 
         # log.stats.* - statistics logs

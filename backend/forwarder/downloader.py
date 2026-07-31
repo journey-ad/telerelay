@@ -32,7 +32,7 @@ class MediaDownloader:
                 shutil.rmtree(TEMP_DIR)
                 logger.debug(t("log.forward.downloader.cleanup", path=TEMP_DIR))
             except OSError as e:
-                logger.warning(f"Failed to purge temp directory: {e}")
+                logger.warning(t("log.forward.downloader.purge_failed", error=str(e)))
 
     async def download(self, messages: List[Message]) -> tuple[List[str], str]:
         """Download media files into a unique subdirectory.

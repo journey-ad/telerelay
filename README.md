@@ -2,7 +2,17 @@
 
 # TeleRelay
 
-Self-hosted Telegram relay and archive. FastAPI backend, React console, persistent forwarding queues, rule-based filtering, callback-button automation, and message exports.
+An intelligent Telegram message relay tool with smart filtering based on regex patterns and keywords, featuring a modern Web management interface.
+
+<p align="center">
+  <img src="https://count.getloli.com/@telerelay.github?theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
+</p>
+
+## Preview
+
+<p align="center">
+  <img src="./docs/preview_en.jpeg" width="600">
+</p>
 
 ## Features
 

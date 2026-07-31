@@ -2,7 +2,17 @@
 
 # TeleRelay
 
-自托管 Telegram 消息转发与归档工具。FastAPI 后端，React 控制台，持久化转发队列，规则过滤，回调按钮自动化，消息导出。
+强大的 自托管 Telegram 消息转发与归档工具。支持基于正则表达式和关键词的灵活过滤，提供现代化的 Web 管理界面
+
+<p align="center">
+  <img src="https://count.getloli.com/@telerelay.github?theme=minecraft&padding=7&offset=0&align=top&scale=1&pixelated=1&darkmode=auto" width="400">
+</p>
+
+## 预览
+
+<p align="center">
+  <img src="./docs/preview_zh.jpeg" width="600">
+</p>
 
 ## 功能
 
