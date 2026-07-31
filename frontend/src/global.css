@@ -35,4 +35,13 @@
     background: #2563eb;
     color: white;
   }
+
+  .linkified {
+    color: #2563eb;
+  }
+
+  .linkified:hover {
+    color: #1d4ed8;
+    text-decoration: underline;
+  }
 }

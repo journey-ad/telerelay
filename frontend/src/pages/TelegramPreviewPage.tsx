@@ -32,6 +32,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import Linkify from 'linkify-react'
 import { request } from '../api/client'
 import { downloadFile } from '../api/downloads'
 import { AuthenticatedImage } from '../components/AuthenticatedImage'
@@ -536,9 +537,13 @@ function MessageBubble({
             </div>
           ) : null}
           {textMessage ? (
-            <p className="m-0 whitespace-pre-wrap wrap-break-word text-[13px] leading-4.5">
+            <Linkify
+              as="p"
+              options={{ target: '_blank', rel: 'noopener noreferrer', className: 'linkified' }}
+              className="m-0 whitespace-pre-wrap wrap-break-word text-[13px] leading-4.5"
+            >
               {textMessage}
-            </p>
+            </Linkify>
           ) : null}
           {message.reactions.length ? (
             <div className="mt-1.5 flex flex-wrap gap-1">

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, History, Search, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import Linkify from 'linkify-react'
 import { request } from '../api/client'
 import {
   Badge,
@@ -146,9 +147,13 @@ export function HistoryPage() {
                     ) : null}
                   </td>
                   <td>
-                    <p className="m-0 line-clamp-2 max-w-108 leading-4">
+                    <Linkify
+                      as="p"
+                      options={{ target: '_blank', rel: 'noopener noreferrer', className: 'linkified' }}
+                      className="m-0 line-clamp-2 max-w-108 leading-4"
+                    >
                       {item.content || t('history.noText')}
-                    </p>
+                    </Linkify>
                   </td>
                   <td>
                     <Badge tone="gray">{item.media_type || 'text'}</Badge>
