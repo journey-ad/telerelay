@@ -1,10 +1,15 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
-import { enUS } from './locales/en-US'
-import { zhCN } from './locales/zh-CN'
+import enUS from './locales/en-US.json'
+import zhCN from './locales/zh-CN.json'
 
 export const supportedLocales = ['zh-CN', 'en-US'] as const
 export type Locale = (typeof supportedLocales)[number]
+
+const resources = {
+  'zh-CN': { translation: zhCN },
+  'en-US': { translation: enUS },
+} satisfies Record<Locale, { translation: typeof enUS }>
 
 const storageKey = 'telerelay.locale'
 const savedLocale = window.localStorage.getItem(storageKey)
@@ -13,10 +18,7 @@ const initialLocale: Locale = supportedLocales.includes(savedLocale as Locale)
   : 'zh-CN'
 
 void i18n.use(initReactI18next).init({
-  resources: {
-    'zh-CN': { translation: zhCN },
-    'en-US': { translation: enUS },
-  },
+  resources,
   lng: initialLocale,
   fallbackLng: 'zh-CN',
   supportedLngs: supportedLocales,
