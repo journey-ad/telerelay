@@ -15,6 +15,7 @@ import {
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
+import { useTelegramChats } from '../hooks/useTelegramChats'
 import { DownloadButton } from '../components/DownloadButton'
 import {
   Badge,
@@ -36,7 +37,7 @@ import {
   tableWrapClass,
   tabsListClass,
 } from '../components/ui'
-import type { ExportChat, ExportJob, ExportRun, ExportTask } from '../types'
+import type { ExportJob, ExportRun, ExportTask } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom, shortDate } from '../utils/format'
 
@@ -63,6 +64,11 @@ function downloadOption(file: string) {
     label: (filename.split('.').pop() ?? filename).toUpperCase(),
     filename,
   }
+}
+
+function chatOptionLabel(chat: { id: number; title: string; username?: string | null }) {
+  const username = chat.username ? ` (@${chat.username})` : ''
+  return `${chat.title}${username} [${chat.id}]`
 }
 
 export function ExportsPage() {
@@ -93,11 +99,7 @@ export function ExportsPage() {
     all_history: false,
     enabled: true,
   })
-  const chats = useQuery({
-    queryKey: ['export-chats'],
-    queryFn: () => request<ExportChat[]>('/api/v1/exports/chats'),
-    retry: false,
-  })
+  const chats = useTelegramChats()
   const tasks = useQuery({
     queryKey: ['export-tasks'],
     queryFn: () => request<ExportTask[]>('/api/v1/exports/tasks'),
@@ -121,7 +123,7 @@ export function ExportsPage() {
   })
   useEffect(() => {
     if (!messageForm.chat_id && chats.data?.[0])
-      setMessageForm((form) => ({ ...form, chat_id: String(chats.data![0].chat_id) }))
+      setMessageForm((form) => ({ ...form, chat_id: String(chats.data![0].id) }))
   }, [chats.data, messageForm.chat_id])
 
   const startExport = useMutation({
@@ -189,7 +191,7 @@ export function ExportsPage() {
   function openTask() {
     setTaskForm((form) => ({
       ...form,
-      chat_id: form.chat_id || String(chats.data?.[0]?.chat_id ?? ''),
+      chat_id: form.chat_id || String(chats.data?.[0]?.id ?? ''),
     }))
     setTaskOpen(true)
   }
@@ -246,8 +248,8 @@ export function ExportsPage() {
                     onValueChange={(chat_id) => setMessageForm({ ...messageForm, chat_id })}
                     placeholder={t('exports.selectChatPlaceholder')}
                     options={(chats.data ?? []).map((chat) => ({
-                      value: String(chat.chat_id),
-                      label: chat.label,
+                      value: String(chat.id),
+                      label: chatOptionLabel(chat),
                     }))}
                   />
                 </label>
@@ -556,8 +558,8 @@ export function ExportsPage() {
                 value={taskForm.chat_id}
                 onValueChange={(chat_id) => setTaskForm({ ...taskForm, chat_id })}
                 options={(chats.data ?? []).map((chat) => ({
-                  value: String(chat.chat_id),
-                  label: chat.label,
+                  value: String(chat.id),
+                  label: chatOptionLabel(chat),
                 }))}
               />
             </label>

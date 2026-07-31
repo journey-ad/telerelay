@@ -29,19 +29,6 @@ class AdministratorRecord:
 
 
 @dataclass(frozen=True)
-class ChatSummary:
-    chat_id: int
-    title: str
-    kind: str
-    username: Optional[str] = None
-
-    @property
-    def label(self) -> str:
-        suffix = f" (@{self.username})" if self.username else ""
-        return f"{self.title}{suffix} [{self.chat_id}]"
-
-
-@dataclass(frozen=True)
 class ChatRecord:
     chat_id: int
     title: str

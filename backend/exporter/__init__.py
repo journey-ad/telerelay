@@ -3,7 +3,6 @@
 from .models import (
     AdministratorRecord,
     ChatRecord,
-    ChatSummary,
     ExportJobSnapshot,
     ExportTask,
     MessageRecord,
@@ -13,7 +12,6 @@ from .message_store import MessageArchiveStore
 __all__ = [
     "AdministratorRecord",
     "ChatRecord",
-    "ChatSummary",
     "ExportJobSnapshot",
     "ExportTask",
     "MessageRecord",

@@ -78,7 +78,6 @@ class ExportService:
         self._jobs: Dict[str, ExportJobState] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
         self._active_task_ids = set()
-        self._chat_cache = {}
         self._message_stores: Dict[int, MessageArchiveStore] = {}
         self.scheduler = None
 
@@ -96,19 +95,6 @@ class ExportService:
         available, reason = self.availability(require_connection=True)
         if not available:
             raise ExportUnavailable(reason)
-
-    def list_chat_choices(self) -> List[Tuple[str, str]]:
-        self._ensure_available()
-        chats = self.source.list_chat_summaries()
-        with self._lock:
-            self._chat_cache = {chat.chat_id: chat for chat in chats}
-        logger.debug(t("log.export.chats_loaded", count=len(chats)))
-        return [(chat.label, str(chat.chat_id)) for chat in chats]
-
-    def _chat_title(self, chat_id: int) -> str:
-        with self._lock:
-            chat = self._chat_cache.get(int(chat_id))
-        return chat.title if chat else str(chat_id)
 
     @staticmethod
     def normalize_formats(
@@ -363,6 +349,7 @@ class ExportService:
         self,
         *,
         chat_id,
+        chat_title: str,
         start_at,
         end_at,
         formats: Sequence[str],
@@ -383,7 +370,7 @@ class ExportService:
         formats = self.normalize_formats(formats)
         directory = self._validated_directory(subdirectory)
         state = self._new_job("messages")
-        chat_title = self._chat_title(chat_id)
+        chat_title = str(chat_title).strip() or str(chat_id)
         logger.info(
             t(
                 "log.export.message_queued",
@@ -733,6 +720,7 @@ class ExportService:
         task_id=None,
         name: str,
         chat_id,
+        chat_title: str,
         initial_start_at,
         formats: Sequence[str],
         subdirectory: str,
@@ -745,6 +733,7 @@ class ExportService:
         enabled: bool = True,
     ) -> ExportTask:
         chat_id = self._validate_chat_id(chat_id)
+        chat_title = str(chat_title).strip() or str(chat_id)
         name = (name or "").strip()
         if not name:
             raise ExportValidationError(t("message.export.task_name_required"))
@@ -774,7 +763,7 @@ class ExportService:
         values = {
             "name": name[:100],
             "chat_id": chat_id,
-            "chat_title": self._chat_title(chat_id),
+            "chat_title": chat_title,
             "initial_start_at": _date_text(start),
             "formats": formats,
             "subdirectory": subdirectory,

@@ -16,6 +16,7 @@ from backend.config import Config
 from backend.events import EventBus
 from backend.services import RuleService
 from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
+from backend.telegram_chats import TelegramChat
 from backend.telegram_runtimes import TelegramRuntimeRegistry
 
 
@@ -101,6 +102,34 @@ class FakeTelegramPreview:
         }
 
 
+class FakeTelegramChats:
+    def __init__(self):
+        self.calls = []
+        self.chat = TelegramChat(
+            id=-1001,
+            title="Release Room",
+            kind="supergroup",
+            username="release_room",
+        )
+
+    def list_chats(self, account_id):
+        self.calls.append(("list", account_id))
+        return [self.chat]
+
+    def get_chat(self, account_id, chat_id):
+        self.calls.append(("get", account_id, chat_id))
+        return self.chat
+
+
+class FakeExports:
+    def __init__(self):
+        self.message_export = None
+
+    def start_message_export(self, **values):
+        self.message_export = values
+        return "job-1"
+
+
 def make_app(context: ApplicationContext) -> FastAPI:
     app = FastAPI()
     app.state.context = context
@@ -141,15 +170,18 @@ class ApiContractTests(unittest.TestCase):
         self.stats_patch.start()
         self.addCleanup(self.stats_patch.stop)
         self.telegram_preview = FakeTelegramPreview()
+        self.telegram_chats = FakeTelegramChats()
+        self.exports = FakeExports()
         self.context = ApplicationContext(
             config=self.config,
             bot=self.bot,
-            exports=SimpleNamespace(),
+            exports=self.exports,
             scheduler=SimpleNamespace(),
             rules=self.rules,
             events=self.events,
             log_handler=SimpleNamespace(),
             accounts=self.accounts,
+            telegram_chats=self.telegram_chats,
             telegram_preview=self.telegram_preview,
         )
         self.client = TestClient(make_app(self.context))
@@ -215,6 +247,39 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.content, b"fake-jpeg-avatar")
         account = self.client.get("/api/v1/telegram-accounts").json()[0]
         self.assertIsNotNone(account["avatar_version"])
+
+    def test_telegram_account_chats_contract(self):
+        response = self.client.get("/api/v1/telegram-accounts/default/chats")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json(),
+            [
+                {
+                    "id": -1001,
+                    "title": "Release Room",
+                    "kind": "supergroup",
+                    "username": "release_room",
+                }
+            ],
+        )
+        self.assertEqual(self.telegram_chats.calls, [("list", "default")])
+        self.assertEqual(self.client.get("/api/v1/exports/chats").status_code, 404)
+
+    def test_message_export_resolves_chat_title_without_listing_chats(self):
+        response = self.client.post(
+            "/api/v1/exports/jobs/messages",
+            json={
+                "chat_id": -1001,
+                "formats": ["json"],
+                "all_history": True,
+            },
+        )
+
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json(), {"job_id": "job-1"})
+        self.assertEqual(self.telegram_chats.calls, [("get", "default", -1001)])
+        self.assertEqual(self.exports.message_export["chat_title"], "Release Room")
 
     def test_telegram_preview_dialog_and_message_contracts(self):
         dialogs = self.client.get(

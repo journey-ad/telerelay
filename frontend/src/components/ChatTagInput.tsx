@@ -1,10 +1,9 @@
 import * as Popover from '@radix-ui/react-popover'
-import { useQuery } from '@tanstack/react-query'
 import { Check, Plus, Search, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { request } from '../api/client'
-import type { ChatRef, ExportChat } from '../types'
+import { useTelegramChats } from '../hooks/useTelegramChats'
+import type { ChatRef, TelegramChat } from '../types'
 import { cn } from '../utils/cn'
 
 interface ChatTagInputProps {
@@ -12,8 +11,8 @@ interface ChatTagInputProps {
   onChange: (value: ChatRef[]) => void
 }
 
-function findChat(chats: ExportChat[] | undefined, chatId: ChatRef) {
-  return chats?.find((chat) => String(chat.chat_id) === String(chatId))
+function findChat(chats: TelegramChat[] | undefined, chatId: ChatRef) {
+  return chats?.find((chat) => String(chat.id) === String(chatId))
 }
 
 function sameChat(left: ChatRef, right: ChatRef) {
@@ -30,17 +29,15 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
   const [search, setSearch] = useState('')
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
 
-  const chats = useQuery({
-    queryKey: ['export-chats'],
-    queryFn: () => request<ExportChat[]>('/api/v1/exports/chats'),
-    retry: false,
-  })
+  const chats = useTelegramChats()
 
   const filtered = useMemo(() => {
     if (!chats.data) return []
     const term = search.trim().toLowerCase()
-    return chats.data.filter(
-      (chat) => String(chat.chat_id).includes(term) || chat.label.toLowerCase().includes(term),
+    return chats.data.filter((chat) =>
+      [chat.id, chat.title, chat.username]
+        .filter((value) => value !== null && value !== undefined)
+        .some((value) => String(value).toLowerCase().includes(term)),
     )
   }, [chats.data, search])
 
@@ -55,6 +52,10 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
   function toggleChat(chatId: ChatRef) {
     const selected = value.some((item) => sameChat(item, chatId))
     onChange(selected ? value.filter((item) => !sameChat(item, chatId)) : [...value, chatId])
+  }
+
+  function removeChat(index: number) {
+    onChange(value.filter((_, itemIndex) => itemIndex !== index))
   }
 
   function addCustomChat() {
@@ -73,15 +74,15 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
           'focus-within:ring-3 focus-within:ring-blue-500/10',
         )}
       >
-        {value.map((chatId) => {
+        {value.map((chatId, index) => {
           const chat = findChat(chats.data, chatId)
           const unknown = chats.isSuccess && !chat
           const label =
-            chat?.label ?? (unknown ? t('chatInput.unknown', { id: chatId }) : String(chatId))
+            chat?.title ?? (unknown ? t('chatInput.unknown', { id: chatId }) : String(chatId))
 
           return (
             <span
-              key={String(chatId)}
+              key={`${String(chatId)}-${index}`}
               className={cn(
                 'inline-flex h-6.5 items-center gap-1 rounded border px-1.5',
                 'text-xs',
@@ -103,7 +104,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
                 )}
                 onClick={(event) => {
                   event.stopPropagation()
-                  toggleChat(chatId)
+                  removeChat(index)
                 }}
               >
                 <X size={12} strokeWidth={2.5} />
@@ -200,11 +201,11 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
               </p>
             ) : (
               filtered.map((chat) => {
-                const selected = value.some((item) => sameChat(item, chat.chat_id))
+                const selected = value.some((item) => sameChat(item, chat.id))
 
                 return (
                   <button
-                    key={chat.chat_id}
+                    key={chat.id}
                     type="button"
                     aria-pressed={selected}
                     className={cn(
@@ -212,10 +213,13 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
                       'text-left text-xs text-slate-600 transition-colors',
                       'hover:bg-slate-50',
                     )}
-                    onClick={() => toggleChat(chat.chat_id)}
+                    onClick={() => toggleChat(chat.id)}
                   >
-                    <span className="min-w-0 flex-1 truncate">{chat.label}</span>
-                    <span className="shrink-0 text-xs text-slate-400">{chat.chat_id}</span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {chat.title}
+                      {chat.username ? ` (@${chat.username})` : ''}
+                    </span>
+                    <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
                     <span className="grid size-4 shrink-0 place-items-center text-blue-600">
                       {selected ? <Check size={13} strokeWidth={2.5} /> : null}
                     </span>

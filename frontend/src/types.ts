@@ -187,9 +187,11 @@ export interface HistoryPage {
   page_size: number
 }
 
-export interface ExportChat {
-  label: string
-  chat_id: number
+export interface TelegramChat {
+  id: number
+  title: string
+  kind: 'bot' | 'group' | 'supergroup' | 'channel'
+  username?: string | null
 }
 export interface ExportTask {
   id: number

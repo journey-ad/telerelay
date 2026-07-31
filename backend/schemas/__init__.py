@@ -86,6 +86,13 @@ class TelegramAccountCreate(StrictModel):
         return value
 
 
+class TelegramChatResponse(StrictModel):
+    id: int
+    title: str
+    kind: Literal["bot", "group", "supergroup", "channel"]
+    username: str | None = None
+
+
 class GroupExportRequest(StrictModel):
     formats: list[Literal["json", "csv", "html"]]
     subdirectory: str = "groups"

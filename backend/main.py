@@ -23,6 +23,7 @@ from backend.i18n import set_language, t
 from backend.logger import get_logger, setup_logger
 from backend.services import RuleService
 from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
+from backend.telegram_chats import TelegramChatService
 from backend.telegram_preview import TelegramPreviewService
 from backend.telegram_runtimes import TelegramRuntimeRegistry
 
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
         bot = BotManager(config)
     bot.bind_loop(asyncio.get_running_loop())
     accounts = TelegramAccountService(account_store, bot) if account_store else None
+    telegram_chats = TelegramChatService(bot, account_store) if account_store else None
     telegram_preview = TelegramPreviewService(bot, account_store) if account_store else None
     if accounts:
         bot.on_user_authenticated = accounts.update_identity
@@ -64,6 +66,7 @@ async def lifespan(app: FastAPI):
         events=events,
         log_handler=log_handler,
         accounts=accounts,
+        telegram_chats=telegram_chats,
         telegram_preview=telegram_preview,
     )
     app.state.context = context

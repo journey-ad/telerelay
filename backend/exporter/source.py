@@ -15,7 +15,7 @@ from telethon.tl.functions.messages import GetFullChatRequest
 
 from backend.i18n import t
 
-from .models import AdministratorRecord, ChatRecord, ChatSummary, MessageRecord
+from .models import AdministratorRecord, ChatRecord, MessageRecord
 
 _STREAM_END = object()
 
@@ -131,27 +131,6 @@ class TelegramExportSource:
 
     def __init__(self, bot_manager):
         self.bot_manager = bot_manager
-
-    def list_chat_summaries(self, timeout: float = 90) -> List[ChatSummary]:
-        future = self.bot_manager.submit_telegram(self._list_chat_summaries)
-        return future.result(timeout=timeout)
-
-    async def _list_chat_summaries(self, client) -> List[ChatSummary]:
-        chats: List[ChatSummary] = []
-        async for dialog in client.iter_dialogs():
-            entity = dialog.entity
-            is_bot = isinstance(entity, types.User) and getattr(entity, "bot", False)
-            if not isinstance(entity, (types.Chat, types.Channel)) and not is_bot:
-                continue
-            chats.append(
-                ChatSummary(
-                    chat_id=int(utils.get_peer_id(entity)),
-                    title=_display_name(entity),
-                    kind=_chat_kind(entity),
-                    username=getattr(entity, "username", None),
-                )
-            )
-        return sorted(chats, key=lambda item: (item.title.casefold(), item.chat_id))
 
     def list_chat_records(
         self,

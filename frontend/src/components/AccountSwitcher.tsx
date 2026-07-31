@@ -73,7 +73,6 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
         client.invalidateQueries({ queryKey: ['telegram-accounts'] }),
         client.invalidateQueries({ queryKey: ['telegram-auth'] }),
         client.invalidateQueries({ queryKey: ['bot-status'] }),
-        client.invalidateQueries({ queryKey: ['export-chats'] }),
       ])
     },
   })

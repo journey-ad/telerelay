@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
 import { ChatTagInput } from '../components/ChatTagInput'
 import { RegexField, useRegexValidation } from '../components/RegexField'
+import { useTelegramChats } from '../hooks/useTelegramChats'
 import {
   Badge,
   Button,
@@ -19,7 +20,7 @@ import {
   tableClass,
   tableWrapClass,
 } from '../components/ui'
-import type { ForwardingRule } from '../types'
+import type { ChatRef, ForwardingRule } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 import { lines } from '../utils/parse'
@@ -68,6 +69,11 @@ export function RulesPage() {
     queryKey: ['rules'],
     queryFn: () => request<ForwardingRule[]>('/api/v1/rules'),
   })
+  const chatsQuery = useTelegramChats()
+  const chatLabels = useMemo(
+    () => new Map((chatsQuery.data ?? []).map((chat) => [String(chat.id), chat.title] as const)),
+    [chatsQuery.data],
+  )
   const rules = useMemo(
     () =>
       (rulesQuery.data ?? [])
@@ -140,6 +146,8 @@ export function RulesPage() {
     key: K,
     value: ForwardingRule['forwarding'][K],
   ) => setForm((current) => ({ ...current, forwarding: { ...current.forwarding, [key]: value } }))
+  const formatChats = (chatRefs: ChatRef[]) =>
+    chatRefs.map((chatRef) => chatLabels.get(String(chatRef)) ?? String(chatRef)).join(', ')
 
   return (
     <>
@@ -221,7 +229,7 @@ export function RulesPage() {
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
-                      {rule.source_chats.join(', ') || '-'}
+                      {formatChats(rule.source_chats) || '-'}
                     </span>
                     <small className="mt-1 block text-xs text-slate-400">
                       {t('common.chatCount', { count: rule.source_chats.length })}
@@ -229,7 +237,7 @@ export function RulesPage() {
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
-                      {rule.target_chats.join(', ') || '-'}
+                      {formatChats(rule.target_chats) || '-'}
                     </span>
                     <small className="mt-1 block text-xs text-slate-400">
                       {t('common.chatCount', { count: rule.target_chats.length })}

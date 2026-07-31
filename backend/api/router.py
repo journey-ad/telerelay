@@ -35,11 +35,13 @@ from backend.schemas import (
     MessageExportRequest,
     RegexValidateRequest,
     TelegramAccountCreate,
+    TelegramChatResponse,
     TogglePayload,
 )
 from backend.services import ServiceError, validate_regex_patterns
 from backend.stats_db import get_stats_db
 from backend.telegram_accounts import TelegramAccountError
+from backend.telegram_chats import TelegramChatError
 from backend.telegram_preview import TelegramPreviewError
 
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_auth)])
@@ -90,6 +92,27 @@ def _telegram_preview(context: ApplicationContext):
             409,
         )
     return context.telegram_preview
+
+
+def _telegram_chats(context: ApplicationContext):
+    if not context.telegram_chats:
+        raise _error(
+            "not_user_mode",
+            "Telegram chats are only available in user mode",
+            409,
+        )
+    return context.telegram_chats
+
+
+def _telegram_chat_error(exc: TelegramChatError) -> HTTPException:
+    status = {
+        "account_not_found": 404,
+        "account_unavailable": 409,
+        "chat_not_found": 404,
+        "telegram_not_connected": 409,
+        "telegram_timeout": 504,
+    }.get(exc.code, 409)
+    return _error(exc.code, str(exc), status)
 
 
 def _preview_error(exc: TelegramPreviewError) -> HTTPException:
@@ -147,6 +170,21 @@ async def telegram_account_avatar(
         media_type="image/jpeg",
         headers={"Cache-Control": "private, max-age=86400"},
     )
+
+
+@router.get(
+    "/telegram-accounts/{account_id}/chats",
+    response_model=list[TelegramChatResponse],
+)
+async def telegram_account_chats(
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> list[dict]:
+    try:
+        chats = await asyncio.to_thread(_telegram_chats(context).list_chats, account_id)
+        return [chat.to_dict() for chat in chats]
+    except TelegramChatError as exc:
+        raise _telegram_chat_error(exc) from exc
 
 
 @router.get("/telegram-preview/dialogs")
@@ -559,15 +597,6 @@ async def export_availability(context: ApplicationContext = Depends(get_context)
     return {"available": available, "reason": reason}
 
 
-@router.get("/exports/chats")
-async def export_chats(context: ApplicationContext = Depends(get_context)) -> list[dict]:
-    try:
-        choices = await asyncio.to_thread(context.exports.list_chat_choices)
-        return [{"label": label, "chat_id": int(chat_id)} for label, chat_id in choices]
-    except ExportError as exc:
-        raise _error("export_unavailable", str(exc), 409) from exc
-
-
 @router.post("/exports/jobs/groups", status_code=202)
 async def start_group_export(
     payload: GroupExportRequest,
@@ -586,8 +615,13 @@ async def start_message_export(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
+        account_id = _accounts(context).store.active_account_id
+        chat = await asyncio.to_thread(
+            _telegram_chats(context).get_chat, account_id, payload.chat_id
+        )
         job_id = context.exports.start_message_export(
             chat_id=payload.chat_id,
+            chat_title=chat.title,
             start_at=payload.start_at,
             end_at=payload.end_at,
             formats=payload.formats,
@@ -595,6 +629,8 @@ async def start_message_export(
             all_history=payload.all_history,
         )
         return {"job_id": job_id}
+    except TelegramChatError as exc:
+        raise _telegram_chat_error(exc) from exc
     except ExportError as exc:
         raise _error("export_failed", str(exc), 422) from exc
 
@@ -625,11 +661,18 @@ async def export_tasks(context: ApplicationContext = Depends(get_context)) -> li
     return [_dataclass(task) for task in context.exports.list_tasks()]
 
 
-def _save_task(context: ApplicationContext, payload: ExportTaskPayload, task_id=None):
+async def _save_task(
+    context: ApplicationContext, payload: ExportTaskPayload, task_id=None
+):
+    account_id = _accounts(context).store.active_account_id
+    chat = await asyncio.to_thread(
+        _telegram_chats(context).get_chat, account_id, payload.chat_id
+    )
     return context.exports.save_task(
         task_id=task_id,
         name=payload.name,
         chat_id=payload.chat_id,
+        chat_title=chat.title,
         initial_start_at=payload.initial_start_at,
         formats=payload.formats,
         subdirectory=payload.subdirectory,
@@ -649,7 +692,9 @@ async def create_export_task(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return _dataclass(_save_task(context, payload))
+        return _dataclass(await _save_task(context, payload))
+    except TelegramChatError as exc:
+        raise _telegram_chat_error(exc) from exc
     except (ExportError, ValueError) as exc:
         raise _error("invalid_export_task", str(exc), 422) from exc
 
@@ -661,9 +706,11 @@ async def update_export_task(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return _dataclass(_save_task(context, payload, task_id))
+        return _dataclass(await _save_task(context, payload, task_id))
     except KeyError as exc:
         raise _error("not_found", "Export task does not exist", 404) from exc
+    except TelegramChatError as exc:
+        raise _telegram_chat_error(exc) from exc
     except (ExportError, ValueError) as exc:
         raise _error("invalid_export_task", str(exc), 422) from exc
 
