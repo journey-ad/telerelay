@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
 import { ChatTagInput } from '../components/ChatTagInput'
+import { MultiValueInput } from '../components/MultiValueInput'
 import { RegexField, useRegexValidation } from '../components/RegexField'
 import { useTelegramChats } from '../hooks/useTelegramChats'
 import {
@@ -58,12 +59,7 @@ export function RulesPage() {
   const [editing, setEditing] = useState<number | null>(null)
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
   const [form, setForm] = useState<ForwardingRule>(blankRule())
-  const [text, setText] = useState({
-    keywords: '',
-    regex: '',
-    ignoredUsers: '',
-    ignoredKeywords: '',
-  })
+  const [regex, setRegex] = useState('')
   const regexValidation = useRegexValidation()
   const rulesQuery = useQuery({
     queryKey: ['rules'],
@@ -85,12 +81,7 @@ export function RulesPage() {
   function createRule() {
     setEditing(null)
     setForm(blankRule())
-    setText({
-      keywords: '',
-      regex: '',
-      ignoredUsers: '',
-      ignoredKeywords: '',
-    })
+    setRegex('')
     regexValidation.reset()
     setOpen(true)
   }
@@ -98,24 +89,14 @@ export function RulesPage() {
     const value = structuredClone(rulesQuery.data?.[index] ?? blankRule())
     setEditing(index)
     setForm(value)
-    setText({
-      keywords: value.filters.keywords.join('\n'),
-      regex: value.filters.regex_patterns.join('\n'),
-      ignoredUsers: value.ignore.user_ids.join('\n'),
-      ignoredKeywords: value.ignore.keywords.join('\n'),
-    })
+    setRegex(value.filters.regex_patterns.join('\n'))
     regexValidation.reset()
     setOpen(true)
   }
   const save = useMutation({
     mutationFn: () => {
       const payload = structuredClone(form)
-      payload.filters.keywords = lines(text.keywords)
-      payload.filters.regex_patterns = lines(text.regex)
-      payload.ignore.user_ids = lines(text.ignoredUsers)
-        .map((v) => (/^-?\d+$/.test(v) ? Number(v) : null))
-        .filter((v): v is number => v !== null)
-      payload.ignore.keywords = lines(text.ignoredKeywords)
+      payload.filters.regex_patterns = lines(regex)
       return request(
         editing === null ? '/api/v1/rules' : `/api/v1/rules/${editing}`,
         json(editing === null ? 'POST' : 'PUT', payload),
@@ -135,7 +116,7 @@ export function RulesPage() {
   })
   function submit(event: FormEvent) {
     event.preventDefault()
-    regexValidation.validate(text.regex).then((valid) => {
+    regexValidation.validate(regex).then((valid) => {
       if (valid) save.mutate()
     })
   }
@@ -337,36 +318,60 @@ export function RulesPage() {
                 onChange={(event) => setForwarding('delay', Number(event.target.value))}
               />
             </label>
-            <label className={fieldClass}>
+            <div className={fieldClass}>
               <span>{t('rules.keywords')}</span>
-              <textarea
-                value={text.keywords}
-                onChange={(event) => setText({ ...text, keywords: event.target.value })}
-                rows={4}
+              <MultiValueInput
+                value={form.filters.keywords}
+                onChange={(keywords) =>
+                  setForm((current) => ({
+                    ...current,
+                    filters: { ...current.filters, keywords },
+                  }))
+                }
+                ariaLabel={t('rules.removeKeyword')}
+                placeholder={t('rules.keywordPlaceholder')}
               />
-            </label>
+            </div>
             <RegexField
               label={t('rules.regex')}
-              value={text.regex}
-              onChange={(regex) => setText({ ...text, regex })}
+              value={regex}
+              onChange={setRegex}
               validation={regexValidation}
             />
-            <label className={fieldClass}>
+            <div className={fieldClass}>
               <span>{t('rules.ignoredUsers')}</span>
-              <textarea
-                value={text.ignoredUsers}
-                onChange={(event) => setText({ ...text, ignoredUsers: event.target.value })}
-                rows={3}
+              <MultiValueInput
+                value={form.ignore.user_ids}
+                onChange={(user_ids) =>
+                  setForm((current) => ({
+                    ...current,
+                    ignore: { ...current.ignore, user_ids },
+                  }))
+                }
+                parse={(value) => {
+                  if (!/^-?\d+$/.test(value)) return null
+                  const parsed = Number(value)
+                  return Number.isSafeInteger(parsed) ? parsed : null
+                }}
+                ariaLabel={t('rules.removeIgnoredUser')}
+                placeholder={t('rules.ignoredUserPlaceholder')}
+                invalidMessage={t('rules.invalidUserId')}
               />
-            </label>
-            <label className={fieldClass}>
+            </div>
+            <div className={fieldClass}>
               <span>{t('rules.ignoredKeywords')}</span>
-              <textarea
-                value={text.ignoredKeywords}
-                onChange={(event) => setText({ ...text, ignoredKeywords: event.target.value })}
-                rows={3}
+              <MultiValueInput
+                value={form.ignore.keywords}
+                onChange={(keywords) =>
+                  setForm((current) => ({
+                    ...current,
+                    ignore: { ...current.ignore, keywords },
+                  }))
+                }
+                ariaLabel={t('rules.removeIgnoredKeyword')}
+                placeholder={t('rules.ignoredKeywordPlaceholder')}
               />
-            </label>
+            </div>
           </div>
           <div className="mt-5 border-t border-slate-100 pt-4">
             <h3 className="mb-3 flex items-center gap-2 text-xs font-bold text-slate-600">

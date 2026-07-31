@@ -42,6 +42,10 @@ class FakeRuntime:
         self.is_running = True
         return True
 
+    async def reload_rules(self) -> bool:
+        self.actions.append(("reload_rules", str(self.session_name)))
+        return True
+
     def bind_loop(self, loop) -> None:
         self.loop = loop
 
@@ -266,6 +270,21 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
             second.queue_db_path,
             self.root / "forward_queues" / f"account_{account.id}.db",
         )
+
+    async def test_rule_reload_only_fans_out_to_running_accounts(self):
+        account = self.store.create("在线账号")
+        online = self.registry.ensure_runtime(account.id)
+        self.default_runtime.is_running = True
+        online.is_running = True
+        offline_account = self.store.create("离线账号")
+        offline = self.registry.ensure_runtime(offline_account.id)
+
+        reloaded = await self.registry.reload_rules()
+
+        self.assertTrue(reloaded)
+        self.assertEqual(self.default_runtime.actions[0][0], "reload_rules")
+        self.assertEqual(online.actions[0][0], "reload_rules")
+        self.assertEqual(offline.actions, [])
 
     async def test_identity_callback_is_bound_to_originating_account(self):
         account = self.store.create("登录中账号")

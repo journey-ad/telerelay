@@ -52,7 +52,7 @@ class RuleService:
         rule = self._forwarding_rule(payload)
         rules.append(rule)
         self._save_rules(rules)
-        await self._restart_if_running()
+        await self._reload_if_running()
         return rule.to_dict()
 
     async def update_rule(self, index: int, payload: ForwardingRulePayload) -> dict:
@@ -68,7 +68,7 @@ class RuleService:
         self._save_rules(rules)
         if old_name != rule.name:
             get_stats_db().rename_rule(old_name, rule.name)
-        await self._restart_if_running()
+        await self._reload_if_running()
         return rule.to_dict()
 
     async def delete_rule(self, index: int) -> None:
@@ -77,7 +77,7 @@ class RuleService:
         deleted = rules.pop(index)
         self._save_rules(rules)
         get_stats_db().delete_rule(deleted.name)
-        await self._restart_if_running()
+        await self._reload_if_running()
 
     async def create_button_rule(self, payload: ButtonActionRulePayload) -> dict:
         rules = self.config.get_button_action_rules()
@@ -85,7 +85,7 @@ class RuleService:
         rule = self._button_rule(payload)
         rules.append(rule)
         self._save_button_rules(rules)
-        await self._restart_if_running()
+        await self._reload_if_running()
         return rule.to_dict()
 
     async def update_button_rule(
@@ -102,7 +102,7 @@ class RuleService:
         rule = self._button_rule(payload)
         rules[index] = rule
         self._save_button_rules(rules)
-        await self._restart_if_running()
+        await self._reload_if_running()
         return rule.to_dict()
 
     async def delete_button_rule(self, index: int) -> None:
@@ -110,7 +110,7 @@ class RuleService:
         self._ensure_index(index, rules)
         rules.pop(index)
         self._save_button_rules(rules)
-        await self._restart_if_running()
+        await self._reload_if_running()
 
     def _forwarding_rule(self, payload: ForwardingRulePayload) -> ForwardingRule:
         if payload.enabled and not payload.source_chats:
@@ -137,9 +137,9 @@ class RuleService:
     def _save_button_rules(self, rules: list[ButtonActionRule]) -> None:
         self.config.update({"button_action_rules": [rule.to_dict() for rule in rules]})
 
-    async def _restart_if_running(self) -> None:
+    async def _reload_if_running(self) -> None:
         if self.bot_manager.is_running:
-            await self.bot_manager.restart()
+            await self.bot_manager.reload_rules()
 
     @staticmethod
     def _ensure_index(index: int, values: list) -> None:

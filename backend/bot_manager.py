@@ -65,6 +65,8 @@ class BotManager:
         self.rule_forwarder_map = {}
         self._queue_forwarders = {}
         self._target_label_cache: dict[str, str] = {}
+        self._forwarding_handler = None
+        self._button_handler = None
         self.button_action_engine: Optional[ButtonActionEngine] = None
         self.forward_queue_store: Optional[ForwardQueueStore] = None
         self.forward_queue: Optional[ForwardQueue] = None
@@ -156,20 +158,12 @@ class BotManager:
 
             # Connected
             self.is_connected = True
-            rules = self.config.get_enabled_rules()
             self.forwarders = []
             self.rule_forwarder_map = {}
             self._queue_forwarders = {}
             self._target_label_cache = {}
-            all_source_chats = set()  # Collect all source chats
-
-            for rule in rules:
-                message_filter, forwarder = self._create_forwarder(rule)
-                self.forwarders.append(forwarder)
-                self.rule_forwarder_map[rule.name] = (rule, message_filter, forwarder)
-                self._queue_forwarders[rule_fingerprint(rule.to_dict())] = forwarder
-                all_source_chats.update(rule.source_chats)
-                logger.debug(t("log.bot.rule_registered", rule=rule.name, count=len(rule.source_chats)))
+            self._forwarding_handler = None
+            self._button_handler = None
 
             # Start queue before accepting updates; pending jobs use stored rule snapshots.
             self.forward_queue_store = ForwardQueueStore(
@@ -187,48 +181,9 @@ class BotManager:
             )
             await self.forward_queue.start()
 
-            # Single handler covers all source chats
-            if all_source_chats:
-                self.client_manager.add_message_handler(
-                    callback=self._central_message_handler,
-                    chats=list(all_source_chats)
-                )
+            await self.reload_rules()
 
-            # Button interaction rules are independent from forwarding rules.
-            self.button_action_engine = None
-            button_action_rules = self.config.get_enabled_button_action_rules()
-            if button_action_rules and self.config.session_type != "user":
-                logger.warning(t("log.button_action.user_mode_required"))
-            elif button_action_rules:
-                valid_button_rules = [
-                    rule
-                    for rule in button_action_rules
-                    if rule.source_chats and rule.button_texts
-                ]
-                if valid_button_rules:
-                    self.button_action_engine = ButtonActionEngine(valid_button_rules)
-                    button_source_chats = list(dict.fromkeys(
-                        chat
-                        for rule in valid_button_rules
-                        for chat in rule.source_chats
-                    ))
-                    self.client_manager.add_message_handler(
-                        callback=self._button_action_handler,
-                        chats=button_source_chats,
-                        incoming=True,
-                    )
-                    logger.debug(
-                        t(
-                            "log.button_action.registered",
-                            rules=len(valid_button_rules),
-                            chats=len(button_source_chats),
-                        )
-                    )
-
-            # Backward compatibility: self.forwarder points to first forwarder
-            self.forwarder = self.forwarders[0] if self.forwarders else None
-
-            logger.info(t("log.bot.started", count=len(rules)))
+            logger.info(t("log.bot.started", count=len(self.forwarders)))
 
             # Run until stop signal received
             await self._stop_event.wait()
@@ -265,6 +220,81 @@ class BotManager:
             target_label_cache=self._target_label_cache,
         )
         return message_filter, forwarder
+
+    async def reload_rules(self) -> bool:
+        """Replace live rule state and handlers without reconnecting Telegram."""
+        if not self.is_connected or not self.client_manager:
+            return False
+
+        rules = self.config.get_enabled_rules()
+        forwarders = []
+        rule_forwarder_map = {}
+        queue_forwarders = {}
+        forwarding_chats = []
+        seen_forwarding_chats = set()
+        for rule in rules:
+            message_filter, forwarder = self._create_forwarder(rule)
+            forwarders.append(forwarder)
+            rule_forwarder_map[rule.name] = (rule, message_filter, forwarder)
+            queue_forwarders[rule_fingerprint(rule.to_dict())] = forwarder
+            for chat in rule.source_chats:
+                if chat not in seen_forwarding_chats:
+                    seen_forwarding_chats.add(chat)
+                    forwarding_chats.append(chat)
+            logger.debug(
+                t("log.bot.rule_registered", rule=rule.name, count=len(rule.source_chats))
+            )
+
+        button_action_engine = None
+        button_source_chats = []
+        button_action_rules = self.config.get_enabled_button_action_rules()
+        if button_action_rules and self.config.session_type != "user":
+            logger.warning(t("log.button_action.user_mode_required"))
+        elif button_action_rules:
+            valid_button_rules = [
+                rule
+                for rule in button_action_rules
+                if rule.source_chats and rule.button_texts
+            ]
+            if valid_button_rules:
+                button_action_engine = ButtonActionEngine(valid_button_rules)
+                button_source_chats = list(
+                    dict.fromkeys(
+                        chat
+                        for rule in valid_button_rules
+                        for chat in rule.source_chats
+                    )
+                )
+
+        self.forwarders = forwarders
+        self.rule_forwarder_map = rule_forwarder_map
+        self._queue_forwarders.update(queue_forwarders)
+        self.forwarder = forwarders[0] if forwarders else None
+        self.button_action_engine = button_action_engine
+
+        self.client_manager.remove_message_handler(self._forwarding_handler)
+        self.client_manager.remove_message_handler(self._button_handler)
+        self._forwarding_handler = None
+        self._button_handler = None
+        if forwarding_chats:
+            self._forwarding_handler = self.client_manager.add_message_handler(
+                callback=self._central_message_handler,
+                chats=forwarding_chats,
+            )
+        if button_action_engine:
+            self._button_handler = self.client_manager.add_message_handler(
+                callback=self._button_action_handler,
+                chats=button_source_chats,
+                incoming=True,
+            )
+            logger.debug(
+                t(
+                    "log.button_action.registered",
+                    rules=len(button_action_engine.rules),
+                    chats=len(button_source_chats),
+                )
+            )
+        return True
 
     async def _process_queue_item(self, item: ForwardQueueItem) -> float:
         """Load the Telegram message and execute one durable queue item."""

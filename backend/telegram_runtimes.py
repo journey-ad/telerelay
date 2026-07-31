@@ -202,6 +202,21 @@ class TelegramRuntimeRegistry:
             )
             return any(result is True for result in results)
 
+    async def reload_rules(self) -> bool:
+        """Reload rules in every running account without reconnecting clients."""
+        async with self._lifecycle_lock:
+            with self._state_lock:
+                runtimes = [
+                    runtime for runtime in self._runtimes.values() if runtime.is_running
+                ]
+            if not runtimes:
+                return False
+            results = await asyncio.gather(
+                *(runtime.reload_rules() for runtime in runtimes),
+                return_exceptions=True,
+            )
+            return any(result is True for result in results)
+
     async def remove_runtime(self, account_id: str, *, clear_queue: bool = False) -> None:
         queue_path = self.queue_db_path(account_id)
         await self.stop_account(account_id)

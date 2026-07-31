@@ -220,7 +220,7 @@ class TelegramClientManager:
         callback: Callable,
         chats: list = None,
         incoming: Optional[bool] = None,
-    ) -> None:
+    ) -> tuple[Callable, Any] | None:
         """
         Add message handler
 
@@ -231,17 +231,29 @@ class TelegramClientManager:
         """
         if not self.client:
             logger.error(t("log.client.client_not_initialized"))
-            return
-        
-        @self.client.on(events.NewMessage(chats=chats, incoming=incoming))
+            return None
+
         async def handler(event):
             try:
                 await callback(event)
             except Exception as e:
                 logger.error(t("log.client.message_error", error=str(e)), exc_info=True)
 
+        event_builder = events.NewMessage(chats=chats, incoming=incoming)
+        self.client.add_event_handler(handler, event_builder)
         logger.debug(t("log.client.handler_registered", count=len(chats) if chats else t("misc.all_media_types")))
-    
+        return handler, event_builder
+
+    def remove_message_handler(
+        self,
+        registration: tuple[Callable, Any] | None,
+    ) -> None:
+        """Remove a handler previously returned by ``add_message_handler``."""
+        if not self.client or not registration:
+            return
+        callback, event_builder = registration
+        self.client.remove_event_handler(callback, event_builder)
+
     async def run_until_disconnected(self) -> None:
         """Run client until disconnected"""
         if self.client:
