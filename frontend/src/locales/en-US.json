@@ -333,7 +333,10 @@
         "reset": "Statistics reset",
         "phone": "Phone number submitted",
         "code": "Login code submitted",
-        "password": "Two-step verification password submitted"
+        "password": "Two-step verification password submitted",
+        "authenticated": "Account authenticated",
+        "deauthenticated": "Session cleared",
+        "connection": "Connection changed"
       },
       "statuses": {
         "completed": "Completed",
@@ -347,7 +350,15 @@
       "details": {
         "forward": "{{rule}} · {{source}} · {{status}}",
         "buttonAction": "{{rule}} · {{buttons}} · {{status}}",
-        "scheduledExport": "{{task}} · {{chat}} · {{status}}"
+        "scheduledExport": "{{task}} · {{chat}} · {{status}}",
+        "accountAction": "{{action}}: {{account}}",
+        "accountConnected": "{{account}} connected",
+        "accountDisconnected": "{{account}} disconnected"
+      },
+      "authStates": {
+        "started": "Authentication started",
+        "success": "Authentication succeeded",
+        "cleared": "Session cleared"
       }
     },
     "waitingLiveEvents": "Waiting for live events",

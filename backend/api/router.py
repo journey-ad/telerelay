@@ -443,7 +443,10 @@ def _submit_auth(context: ApplicationContext, kind: str, value: str) -> ApiMessa
     submitter = getattr(auth, f"submit_{kind}")
     if not submitter(value):
         raise _error("auth_value_rejected", f"No {kind} challenge is waiting", 409)
-    context.events.publish("telegram-auth", {"submitted": kind})
+    context.events.publish(
+        "telegram-auth",
+        {"submitted": kind, "account_id": context.accounts.store.active_account_id},
+    )
     return ApiMessage(code=f"{kind}_submitted")
 
 
@@ -481,8 +484,9 @@ async def clear_telegram_session(
         if context.bot.is_running:
             await context.bot.stop()
         await asyncio.to_thread(TelegramClientManager(context.config).clear_session)
-    context.events.publish("telegram-account", {"action": "deauthenticated"})
-    context.events.publish("telegram-auth", {"state": "cleared"})
+    account_id = context.accounts.store.active_account_id if context.accounts else None
+    context.events.publish("telegram-account", {"action": "deauthenticated", "account_id": account_id})
+    context.events.publish("telegram-auth", {"state": "cleared", "account_id": account_id})
     return ApiMessage(code="telegram_session_cleared")
 
 

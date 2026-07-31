@@ -333,7 +333,10 @@
         "reset": "已重置统计数据",
         "phone": "已提交手机号码",
         "code": "已提交登录验证码",
-        "password": "已提交两步验证密码"
+        "password": "已提交两步验证密码",
+        "authenticated": "账号已认证",
+        "deauthenticated": "已清除会话",
+        "connection": "连接状态已变更"
       },
       "statuses": {
         "completed": "已完成",
@@ -347,7 +350,15 @@
       "details": {
         "forward": "{{rule}} · {{source}} · {{status}}",
         "buttonAction": "{{rule}} · {{buttons}} · {{status}}",
-        "scheduledExport": "{{task}} · {{chat}} · {{status}}"
+        "scheduledExport": "{{task}} · {{chat}} · {{status}}",
+        "accountAction": "{{action}}：{{account}}",
+        "accountConnected": "账号 {{account}} 已连接",
+        "accountDisconnected": "账号 {{account}} 已断开"
+      },
+      "authStates": {
+        "started": "正在认证",
+        "success": "认证成功",
+        "cleared": "已清除会话"
       }
     },
     "waitingLiveEvents": "等待实时事件",

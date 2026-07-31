@@ -35,7 +35,7 @@ import {
 import { json, request } from '../api/client'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
-import type { BotStatus, ForwardQueueItem, RelayEvent, Stats } from '../types'
+import type { BotStatus, ForwardQueueItem, RelayEvent, Stats, TelegramAccount } from '../types'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 
@@ -88,6 +88,9 @@ const eventActionKeys = {
   phone: 'dashboard.events.actions.phone',
   code: 'dashboard.events.actions.code',
   password: 'dashboard.events.actions.password',
+  authenticated: 'dashboard.events.actions.authenticated',
+  deauthenticated: 'dashboard.events.actions.deauthenticated',
+  connection: 'dashboard.events.actions.connection',
 } as const
 const eventStatusKeys = {
   completed: 'dashboard.events.statuses.completed',
@@ -97,6 +100,11 @@ const eventStatusKeys = {
   started: 'dashboard.events.statuses.started',
   skipped: 'dashboard.events.statuses.skipped',
   cancelled: 'dashboard.events.statuses.cancelled',
+} as const
+const authStateKeys = {
+  started: 'dashboard.events.authStates.started',
+  success: 'dashboard.events.authStates.success',
+  cleared: 'dashboard.events.authStates.cleared',
 } as const
 const queueStatusKeys = {
   processing: 'dashboard.queuePreview.statuses.processing',
@@ -123,14 +131,52 @@ function eventTypeLabel(type: string, t: TFunction): string {
   return key ? t(key) : t('dashboard.events.types.other')
 }
 
-function eventDetail(event: RelayEvent, t: TFunction): string {
+function accountLabel(
+  accounts: TelegramAccount[] | undefined,
+  event: RelayEvent,
+): string | undefined {
+  const id = event.payload.account_id ?? event.payload.id
+  if (typeof id !== 'string' || !id) return undefined
+  return accounts?.find((account) => account.id === id)?.label ?? id
+}
+
+function eventDetail(
+  event: RelayEvent,
+  t: TFunction,
+  accounts: TelegramAccount[] | undefined,
+): string {
   const message = event.payload.message
   if (['string', 'number', 'boolean'].includes(typeof message)) return String(message)
 
+  const account = accountLabel(accounts, event)
+  const withAccount = (action: string) =>
+    t('dashboard.events.details.accountAction', {
+      action,
+      account: account ?? '',
+    })
+
   const action = event.payload.action ?? event.payload.submitted
   if (typeof action === 'string') {
+    if (event.type === 'telegram-account' && action === 'connection') {
+      const connected = event.payload.connected === true
+      return t(
+        connected
+          ? 'dashboard.events.details.accountConnected'
+          : 'dashboard.events.details.accountDisconnected',
+        { account: account ?? '' },
+      )
+    }
     const key = eventActionKeys[action as keyof typeof eventActionKeys]
-    return key ? t(key) : action
+    const actionLabel = key ? t(key) : action
+    return account ? withAccount(actionLabel) : actionLabel
+  }
+
+  if (event.type === 'telegram-auth') {
+    const state = event.payload.state
+    const stateKey =
+      typeof state === 'string' ? authStateKeys[state as keyof typeof authStateKeys] : undefined
+    const stateLabel = stateKey ? t(stateKey) : t('dashboard.statusUpdate')
+    return account ? withAccount(stateLabel) : stateLabel
   }
 
   const statusValue = event.payload.status
@@ -335,6 +381,11 @@ export function DashboardPage() {
     queryFn: () => request<RelayEvent[]>(recentEventsPath),
     refetchOnMount: 'always',
     gcTime: 0,
+  })
+  const accountsQuery = useQuery({
+    queryKey: ['telegram-accounts'],
+    queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
+    refetchInterval: 30_000,
   })
   const handleDashboardEvent = useCallback(
     (event: RelayEvent) => {
@@ -1154,7 +1205,7 @@ export function DashboardPage() {
                     {eventTypeLabel(event.type, t)}
                   </strong>
                   <p className="mt-0.5 truncate text-[13px] text-slate-500">
-                    {eventDetail(event, t)}
+                    {eventDetail(event, t, accountsQuery.data)}
                   </p>
                 </div>
                 <time className="text-xs text-slate-400">
