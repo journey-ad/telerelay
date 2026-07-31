@@ -604,11 +604,25 @@ function Loading({ label }: { label: string }) {
   )
 }
 
-function ToolButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+function ToolButton({
+  children,
+  onClick,
+  disabled = false,
+}: {
+  children: ReactNode
+  onClick: () => void
+  disabled?: boolean
+}) {
   return (
     <button
-      className="h-8 rounded-[5px] border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-600 hover:border-blue-200 hover:text-blue-700"
+      className={cn(
+        'h-8 rounded-[5px] border px-3 text-[13px] font-semibold',
+        disabled
+          ? 'cursor-default border-slate-100 bg-slate-50 text-slate-400'
+          : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:text-blue-700',
+      )}
       onClick={onClick}
+      disabled={disabled}
     >
       {children}
     </button>
@@ -630,6 +644,7 @@ export function TelegramPreviewPage() {
   const viewportRef = useRef<HTMLDivElement>(null)
   const previousScrollHeight = useRef<number | null>(null)
   const stickToBottom = useRef(true)
+  const suppressAutoLoadRef = useRef(false)
   const replyRequestId = useRef(0)
 
   const accounts = useQuery({
@@ -723,8 +738,12 @@ export function TelegramPreviewPage() {
       target.classList.remove('ring-2', 'ring-blue-300')
       setReplyTargetId((current) => (current === targetId ? null : current))
     }, 900)
+    const clearSuppress = window.setTimeout(() => {
+      suppressAutoLoadRef.current = false
+    }, 1500)
     return () => {
       window.clearTimeout(timeout)
+      window.clearTimeout(clearSuppress)
       target.classList.remove('ring-2', 'ring-blue-300')
     }
   }, [allMessages, replyTargetId])
@@ -751,11 +770,13 @@ export function TelegramPreviewPage() {
   }
 
   async function loadOlder() {
+    stickToBottom.current = false
     if (viewportRef.current) previousScrollHeight.current = viewportRef.current.scrollHeight
     await messages.fetchNextPage()
   }
 
   async function replyClick(id: number) {
+    suppressAutoLoadRef.current = true
     const target = document.getElementById(`message-${id}`)
     if (target) {
       setReplyTargetId(id)
@@ -985,11 +1006,22 @@ export function TelegramPreviewPage() {
                   const node = event.currentTarget
                   stickToBottom.current =
                     node.scrollHeight - node.scrollTop - node.clientHeight < 120
+                  if (
+                    !suppressAutoLoadRef.current &&
+                    node.scrollTop < 200 &&
+                    messages.hasNextPage &&
+                    !messages.isFetchingNextPage
+                  ) {
+                    void loadOlder()
+                  }
                 }}
               >
                 {messages.hasNextPage ? (
                   <div className="mb-3 flex justify-center">
-                    <ToolButton onClick={() => void loadOlder()}>
+                    <ToolButton
+                      onClick={() => void loadOlder()}
+                      disabled={messages.isFetchingNextPage}
+                    >
                       {t(
                         messages.isFetchingNextPage
                           ? 'telegramPreview.loadingHistory'
