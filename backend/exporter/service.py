@@ -1,10 +1,13 @@
 """Background orchestration for group metadata and message exports."""
 
+import secrets
 import threading
+import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -52,6 +55,9 @@ def _date_text(value: datetime) -> str:
     return value.isoformat(timespec="seconds")
 
 
+PREVIEW_TOKEN_TTL = 300.0
+
+
 class ExportService:
     def __init__(
         self,
@@ -81,10 +87,49 @@ class ExportService:
         self._cancel_events: Dict[str, threading.Event] = {}
         self._active_task_ids = set()
         self._message_stores: Dict[int, MessageArchiveStore] = {}
+        self._preview_tokens: Dict[str, Tuple[str, float]] = {}
         self.scheduler = None
 
     def set_scheduler(self, scheduler) -> None:
         self.scheduler = scheduler
+
+    def create_preview_token(self, zip_path: str | Path) -> str:
+        candidate = Path(zip_path).resolve()
+        root = self.export_root.resolve()
+        if not candidate.is_file() or not (candidate == root or root in candidate.parents):
+            raise ExportValidationError("Export archive does not exist")
+        if not candidate.name.endswith(".html.zip"):
+            raise ExportValidationError("Only HTML archives support online preview")
+        token = secrets.token_urlsafe(24)
+        self._preview_tokens[token] = (str(candidate), time.monotonic() + PREVIEW_TOKEN_TTL)
+        return token
+
+    def resolve_preview_token(self, token: str) -> Optional[Path]:
+        entry = self._preview_tokens.get(token)
+        if not entry:
+            return None
+        path_text, expires = entry
+        if time.monotonic() > expires:
+            self._preview_tokens.pop(token, None)
+            return None
+        return Path(path_text)
+
+    def read_archive_file(self, zip_path: Path, inner: str) -> Optional[bytes]:
+        normalized = PurePosixPath(inner)
+        if normalized.is_absolute() or ".." in normalized.parts:
+            return None
+        name = normalized.as_posix()
+        try:
+            with zipfile.ZipFile(zip_path) as archive:
+                if name in archive.namelist():
+                    return archive.read(name)
+                if name == "index.html":
+                    for entry in archive.namelist():
+                        if entry.endswith("index.html"):
+                            return archive.read(entry)
+        except (OSError, zipfile.BadZipFile):
+            return None
+        return None
 
     def availability(self, require_connection: bool = True) -> Tuple[bool, str]:
         if self.config.session_type != "user":
@@ -390,6 +435,10 @@ class ExportService:
         directory = self._validated_directory(subdirectory)
         state = self._new_job("messages")
         chat_title = str(chat_title).strip() or str(chat_id)
+        state.chat_title = chat_title
+        state.range_start = _date_text(start)
+        state.range_end = _date_text(end)
+        state.all_history = all_history
         logger.info(
             t(
                 "log.export.message_queued",
@@ -537,7 +586,11 @@ class ExportService:
                     int(record.message_id),
                 )
                 if count == 1 or count % 25 == 0:
-                    self._update_job(job_id, processed=count)
+                    self._update_job(
+                        job_id,
+                        processed=count,
+                        progress_date=record.date,
+                    )
                 if count == 1 or count % 2000 == 0:
                     logger.debug(
                         t(
@@ -867,6 +920,9 @@ class ExportService:
             min_message_id = task.last_message_id if backfill_complete else None
             directory = self._validated_directory(task.subdirectory)
             state = self._new_job("scheduled", task.id)
+            state.chat_title = task.chat_title
+            state.range_start = _date_text(start_at)
+            state.range_end = _date_text(end_at)
             logger.info(
                 t(
                     "log.export.message_queued",

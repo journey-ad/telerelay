@@ -129,6 +129,9 @@ class FakeExports:
         self.message_export = values
         return "job-1"
 
+    def create_preview_token(self, zip_path):
+        return "preview-token-123"
+
 
 def make_app(context: ApplicationContext) -> FastAPI:
     app = FastAPI()
@@ -234,6 +237,14 @@ class ApiContractTests(unittest.TestCase):
             body = self.client.get("/api/v1/update-check").json()
         self.assertFalse(body["update_available"])
         self.assertEqual(body["error"], "HTTP 403")
+
+    def test_export_preview_token_contract(self):
+        response = self.client.get(
+            "/api/v1/exports/preview-token",
+            params={"path": "/exports/chat.html.zip"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["token"], "preview-token-123")
 
     def test_queue_preview_contract_and_limit_validation(self):
         calls = []

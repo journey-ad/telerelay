@@ -164,6 +164,11 @@ class ExportJobState:
     run_id: Optional[int] = None
     started_at: Optional[str] = None
     finished_at: Optional[str] = None
+    chat_title: Optional[str] = None
+    range_start: Optional[str] = None
+    range_end: Optional[str] = None
+    all_history: bool = False
+    progress_date: Optional[str] = None
 
     def snapshot(self) -> "ExportJobSnapshot":
         return ExportJobSnapshot(
@@ -178,6 +183,11 @@ class ExportJobState:
             task_id=self.task_id,
             started_at=self.started_at,
             finished_at=self.finished_at,
+            chat_title=self.chat_title,
+            range_start=self.range_start,
+            range_end=self.range_end,
+            all_history=self.all_history,
+            progress_date=self.progress_date,
         )
 
 
@@ -194,6 +204,11 @@ class ExportJobSnapshot:
     task_id: Optional[int]
     started_at: Optional[str]
     finished_at: Optional[str]
+    chat_title: Optional[str] = None
+    range_start: Optional[str] = None
+    range_end: Optional[str] = None
+    all_history: bool = False
+    progress_date: Optional[str] = None
 
     @property
     def is_terminal(self) -> bool:

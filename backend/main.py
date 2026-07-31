@@ -8,9 +8,18 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+PREVIEW_MEDIA_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".svg": "image/svg+xml",
+}
 
 from backend.api import router
 from backend.application import ApplicationContext
@@ -113,6 +122,24 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/health", tags=["system"])
     async def health() -> dict:
         return {"status": "ok", "service": "telerelay"}
+
+    @app.get("/api/v1/exports/preview/{token}/{file:path}", tags=["system"])
+    async def export_preview(token: str, file: str, request: Request) -> Response:
+        exports = request.app.state.context.exports
+        zip_path = exports.resolve_preview_token(token)
+        if zip_path is None:
+            return JSONResponse(
+                {"code": "invalid_preview_token", "message": "Preview link is invalid or expired"},
+                status_code=404,
+            )
+        content = exports.read_archive_file(zip_path, file)
+        if content is None:
+            return JSONResponse(
+                {"code": "preview_file_not_found", "message": "Archive file does not exist"},
+                status_code=404,
+            )
+        media_type = PREVIEW_MEDIA_TYPES.get(Path(file).suffix.lower(), "application/octet-stream")
+        return Response(content=content, media_type=media_type)
 
     app.include_router(router)
 

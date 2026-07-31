@@ -5,13 +5,16 @@ import {
   CalendarClock,
   Database,
   Download,
+  Eye,
   FileArchive,
   Globe2,
   Play,
   Plus,
   Table2,
   Trash2,
+  X,
 } from 'lucide-react'
+import type { TFunction } from 'i18next'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { json, request } from '../api/client'
@@ -59,11 +62,96 @@ const formatOptionClass = cn(
 
 function downloadOption(file: string) {
   const filename = file.split('/').pop() ?? file
+  const extension = filename.split('.').pop() ?? filename
   return {
     url: `/api/v1/exports/file?path=${encodeURIComponent(file)}`,
-    label: (filename.split('.').pop() ?? filename).toUpperCase(),
+    label: extension === 'zip' ? 'HTML (ZIP)' : extension.toUpperCase(),
     filename,
   }
+}
+
+const exportPhaseLabels = {
+  queued: 'exports.phase.queued',
+  reading_groups: 'exports.phase.readingGroups',
+  reading_messages: 'exports.phase.readingMessages',
+  writing_files: 'exports.phase.writingFiles',
+  cancelling: 'exports.phase.cancelling',
+  completed: 'exports.phase.completed',
+  failed: 'exports.phase.failed',
+  cancelled: 'exports.phase.cancelled',
+} as const
+
+function phaseLabel(phase: string | undefined, t: TFunction): string {
+  if (!phase) return t('exports.processingMessages')
+  const key = exportPhaseLabels[phase as keyof typeof exportPhaseLabels]
+  return key ? t(key) : phase
+}
+
+function jobLabel(job: ExportJob, t: TFunction): string {
+  if (job.chat_title) {
+    const range = job.all_history
+      ? t('exports.allHistoryLabel')
+      : job.range_start && job.range_end
+        ? `${shortDate(job.range_start)} ~ ${shortDate(job.range_end)}`
+        : ''
+    return range ? `${job.chat_title} · ${range}` : job.chat_title
+  }
+  return job.id
+}
+
+function jobProgress(job: ExportJob): number {
+  if (job.status === 'completed') return 100
+  if (job.total) return Math.min(100, (job.processed / job.total) * 100)
+  if (job.range_start && job.range_end && job.progress_date) {
+    const start = Date.parse(job.range_start)
+    const end = Date.parse(job.range_end)
+    const current = Date.parse(job.progress_date)
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start && Number.isFinite(current)) {
+      return Math.min(100, Math.max(2, ((current - start) / (end - start)) * 100))
+    }
+  }
+  return job.processed > 0 ? 18 : 2
+}
+
+function ExportFilesRow({ files }: { files: string[] }) {
+  const { t } = useTranslation()
+  const [previewUrl, setPreviewUrl] = useState('')
+  const previewFile = files.find((file) => file.endsWith('.html.zip'))
+  async function openPreview(file: string) {
+    const filename = file.split('/').pop() ?? file
+    const root = filename.replace(/\.html\.zip$/i, '')
+    const { token } = await request<{ token: string }>(
+      `/api/v1/exports/preview-token?path=${encodeURIComponent(file)}`,
+    )
+    setPreviewUrl(`/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html`)
+  }
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <DownloadButton files={files.map(downloadOption)} />
+        {previewFile ? (
+          <Button icon={Eye} onClick={() => void openPreview(previewFile)}>
+            {t('exports.preview')}
+          </Button>
+        ) : null}
+      </div>
+      {previewUrl ? (
+        <div className="fixed inset-0 z-120 bg-white">
+          <header className="flex h-11 items-center justify-between border-b border-slate-200 px-4">
+            <strong className="text-sm font-semibold text-slate-700">
+              {t('exports.previewTitle')}
+            </strong>
+            <IconButton label={t('common.close')} icon={X} onClick={() => setPreviewUrl('')} />
+          </header>
+          <iframe
+            src={previewUrl}
+            title={t('exports.previewTitle')}
+            className="block h-[calc(100dvh-2.75rem)] w-full border-0 bg-white"
+          />
+        </div>
+      ) : null}
+    </>
+  )
 }
 
 function chatOptionLabel(chat: { id: number; title: string; username?: string | null }) {
@@ -384,9 +472,9 @@ export function ExportsPage() {
                   </span>
                   <div className="min-w-0">
                     <strong className="text-[13px] text-slate-700">
-                      {job.data.phase || t('exports.processingMessages')}
+                      {phaseLabel(job.data.phase, t)}
                     </strong>
-                    <p className="mt-1 truncate text-xs text-slate-400">{job.data.id}</p>
+                    <p className="mt-1 truncate text-xs text-slate-400">{jobLabel(job.data, t)}</p>
                   </div>
                   <div className="max-sm:col-span-2">
                     <strong className="font-display text-[22px] text-slate-700">
@@ -399,18 +487,14 @@ export function ExportsPage() {
                   <div className="col-span-full h-2 overflow-hidden rounded-sm bg-slate-100">
                     <i
                       className="block h-full min-w-1 bg-blue-600"
-                      style={{
-                        width: job.data.total
-                          ? `${(job.data.processed / job.data.total) * 100}%`
-                          : '18%',
-                      }}
+                      style={{ width: `${jobProgress(job.data)}%` }}
                     />
                   </div>
                   {job.data.error ? (
                     <p className={cn('col-span-full', errorClass)}>{job.data.error}</p>
                   ) : null}
                   <div className="col-span-full">
-                    <DownloadButton files={job.data.files.map(downloadOption)} />
+                    <ExportFilesRow files={job.data.files} />
                   </div>
                 </div>
               ) : (
@@ -531,7 +615,7 @@ export function ExportsPage() {
                       <td>{run.message_count}</td>
                       <td>
                         <div className="flex justify-end gap-1">
-                          <DownloadButton files={run.files.map(downloadOption)} />
+                          <ExportFilesRow files={run.files} />
                         </div>
                       </td>
                     </tr>

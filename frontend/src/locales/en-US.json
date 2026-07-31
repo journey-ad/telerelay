@@ -517,7 +517,20 @@
       "instant": "Instant export",
       "scheduled": "Scheduled export",
       "manual": "Manual run"
-    }
+    },
+    "preview": "Preview",
+    "previewTitle": "Export preview",
+    "phase": {
+      "queued": "Waiting to run",
+      "readingGroups": "Reading group metadata and administrators",
+      "readingMessages": "Reading group messages",
+      "writingFiles": "Publishing export files",
+      "cancelling": "Cancelling",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "allHistoryLabel": "All history"
   },
   "telegramPreview": {
     "eyebrow": "Telegram reader",

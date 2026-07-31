@@ -517,7 +517,20 @@
       "instant": "即时导出",
       "scheduled": "定时导出",
       "manual": "手动运行"
-    }
+    },
+    "preview": "在线预览",
+    "previewTitle": "导出预览",
+    "phase": {
+      "queued": "等待执行",
+      "readingGroups": "正在读取群元数据和管理员",
+      "readingMessages": "正在读取群消息",
+      "writingFiles": "正在提交导出文件",
+      "cancelling": "正在取消",
+      "completed": "已完成",
+      "failed": "执行失败",
+      "cancelled": "已取消"
+    },
+    "allHistoryLabel": "全部历史"
   },
   "telegramPreview": {
     "eyebrow": "Telegram 阅读器",

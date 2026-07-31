@@ -230,6 +230,11 @@ export interface ExportJob {
   phase?: string
   files: string[]
   error?: string
+  chat_title?: string | null
+  range_start?: string | null
+  range_end?: string | null
+  all_history?: boolean
+  progress_date?: string | null
 }
 
 export interface TelegramAuth {

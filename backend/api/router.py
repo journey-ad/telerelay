@@ -813,6 +813,18 @@ async def export_file(
     return FileResponse(candidate, filename=candidate.name)
 
 
+@router.get("/exports/preview-token")
+async def export_preview_token(
+    path: str,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        token = context.exports.create_preview_token(path)
+    except ExportError as exc:
+        raise _error("export_failed", str(exc), 422) from exc
+    return {"token": token}
+
+
 @router.get("/config")
 async def get_config(context: ApplicationContext = Depends(get_context)) -> dict:
     return {
