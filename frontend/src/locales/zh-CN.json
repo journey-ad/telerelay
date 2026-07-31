@@ -44,7 +44,13 @@
     "openMenu": "打开菜单",
     "refresh": "刷新当前数据",
     "logout": "退出登录",
-    "more": "更多"
+    "more": "更多",
+    "mobile": {
+      "dashboard": "总览",
+      "telegram": "会话",
+      "rules": "规则",
+      "automations": "自动化"
+    }
   },
   "node": {
     "title": "Telegram 节点",

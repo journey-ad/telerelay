@@ -44,7 +44,13 @@
     "openMenu": "Open menu",
     "refresh": "Refresh current data",
     "logout": "Sign out",
-    "more": "More"
+    "more": "More",
+    "mobile": {
+      "dashboard": "Overview",
+      "telegram": "Chats",
+      "rules": "Rules",
+      "automations": "Automation"
+    }
   },
   "node": {
     "title": "Telegram node",

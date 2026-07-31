@@ -38,6 +38,13 @@ const navigation = [
   { to: '/settings', label: 'nav.settings', icon: Settings },
 ] as const
 
+const mobileNavigation = [
+  { ...navigation[0], label: 'nav.mobile.dashboard' },
+  { ...navigation[1], label: 'nav.mobile.telegram' },
+  { ...navigation[2], label: 'nav.mobile.rules' },
+  { ...navigation[3], label: 'nav.mobile.automations' },
+] as const
+
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `mb-1 flex h-10 items-center gap-3 rounded-[5px] px-3 text-sm font-medium transition ${
     isActive
@@ -252,20 +259,20 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           'border-slate-200 bg-white/95 backdrop-blur-xl max-md:grid',
         )}
       >
-        {navigation.slice(0, 4).map(({ icon: Icon, ...item }) => (
+        {mobileNavigation.map(({ icon: Icon, label, ...item }) => (
           <NavLink
             key={item.to}
             {...item}
             className={({ isActive }) =>
               cn(
                 'flex min-w-0 flex-col items-center justify-center gap-1',
-                'text-xs no-underline',
+                'text-[11px] no-underline',
                 isActive ? 'text-blue-600' : 'text-slate-400',
               )
             }
           >
             <Icon size={19} />
-            <span>{t(item.label)}</span>
+            <span className="w-full truncate px-0.5 text-center leading-none">{t(label)}</span>
           </NavLink>
         ))}
         <button
@@ -276,7 +283,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           onClick={() => setMobileOpen(true)}
         >
           <MoreHorizontal size={20} />
-          <span>{t('nav.more')}</span>
+          <span className="w-full truncate px-0.5 text-center leading-none">{t('nav.more')}</span>
         </button>
       </nav>
     </div>
