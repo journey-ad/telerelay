@@ -24,5 +24,7 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 COPY config/*.example ./config/
 ARG GIT_SHA=""
 RUN echo "${GIT_SHA}" > ./backend/.commit
+ARG APP_VERSION=""
+RUN echo "${APP_VERSION}" > ./backend/.version
 EXPOSE 8080
 CMD ["python", "-m", "backend.main"]

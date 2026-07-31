@@ -15,12 +15,20 @@ REPOSITORY = "journey-ad/telerelay"
 REPOSITORY_URL = f"https://github.com/{REPOSITORY}"
 VERSION_INFO_URL = "https://journey-ad.github.io/telerelay/version.json"
 VERSION_ENV = "TELERELAY_VERSION"
+VERSION_FILE = Path(__file__).resolve().parent / ".version"
 COMMIT_ENV = "TELERELAY_COMMIT"
 COMMIT_FILE = Path(__file__).resolve().parent / ".commit"
 
 
 def current_version() -> str:
-    return os.getenv(VERSION_ENV) or __version__
+    value = os.getenv(VERSION_ENV, "").strip()
+    if value:
+        return value
+    if VERSION_FILE.is_file():
+        value = VERSION_FILE.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    return __version__
 
 
 def _short_hash(value: str) -> str:

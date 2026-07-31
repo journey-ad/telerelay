@@ -31,6 +31,7 @@ from backend.exporter.service import ExportService
 from backend.forwarder.downloader import MediaDownloader
 from backend.i18n import set_language, t
 from backend.logger import get_logger, setup_logger
+from backend.meta import current_version
 from backend.services import RuleService
 from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
 from backend.telegram_chats import TelegramChatService
@@ -113,7 +114,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TeleRelay API",
-        version="2.0.0",
+        version=current_version(),
         lifespan=lifespan,
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",

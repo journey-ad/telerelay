@@ -28,6 +28,33 @@ class VersionParsingTests(unittest.TestCase):
         with patch.dict(os.environ, {"TELERELAY_VERSION": "v9.9.9"}, clear=False):
             self.assertEqual(current_version(), "v9.9.9")
 
+    def test_current_version_reads_version_file(self):
+        with patch.dict(os.environ, {}, clear=False), patch(
+            "backend.meta.VERSION_FILE"
+        ) as version_file:
+            version_file.is_file.return_value = True
+            version_file.read_text.return_value = "2.0.0-12-g3f9a1c2\n"
+            self.assertEqual(current_version(), "2.0.0-12-g3f9a1c2")
+
+    def test_current_version_ignores_blank_version_file(self):
+        from backend import __version__
+
+        with patch.dict(os.environ, {}, clear=False), patch(
+            "backend.meta.VERSION_FILE"
+        ) as version_file:
+            version_file.is_file.return_value = True
+            version_file.read_text.return_value = "   \n"
+            self.assertEqual(current_version(), __version__)
+
+    def test_current_version_falls_back_to_package_version(self):
+        from backend import __version__
+
+        with patch.dict(os.environ, {}, clear=False), patch(
+            "backend.meta.VERSION_FILE"
+        ) as version_file:
+            version_file.is_file.return_value = False
+            self.assertEqual(current_version(), __version__)
+
     def test_short_hash_truncates_full_sha(self):
         self.assertEqual(_short_hash("0123456789abcdef"), "0123456")
         self.assertEqual(_short_hash("abc1234"), "abc1234")
