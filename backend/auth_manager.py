@@ -49,6 +49,9 @@ class AuthManager:
     def set_user_info(self, user_info: str) -> None:
         self._user_info = user_info
 
+    def set_on_state_change(self, callback: Callable[[str, str], None] | None) -> None:
+        self._on_state_change = callback
+
     def _submit(self, kind: str, value: str, name: str) -> bool:
         value = value.strip()
         if not value:

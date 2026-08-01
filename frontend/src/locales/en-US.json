@@ -106,6 +106,9 @@
     "switchTo": "Switch to {{name}}",
     "authenticate": "Authenticate {{name}}",
     "deleteNamed": "Delete {{name}}",
+    "editName": "Rename {{name}}",
+    "saveName": "Save account name",
+    "cancelEdit": "Cancel renaming",
     "deleteConfirm": "Delete “{{name}}” and its local login session? Its cache data will also be removed."
   },
   "chatInput": {

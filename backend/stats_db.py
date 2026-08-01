@@ -10,6 +10,7 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List
+from backend.account_paths import AccountPathRegistry
 from backend.logger import get_logger
 
 logger = get_logger()
@@ -508,3 +509,29 @@ def get_stats_db() -> StatsDB:
             if _stats_db is None:
                 _stats_db = StatsDB()
     return _stats_db
+
+
+class AccountStatsRegistry:
+    """Resolve one isolated statistics database per authenticated account."""
+
+    def __init__(
+        self,
+        data_dir: str | Path = "data",
+        paths: AccountPathRegistry | None = None,
+    ):
+        self.paths = paths or AccountPathRegistry(data_dir=data_dir)
+        self._databases: dict[str, StatsDB] = {}
+        self._lock = threading.RLock()
+
+    def for_account(self, account_id: str) -> StatsDB:
+        path = self.paths.for_account(account_id).stats_db
+        with self._lock:
+            database = self._databases.get(account_id)
+            if database is None:
+                database = StatsDB(path)
+                self._databases[account_id] = database
+            return database
+
+    def discard(self, account_id: str) -> None:
+        with self._lock:
+            self._databases.pop(account_id, None)

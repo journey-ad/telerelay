@@ -42,6 +42,7 @@ class MessageForwarder:
         message_filter: MessageFilter,
         bot_manager=None,
         target_label_cache: Optional[dict[str, str]] = None,
+        stats_db=None,
     ):
         self.client = client
         self.rule = rule
@@ -52,7 +53,7 @@ class MessageForwarder:
         )
 
         # Statistics (persistent via SQLite)
-        self._stats_db = get_stats_db()
+        self._stats_db = stats_db or get_stats_db()
         db_stats = self._stats_db.get_stats(rule.name)
         self.forwarded_count = db_stats["forwarded"]
         self.filtered_count = db_stats["filtered"]

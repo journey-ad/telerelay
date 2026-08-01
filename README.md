@@ -44,7 +44,6 @@ REST endpoints: `/api/v1`. OpenAPI docs: `/api/docs`. SSE stream: `/api/v1/event
 
 ```bash
 cp .env.example .env
-cp config/config.yaml.example config/config.yaml
 ```
 
 Set `API_ID` and `API_HASH` in `.env`. For Bot mode, also set `BOT_TOKEN`. Enable `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` when the console is network-accessible.
@@ -88,24 +87,23 @@ Use `pnpm dev:backend` and `pnpm dev:frontend` to run either side separately.
 
 `.env` — credentials and runtime settings: API credentials, `SESSION_TYPE`, proxy, host, port, log level, runtime language, Web Basic Auth, Admin Bot and Mini App settings.
 
-`config/config.yaml` — mutable application config: forwarding and button rules, filter and forwarding options, queue settings, export directories, timezone, and concurrency.
+`config/<telegram_user_id>.yaml` is generated after account authentication and managed by the console. It stores forwarding rules, button automation, filters, and export settings for that account.
 
 The console can import/export YAML config. `.env` secrets are never included.
 
 ## Data
 
 ```text
-data/telegram_session.session    # Default account session
-data/telegram_sessions/          # Additional account sessions
-data/telegram_accounts.json      # Account registry
-data/telegram_avatars/           # Cached avatars
-data/forward_queue.db            # Default account queue
-data/forward_queues/             # Additional account queues
-data/stats.db                    # Forwarding statistics
-data/exports.db                  # Export tasks
-data/db/msg_export_{chat_id}.sqlite3
-data/exports/                    # Generated files
-logs/telerelay.log               # Rotating log
+config/<telegram_user_id>.yaml             # Account configuration
+data/telegram_accounts.json                # Global account registry
+data/<telegram_user_id>/telegram.session   # Telegram session
+data/<telegram_user_id>/forward_queue.db   # Forwarding queue
+data/<telegram_user_id>/stats.db           # Statistics and history
+data/<telegram_user_id>/exports.db         # Export tasks and runs
+data/<telegram_user_id>/db/                # Message archives
+data/<telegram_user_id>/exports/           # Generated files
+data/<telegram_user_id>/avatar.jpg         # Account avatar
+logs/telerelay.log                          # Rotating log
 ```
 
 Back up `config/`, `data/`, and `.env` together. `.env` and session files are secrets.
@@ -148,7 +146,6 @@ telerelay/
 │   └── main.py           # Entry point
 ├── frontend/             # React + TypeScript console
 │   └── src/
-├── config/               # YAML configuration
 ├── data/                 # Sessions, databases, exports
 ├── logs/                 # Rotating logs
 ├── tests/

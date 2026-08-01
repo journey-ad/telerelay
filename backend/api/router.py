@@ -1,7 +1,6 @@
 """Versioned REST and SSE API."""
 
 import asyncio
-import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
@@ -36,11 +35,11 @@ from backend.schemas import (
     MessageExportRequest,
     RegexValidateRequest,
     TelegramAccountCreate,
+    TelegramAccountUpdate,
     TelegramChatResponse,
     TogglePayload,
 )
 from backend.services import ServiceError, validate_regex_patterns
-from backend.stats_db import get_stats_db
 from backend.telegram_accounts import TelegramAccountError
 from backend.telegram_chats import TelegramChatError
 from backend.telegram_preview import TelegramPreviewError
@@ -103,6 +102,23 @@ def _telegram_chats(context: ApplicationContext):
             409,
         )
     return context.telegram_chats
+
+
+def _active_resource(context: ApplicationContext, name: str):
+    try:
+        return getattr(context, name)()
+    except ValueError as exc:
+        raise _error("account_not_authenticated", str(exc), 409) from exc
+
+
+def _active_account_id(context: ApplicationContext) -> str:
+    try:
+        account_id = context.active_account_id()
+    except ValueError as exc:
+        raise _error("account_not_authenticated", str(exc), 409) from exc
+    if account_id is None:
+        raise _error("not_user_mode", "Telegram accounts are only available in user mode", 409)
+    return account_id
 
 
 def _telegram_chat_error(exc: TelegramChatError) -> HTTPException:
@@ -317,6 +333,21 @@ async def create_telegram_account(
     return account
 
 
+@router.put("/telegram-accounts/{account_id}")
+async def update_telegram_account(
+    account_id: str,
+    payload: TelegramAccountUpdate,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        account = await _accounts(context).rename(account_id, payload.label)
+    except TelegramAccountError as exc:
+        status_code = 404 if exc.code == "account_not_found" else 409
+        raise _error(exc.code, str(exc), status_code) from exc
+    context.events.publish("telegram-account", {"action": "rename", "id": account_id})
+    return account
+
+
 @router.post("/telegram-accounts/{account_id}/activate")
 async def activate_telegram_account(
     account_id: str,
@@ -375,10 +406,16 @@ async def queue_items(
 
 @router.post("/bot/start", response_model=ApiMessage)
 async def bot_start(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
-    valid, message = context.config.validate()
+    config = _active_resource(context, "active_config")
+    valid, message = config.validate()
     if not valid:
         raise _error("invalid_config", message, 422)
-    if not await context.bot.start():
+    started = (
+        await context.bot.start_account(_active_account_id(context))
+        if context.accounts
+        else await context.bot.start()
+    )
+    if not started:
         raise _error("already_running", "Telegram runtime is already running", 409)
     context.events.publish("bot", {"action": "start"})
     return ApiMessage(code="bot_started")
@@ -386,7 +423,12 @@ async def bot_start(context: ApplicationContext = Depends(get_context)) -> ApiMe
 
 @router.post("/bot/stop", response_model=ApiMessage)
 async def bot_stop(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
-    if not await context.bot.stop():
+    stopped = (
+        await context.bot.stop_account(_active_account_id(context))
+        if context.accounts
+        else await context.bot.stop()
+    )
+    if not stopped:
         raise _error("not_running", "Telegram runtime is not running", 409)
     context.events.publish("bot", {"action": "stop"})
     return ApiMessage(code="bot_stopped")
@@ -394,8 +436,14 @@ async def bot_stop(context: ApplicationContext = Depends(get_context)) -> ApiMes
 
 @router.post("/bot/restart", response_model=ApiMessage)
 async def bot_restart(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
-    context.config.load()
-    if not await context.bot.restart():
+    config = _active_resource(context, "active_config")
+    config.load()
+    restarted = (
+        await context.bot.get_runtime(_active_account_id(context)).restart()
+        if context.accounts
+        else await context.bot.restart()
+    )
+    if not restarted:
         raise _error("restart_failed", "Telegram runtime could not restart", 500)
     context.events.publish("bot", {"action": "restart"})
     return ApiMessage(code="bot_restarted")
@@ -403,6 +451,8 @@ async def bot_restart(context: ApplicationContext = Depends(get_context)) -> Api
 
 @router.post("/bot/reset-stats", response_model=ApiMessage)
 async def reset_stats(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
+    if context.accounts:
+        _active_resource(context, "active_stats")
     await asyncio.to_thread(context.bot.reset_stats)
     context.events.publish("stats", {"action": "reset"})
     return ApiMessage(code="stats_reset")
@@ -423,7 +473,7 @@ async def telegram_auth_state(context: ApplicationContext = Depends(get_context)
 async def telegram_auth_start(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
     if context.accounts:
         account_id = context.accounts.store.active_account_id
-        if context.accounts.runtimes.is_account_running(account_id):
+        if context.accounts.is_authentication_running(account_id):
             return ApiMessage(code="auth_in_progress")
         auth = context.accounts.get_auth()
         auth.reset()
@@ -492,7 +542,7 @@ async def clear_telegram_session(
 
 @router.get("/rules")
 async def list_rules(context: ApplicationContext = Depends(get_context)) -> list[dict]:
-    return context.rules.list_rules()
+    return _active_resource(context, "active_rules").list_rules()
 
 
 @router.post("/rules", status_code=201)
@@ -501,7 +551,7 @@ async def create_rule(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return await context.rules.create_rule(payload)
+        return await _active_resource(context, "active_rules").create_rule(payload)
     except ServiceError as exc:
         raise _error(exc.code, str(exc), 422) from exc
 
@@ -513,7 +563,7 @@ async def update_rule(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return await context.rules.update_rule(index, payload)
+        return await _active_resource(context, "active_rules").update_rule(index, payload)
     except ServiceError as exc:
         raise _error(exc.code, str(exc), 404 if exc.code == "not_found" else 422) from exc
 
@@ -524,7 +574,7 @@ async def delete_rule(
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
     try:
-        await context.rules.delete_rule(index)
+        await _active_resource(context, "active_rules").delete_rule(index)
     except ServiceError as exc:
         raise _error(exc.code, str(exc), 404 if exc.code == "not_found" else 422) from exc
     return ApiMessage(code="rule_deleted")
@@ -532,7 +582,7 @@ async def delete_rule(
 
 @router.get("/button-rules")
 async def list_button_rules(context: ApplicationContext = Depends(get_context)) -> list[dict]:
-    return context.rules.list_button_rules()
+    return _active_resource(context, "active_rules").list_button_rules()
 
 
 @router.post("/button-rules", status_code=201)
@@ -541,7 +591,7 @@ async def create_button_rule(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return await context.rules.create_button_rule(payload)
+        return await _active_resource(context, "active_rules").create_button_rule(payload)
     except ServiceError as exc:
         raise _error(exc.code, str(exc), 422) from exc
 
@@ -553,7 +603,7 @@ async def update_button_rule(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return await context.rules.update_button_rule(index, payload)
+        return await _active_resource(context, "active_rules").update_button_rule(index, payload)
     except ServiceError as exc:
         raise _error(exc.code, str(exc), 404 if exc.code == "not_found" else 422) from exc
 
@@ -564,7 +614,7 @@ async def delete_button_rule(
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
     try:
-        await context.rules.delete_button_rule(index)
+        await _active_resource(context, "active_rules").delete_button_rule(index)
     except ServiceError as exc:
         raise _error(exc.code, str(exc), 404 if exc.code == "not_found" else 422) from exc
     return ApiMessage(code="button_rule_deleted")
@@ -573,8 +623,9 @@ async def delete_button_rule(
 @router.get("/stats")
 async def stats(
     date_limit: StatsDateLimit = "30day",
+    context: ApplicationContext = Depends(get_context),
 ) -> dict:
-    database = get_stats_db()
+    database = _active_resource(context, "active_stats")
     report_days = STATS_DATE_LIMIT_DAYS[date_limit]
     details, daily = await asyncio.gather(
         asyncio.to_thread(database.get_rule_stats_detail),
@@ -592,9 +643,10 @@ async def history(
     keyword: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
+    context: ApplicationContext = Depends(get_context),
 ) -> dict:
     rows, total = await asyncio.to_thread(
-        get_stats_db().query_history,
+        _active_resource(context, "active_stats").query_history,
         rule_name or None,
         keyword or None,
         page_size,
@@ -633,7 +685,7 @@ async def recent_events(
 
 @router.get("/exports/availability")
 async def export_availability(context: ApplicationContext = Depends(get_context)) -> dict:
-    available, reason = context.exports.availability(require_connection=True)
+    available, reason = _active_resource(context, "active_exports").availability(require_connection=True)
     return {"available": available, "reason": reason}
 
 
@@ -643,7 +695,7 @@ async def start_group_export(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        job_id = context.exports.start_group_export(payload.formats, payload.subdirectory)
+        job_id = _active_resource(context, "active_exports").start_group_export(payload.formats, payload.subdirectory)
         return {"job_id": job_id}
     except ExportError as exc:
         raise _error("export_failed", str(exc), 422) from exc
@@ -659,7 +711,7 @@ async def start_message_export(
         chat = await asyncio.to_thread(
             _telegram_chats(context).get_chat, account_id, payload.chat_id
         )
-        job_id = context.exports.start_message_export(
+        job_id = _active_resource(context, "active_exports").start_message_export(
             chat_id=payload.chat_id,
             chat_title=chat.title,
             start_at=payload.start_at,
@@ -680,7 +732,7 @@ async def export_job(
     job_id: str,
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
-    snapshot = context.exports.get_job(job_id)
+    snapshot = _active_resource(context, "active_exports").get_job(job_id)
     if not snapshot:
         raise _error("not_found", "Export job does not exist", 404)
     return _dataclass(snapshot)
@@ -691,14 +743,14 @@ async def cancel_export_job(
     job_id: str,
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
-    if not context.exports.cancel_job(job_id):
+    if not _active_resource(context, "active_exports").cancel_job(job_id):
         raise _error("not_cancellable", "Export job cannot be cancelled", 409)
     return ApiMessage(code="export_cancelling")
 
 
 @router.get("/exports/tasks")
 async def export_tasks(context: ApplicationContext = Depends(get_context)) -> list[dict]:
-    return [_dataclass(task) for task in context.exports.list_tasks()]
+    return [_dataclass(task) for task in _active_resource(context, "active_exports").list_tasks()]
 
 
 async def _save_task(
@@ -708,7 +760,7 @@ async def _save_task(
     chat = await asyncio.to_thread(
         _telegram_chats(context).get_chat, account_id, payload.chat_id
     )
-    return context.exports.save_task(
+    return _active_resource(context, "active_exports").save_task(
         task_id=task_id,
         name=payload.name,
         chat_id=payload.chat_id,
@@ -762,7 +814,7 @@ async def toggle_export_task(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return _dataclass(context.exports.set_task_enabled(task_id, payload.enabled))
+        return _dataclass(_active_resource(context, "active_exports").set_task_enabled(task_id, payload.enabled))
     except KeyError as exc:
         raise _error("not_found", "Export task does not exist", 404) from exc
 
@@ -773,7 +825,7 @@ async def delete_export_task(
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
     try:
-        context.exports.delete_task(task_id)
+        _active_resource(context, "active_exports").delete_task(task_id)
     except KeyError as exc:
         raise _error("not_found", "Export task does not exist", 404) from exc
     except ExportError as exc:
@@ -787,7 +839,7 @@ async def run_export_task(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        job_id = context.scheduler.run_now(task_id)
+        job_id = _active_resource(context, "active_scheduler").run_now(task_id)
     except KeyError as exc:
         raise _error("not_found", "Export task does not exist", 404) from exc
     except ExportError as exc:
@@ -802,7 +854,7 @@ async def export_runs(
     limit: int = Query(50, ge=1, le=500),
     context: ApplicationContext = Depends(get_context),
 ) -> list[dict]:
-    return [_dataclass(run) for run in context.exports.list_runs(limit)]
+    return [_dataclass(run) for run in _active_resource(context, "active_exports").list_runs(limit)]
 
 
 @router.delete("/exports/runs/{run_id}", response_model=ApiMessage)
@@ -811,7 +863,7 @@ async def delete_export_run(
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
     try:
-        context.exports.delete_run(run_id)
+        _active_resource(context, "active_exports").delete_run(run_id)
     except KeyError as exc:
         raise _error("not_found", "Export run does not exist", 404) from exc
     return ApiMessage(code="export_run_deleted")
@@ -823,7 +875,8 @@ async def export_file(
     context: ApplicationContext = Depends(get_context),
 ) -> FileResponse:
     candidate = Path(path).resolve()
-    roots = [context.exports.export_root.resolve(), context.exports.message_db_root.resolve()]
+    exports = _active_resource(context, "active_exports")
+    roots = [exports.export_root.resolve(), exports.message_db_root.resolve()]
     if not candidate.is_file() or not any(candidate == root or root in candidate.parents for root in roots):
         raise _error("not_found", "Export file does not exist", 404)
     return FileResponse(candidate, filename=candidate.name)
@@ -835,7 +888,7 @@ async def export_preview_token(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        token = context.exports.create_preview_token(path)
+        token = _active_resource(context, "active_exports").create_preview_token(path)
     except ExportError as exc:
         raise _error("export_failed", str(exc), 422) from exc
     return {"token": token}
@@ -843,9 +896,10 @@ async def export_preview_token(
 
 @router.get("/config")
 async def get_config(context: ApplicationContext = Depends(get_context)) -> dict:
+    config = _active_resource(context, "active_config")
     return {
-        "runtime": context.config.to_dict(),
-        "config": context.config.config_data,
+        "runtime": config.to_dict(),
+        "config": config.config_data,
     }
 
 
@@ -854,18 +908,30 @@ async def replace_config(
     payload: ConfigPayload,
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
-    context.config.replace(payload.config)
-    if context.bot.is_running:
-        await context.bot.restart()
+    account_id = _active_account_id(context) if context.accounts else None
+    if account_id and context.config_registry:
+        context.config_registry.replace(account_id, payload.config)
+        if context.export_registry:
+            context.export_registry.recreate(account_id)
+        runtime = context.bot.get_runtime(account_id)
+        if runtime.is_running:
+            await runtime.restart()
+    else:
+        context.config.replace(payload.config)
+        if context.bot.is_running:
+            await context.bot.restart()
     return ApiMessage(code="config_saved")
 
 
 @router.get("/config/export")
 async def export_config(context: ApplicationContext = Depends(get_context)) -> FileResponse:
-    path = Path(context.config.config_file)
+    config = _active_resource(context, "active_config")
+    path = Path(config.config_file)
     if not path.is_file():
         raise _error("not_found", "Configuration file does not exist", 404)
-    return FileResponse(path, filename="config.yaml", media_type="application/yaml")
+    account_id = _active_account_id(context) if context.accounts else None
+    filename = f"config-{account_id}.yaml" if account_id else "config.yaml"
+    return FileResponse(path, filename=filename, media_type="application/yaml")
 
 
 @router.post("/config/import", response_model=ApiMessage)
@@ -882,9 +948,18 @@ async def import_config(
         raise _error("invalid_yaml", "Configuration file is not valid YAML", 422) from exc
     if not isinstance(loaded, dict):
         raise _error("invalid_config", "Configuration root must be an object", 422)
-    context.config.replace(loaded)
-    if context.bot.is_running:
-        await context.bot.restart()
+    account_id = _active_account_id(context) if context.accounts else None
+    if account_id and context.config_registry:
+        context.config_registry.replace(account_id, loaded)
+        if context.export_registry:
+            context.export_registry.recreate(account_id)
+        runtime = context.bot.get_runtime(account_id)
+        if runtime.is_running:
+            await runtime.restart()
+    else:
+        context.config.replace(loaded)
+        if context.bot.is_running:
+            await context.bot.restart()
     return ApiMessage(code="config_imported")
 
 

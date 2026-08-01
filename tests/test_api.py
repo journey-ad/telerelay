@@ -157,6 +157,7 @@ class ApiContractTests(unittest.TestCase):
             config_file=str(root / "config.yaml"),
         )
         self.account_store = TelegramAccountStore(root / "data")
+        self.account_id = self.account_store.active_account_id
         self.bot = TelegramRuntimeRegistry(
             self.config,
             self.account_store,
@@ -318,7 +319,7 @@ class ApiContractTests(unittest.TestCase):
             get_daily_stats=lambda days: calls.append(days) or [{"days": days}],
         )
 
-        with patch("backend.api.router.get_stats_db", return_value=database):
+        with patch("backend.stats_db.get_stats_db", return_value=database):
             default = self.client.get("/api/v1/stats")
             responses = {
                 date_limit: self.client.get(
@@ -336,7 +337,7 @@ class ApiContractTests(unittest.TestCase):
     def test_telegram_account_create_list_and_activate_contracts(self):
         initial = self.client.get("/api/v1/telegram-accounts")
         self.assertEqual(initial.status_code, 200)
-        self.assertEqual(initial.json()[0]["id"], "default")
+        self.assertEqual(initial.json()[0]["id"], self.account_id)
 
         created = self.client.post(
             "/api/v1/telegram-accounts",
@@ -345,17 +346,34 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(created.status_code, 201, created.text)
         self.assertTrue(created.json()["active"])
 
-        activated = self.client.post("/api/v1/telegram-accounts/default/activate")
+        activated = self.client.post(
+            f"/api/v1/telegram-accounts/{self.account_id}/activate"
+        )
         self.assertEqual(activated.status_code, 200, activated.text)
         self.assertTrue(activated.json()["active"])
 
+    def test_telegram_account_name_can_be_updated(self):
+        updated = self.client.put(
+            f"/api/v1/telegram-accounts/{self.account_id}",
+            json={"label": "Primary account"},
+        )
+
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["label"], "Primary account")
+        listed = self.client.get("/api/v1/telegram-accounts").json()
+        self.assertEqual(listed[0]["label"], "Primary account")
+
     def test_telegram_account_avatar_contract(self):
-        missing = self.client.get("/api/v1/telegram-accounts/default/avatar")
+        missing = self.client.get(
+            f"/api/v1/telegram-accounts/{self.account_id}/avatar"
+        )
         self.assertEqual(missing.status_code, 404)
         self.assertEqual(missing.json()["detail"]["code"], "avatar_not_found")
 
-        self.account_store.update_avatar("default", b"fake-jpeg-avatar")
-        response = self.client.get("/api/v1/telegram-accounts/default/avatar")
+        self.account_store.update_avatar(self.account_id, b"fake-jpeg-avatar")
+        response = self.client.get(
+            f"/api/v1/telegram-accounts/{self.account_id}/avatar"
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "image/jpeg")
@@ -364,7 +382,9 @@ class ApiContractTests(unittest.TestCase):
         self.assertIsNotNone(account["avatar_version"])
 
     def test_telegram_account_chats_contract(self):
-        response = self.client.get("/api/v1/telegram-accounts/default/chats")
+        response = self.client.get(
+            f"/api/v1/telegram-accounts/{self.account_id}/chats"
+        )
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
@@ -378,7 +398,7 @@ class ApiContractTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(self.telegram_chats.calls, [("list", "default")])
+        self.assertEqual(self.telegram_chats.calls, [("list", self.account_id)])
         self.assertEqual(self.client.get("/api/v1/exports/chats").status_code, 404)
 
     def test_message_export_resolves_chat_title_without_listing_chats(self):
@@ -393,21 +413,21 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 202, response.text)
         self.assertEqual(response.json(), {"job_id": "job-1"})
-        self.assertEqual(self.telegram_chats.calls, [("get", "default", -1001)])
+        self.assertEqual(self.telegram_chats.calls, [("get", self.account_id, -1001)])
         self.assertEqual(self.exports.message_export["chat_title"], "Release Room")
 
     def test_telegram_preview_dialog_and_message_contracts(self):
         dialogs = self.client.get(
             "/api/v1/telegram-preview/dialogs",
-            params={"account_id": "default", "folder": "archived", "limit": 25},
+            params={"account_id": self.account_id, "folder": "archived", "limit": 25},
         )
         messages = self.client.get(
             "/api/v1/telegram-preview/chats/-1001/messages",
-            params={"account_id": "default", "query": "release"},
+            params={"account_id": self.account_id, "query": "release"},
         )
         message = self.client.get(
             "/api/v1/telegram-preview/chats/-1001/messages/12",
-            params={"account_id": "default"},
+            params={"account_id": self.account_id},
         )
 
         self.assertEqual(dialogs.status_code, 200, dialogs.text)
@@ -422,7 +442,7 @@ class ApiContractTests(unittest.TestCase):
                 (
                     "dialogs",
                     {
-                        "account_id": "default",
+                        "account_id": self.account_id,
                         "folder": "archived",
                         "limit": 25,
                         "cursor": None,
@@ -431,7 +451,7 @@ class ApiContractTests(unittest.TestCase):
                 (
                     "messages",
                     {
-                        "account_id": "default",
+                        "account_id": self.account_id,
                         "chat_id": -1001,
                         "limit": 40,
                         "before_id": None,
@@ -441,7 +461,7 @@ class ApiContractTests(unittest.TestCase):
                 (
                     "message",
                     {
-                        "account_id": "default",
+                        "account_id": self.account_id,
                         "chat_id": -1001,
                         "message_id": 12,
                     },

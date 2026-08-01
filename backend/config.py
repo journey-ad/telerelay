@@ -2,6 +2,7 @@
 Configuration loading and validation module
 Supports loading configuration from .env and config.yaml
 """
+import copy
 import os
 import threading
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 from dotenv import load_dotenv
 
+from backend.account_paths import AccountPathRegistry
 from backend.button_actions import ButtonActionRule, load_button_action_rules
 from backend.i18n import t
 from backend.logger import get_logger
@@ -403,6 +405,106 @@ class Config:
             "log_level": self.log_level,
             "config": self.config_data
         }
+
+
+class AccountConfigRegistry:
+    """Own one mutable YAML configuration per Telegram account."""
+
+    def __init__(
+        self,
+        base_config: Config,
+        data_dir: str | Path = "data",
+        paths: AccountPathRegistry | None = None,
+    ):
+        self.base_config = base_config
+        self.paths = paths or AccountPathRegistry(
+            config_dir=Path(base_config.config_file).parent,
+            data_dir=data_dir,
+        )
+        self._configs: dict[str, Config] = {}
+        self._lock = threading.RLock()
+
+    def for_account(self, account_id: str) -> Config:
+        account_paths = self.paths.for_account(account_id)
+        with self._lock:
+            config = self._configs.get(account_id)
+            if config is not None:
+                return config
+            path = account_paths.config_file
+            exists = path.is_file()
+            config = Config(
+                env_file=self.base_config.env_file,
+                config_file=str(path),
+            )
+            if not exists:
+                config.replace(self._initial_config(account_id))
+            else:
+                self._enforce_paths(config, account_id)
+            self._configs[account_id] = config
+            return config
+
+    def config_path(self, account_id: str) -> Path:
+        return self.paths.for_account(account_id).config_file
+
+    def replace(self, account_id: str, config_data: dict[str, Any]) -> Config:
+        config = self.for_account(account_id)
+        normalized = copy.deepcopy(config_data)
+        self._set_paths(normalized, account_id)
+        config.replace(normalized)
+        return config
+
+    def load_all(self) -> None:
+        with self._lock:
+            configs = list(self._configs.values())
+        for config in configs:
+            config.load()
+
+    def discard(self, account_id: str) -> None:
+        with self._lock:
+            self._configs.pop(account_id, None)
+
+    def _initial_config(self, account_id: str) -> dict[str, Any]:
+        data = copy.deepcopy(self.base_config.config_data)
+        for key in (
+            "source_chats",
+            "target_chats",
+            "filters",
+            "ignore",
+            "forwarding",
+            "forwarding_rules",
+            "button_action_rules",
+        ):
+            data.pop(key, None)
+        data["forwarding_rules"] = []
+        data["button_action_rules"] = []
+        self._set_paths(data, account_id)
+        return data
+
+    def _enforce_paths(self, config: Config, account_id: str) -> None:
+        normalized = copy.deepcopy(config.config_data)
+        if self._set_paths(normalized, account_id):
+            config.replace(normalized)
+
+    def _set_paths(self, data: dict[str, Any], account_id: str) -> bool:
+        paths = self.paths.for_account(account_id)
+        changed = False
+        export = dict(data.get("export") or {})
+        expected_export = {
+            "root_dir": str(paths.export_dir),
+            "message_db_dir": str(paths.message_db_dir),
+        }
+        if any(export.get(key) != value for key, value in expected_export.items()):
+            export.update(expected_export)
+            changed = True
+        data["export"] = export
+
+        queue = dict(data.get("forward_queue") or {})
+        expected_queue = str(paths.queue_db)
+        if queue.get("db_path") != expected_queue:
+            queue["db_path"] = expected_queue
+            changed = True
+        data["forward_queue"] = queue
+        return changed
 
 
 # Factory function

@@ -86,6 +86,10 @@ class TelegramAccountCreate(StrictModel):
         return value
 
 
+class TelegramAccountUpdate(TelegramAccountCreate):
+    pass
+
+
 class TelegramChatResponse(StrictModel):
     id: int
     title: str

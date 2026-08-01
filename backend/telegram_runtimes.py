@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from backend.account_paths import AccountPathRegistry, is_telegram_user_id
 from backend.auth_manager import AuthManager
 from backend.bot_manager import BotManager
 from backend.stats_db import get_stats_db
@@ -26,6 +27,9 @@ class TelegramRuntimeRegistry:
         bot_factory: Callable[..., Any] = BotManager,
         auth_factory: Callable[..., AuthManager] = AuthManager,
         events: Any = None,
+        config_registry: Any = None,
+        stats_registry: Any = None,
+        paths: AccountPathRegistry | None = None,
     ):
         self.config = config
         self.account_store = account_store
@@ -33,6 +37,9 @@ class TelegramRuntimeRegistry:
         self.bot_factory = bot_factory
         self.auth_factory = auth_factory
         self.events = events
+        self.config_registry = config_registry
+        self.stats_registry = stats_registry
+        self.paths = paths
         self.loop: asyncio.AbstractEventLoop | None = None
         self.on_user_authenticated: Callable[[str, dict[str, Any]], None] | None = None
         self._runtimes: dict[str, Any] = {}
@@ -50,6 +57,14 @@ class TelegramRuntimeRegistry:
 
     def ensure_runtime(self, account_id: str) -> Any:
         self.account_store.get_public(account_id)
+        if not is_telegram_user_id(account_id) and any(
+            value is not None
+            for value in (self.config_registry, self.stats_registry, self.paths)
+        ):
+            raise TelegramAccountError(
+                "account_not_authenticated",
+                "Telegram account must be authenticated first",
+            )
         with self._state_lock:
             if account_id in self._blocked_account_ids:
                 raise TelegramAccountError(
@@ -66,13 +81,19 @@ class TelegramRuntimeRegistry:
                     target, state, error
                 ),
             )
-            runtime = self.bot_factory(
-                self.config,
-                auth,
-                session_name=self.account_store.session_name(account_id),
-                queue_db_path=self.queue_db_path(account_id),
-                account_id=account_id,
+            runtime_config = (
+                self.config_registry.for_account(account_id)
+                if self.config_registry is not None
+                else self.config
             )
+            runtime_kwargs = {
+                "session_name": self.account_store.session_name(account_id),
+                "queue_db_path": self.queue_db_path(account_id),
+                "account_id": account_id,
+            }
+            if self.stats_registry is not None:
+                runtime_kwargs["stats_db"] = self.stats_registry.for_account(account_id)
+            runtime = self.bot_factory(runtime_config, auth, **runtime_kwargs)
             runtime.events = self.events
             runtime.on_user_authenticated = (
                 lambda identity, target=account_id: self._authenticated(target, identity)
@@ -94,6 +115,8 @@ class TelegramRuntimeRegistry:
             return self._auth_managers[target]
 
     def queue_db_path(self, account_id: str) -> Path:
+        if self.paths is not None:
+            return self.paths.for_account(account_id).queue_db
         configured = Path(self.config.forward_queue_db_path)
         if account_id == self.account_store.DEFAULT_ACCOUNT_ID:
             return configured
@@ -146,6 +169,7 @@ class TelegramRuntimeRegistry:
                 account["id"]
                 for account in self.account_store.list_public()
                 if account["authenticated"]
+                and is_telegram_user_id(account["id"])
                 and not self.is_account_blocked(account["id"])
                 and not self.is_account_running(account["id"])
             ]
@@ -255,7 +279,9 @@ class TelegramRuntimeRegistry:
         counts: dict[str, int] = {}
         paused_until = 0.0
         pause_reasons: list[str] = []
-        for status in runtime_statuses.values():
+        active_id = self.account_store.active_account_id
+        active_status = runtime_statuses.get(active_id, {})
+        for status in [active_status] if active_status else []:
             queue = status.get("queue", {})
             for key, value in queue.get("counts", {}).items():
                 counts[key] = counts.get(key, 0) + int(value)
@@ -264,8 +290,14 @@ class TelegramRuntimeRegistry:
             if reason and reason not in pause_reasons:
                 pause_reasons.append(str(reason))
 
-        database = get_stats_db()
-        all_stats = database.get_all_stats()
+        if self.stats_registry is not None:
+            all_stats = (
+                self.stats_registry.for_account(active_id).get_all_stats()
+                if is_telegram_user_id(active_id)
+                else {}
+            )
+        else:
+            all_stats = get_stats_db().get_all_stats()
         forwarded = sum(int(item.get("forwarded", 0)) for item in all_stats.values())
         filtered = sum(int(item.get("filtered", 0)) for item in all_stats.values())
         accounts = self.account_store.list_public()
@@ -280,8 +312,8 @@ class TelegramRuntimeRegistry:
             if runtime_statuses.get(account["id"], {}).get("is_running")
         ]
         return {
-            "is_running": bool(running_ids),
-            "is_connected": bool(connected_ids),
+            "is_running": bool(active_status.get("is_running")),
+            "is_connected": bool(active_status.get("is_connected")),
             "running_account_count": len(running_ids),
             "connected_account_count": len(connected_ids),
             "authenticated_account_count": sum(account["authenticated"] for account in accounts),
@@ -303,7 +335,9 @@ class TelegramRuntimeRegistry:
     def list_queue_items(self, limit: int = 50) -> list[dict[str, Any]]:
         accounts = {account["id"]: account for account in self.account_store.list_public()}
         with self._state_lock:
-            runtimes = list(self._runtimes.items())
+            active_id = self.account_store.active_account_id
+            runtime = self._runtimes.get(active_id)
+            runtimes = [(active_id, runtime)] if runtime is not None else []
         items = []
         for account_id, runtime in runtimes:
             store = getattr(runtime, "forward_queue_store", None)
@@ -323,9 +357,16 @@ class TelegramRuntimeRegistry:
         return items[: max(1, min(int(limit), 100))]
 
     def reset_stats(self) -> None:
-        get_stats_db().reset_stats()
+        active_id = self.account_store.active_account_id
+        database = (
+            self.stats_registry.for_account(active_id)
+            if self.stats_registry is not None and is_telegram_user_id(active_id)
+            else get_stats_db()
+        )
+        database.reset_stats()
         with self._state_lock:
-            runtimes = list(self._runtimes.values())
+            runtime = self._runtimes.get(active_id)
+            runtimes = [runtime] if runtime is not None else []
         for runtime in runtimes:
             for forwarder in getattr(runtime, "forwarders", []):
                 forwarder.forwarded_count = 0

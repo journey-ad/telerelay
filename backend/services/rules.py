@@ -36,9 +36,10 @@ def _ensure_valid_regex(patterns: list[str]) -> None:
 
 
 class RuleService:
-    def __init__(self, config: Config, bot_manager):
+    def __init__(self, config: Config, bot_manager, stats_db=None):
         self.config = config
         self.bot_manager = bot_manager
+        self.stats_db = stats_db or get_stats_db()
 
     def list_rules(self) -> list[dict]:
         return [rule.to_dict() for rule in self.config.get_forwarding_rules()]
@@ -67,7 +68,7 @@ class RuleService:
         rules[index] = rule
         self._save_rules(rules)
         if old_name != rule.name:
-            get_stats_db().rename_rule(old_name, rule.name)
+            self.stats_db.rename_rule(old_name, rule.name)
         await self._reload_if_running()
         return rule.to_dict()
 
@@ -76,7 +77,7 @@ class RuleService:
         self._ensure_index(index, rules)
         deleted = rules.pop(index)
         self._save_rules(rules)
-        get_stats_db().delete_rule(deleted.name)
+        self.stats_db.delete_rule(deleted.name)
         await self._reload_if_running()
 
     async def create_button_rule(self, payload: ButtonActionRulePayload) -> dict:
@@ -150,3 +151,27 @@ class RuleService:
     def _ensure_unique(name: str, existing_names: list[str]) -> None:
         if name.casefold() in {item.casefold() for item in existing_names}:
             raise ServiceError("duplicate_name", "Rule names must be unique")
+
+
+class AccountRuleRegistry:
+    """Build a rule service bound to one account's config, runtime and stats."""
+
+    def __init__(self, configs, runtimes, stats):
+        self.configs = configs
+        self.runtimes = runtimes
+        self.stats = stats
+        self._services: dict[str, RuleService] = {}
+
+    def for_account(self, account_id: str) -> RuleService:
+        service = self._services.get(account_id)
+        if service is None:
+            service = RuleService(
+                self.configs.for_account(account_id),
+                self.runtimes.get_runtime(account_id),
+                self.stats.for_account(account_id),
+            )
+            self._services[account_id] = service
+        return service
+
+    def discard(self, account_id: str) -> None:
+        self._services.pop(account_id, None)

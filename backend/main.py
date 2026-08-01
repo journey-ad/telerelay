@@ -21,18 +21,23 @@ PREVIEW_MEDIA_TYPES = {
     ".svg": "image/svg+xml",
 }
 
+from backend.account_paths import AccountPathRegistry
+from backend.account_migration import AccountMigration
 from backend.api import router
 from backend.application import ApplicationContext
 from backend.bot_manager import BotManager
-from backend.config import create_config
+from backend.config import AccountConfigRegistry, create_config
 from backend.events import EventBus, EventLogHandler
+from backend.exporter.registry import AccountExportRegistry
 from backend.exporter.scheduler import ExportScheduler
 from backend.exporter.service import ExportService
 from backend.forwarder.downloader import MediaDownloader
 from backend.i18n import set_language, t
-from backend.logger import get_logger, setup_logger
+from backend.logger import setup_logger
 from backend.meta import current_version
 from backend.services import RuleService
+from backend.services.rules import AccountRuleRegistry
+from backend.stats_db import AccountStatsRegistry
 from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
 from backend.telegram_chats import TelegramChatService
 from backend.telegram_preview import TelegramPreviewService
@@ -54,10 +59,26 @@ async def lifespan(app: FastAPI):
     )
     logger.addHandler(log_handler)
 
-    account_store = TelegramAccountStore() if config.session_type == "user" else None
-    if account_store:
-        bot = TelegramRuntimeRegistry(config, account_store, auth_timeout=300, events=events)
+    paths = AccountPathRegistry(config_dir=Path(config.config_file).parent, data_dir="data")
+    migration = AccountMigration(paths)
+    account_store = None
+    if config.session_type == "user":
+        migration.run()
+        account_store = TelegramAccountStore(paths=paths)
+        config_registry = AccountConfigRegistry(config, paths=paths)
+        stats_registry = AccountStatsRegistry(paths=paths)
+        bot = TelegramRuntimeRegistry(
+            config,
+            account_store,
+            auth_timeout=300,
+            events=events,
+            config_registry=config_registry,
+            stats_registry=stats_registry,
+            paths=paths,
+        )
     else:
+        config_registry = None
+        stats_registry = None
         bot = BotManager(config, events=events)
     bot.bind_loop(asyncio.get_running_loop())
     accounts = TelegramAccountService(account_store, bot) if account_store else None
@@ -65,9 +86,27 @@ async def lifespan(app: FastAPI):
     telegram_preview = TelegramPreviewService(bot, account_store) if account_store else None
     if accounts:
         bot.on_user_authenticated = accounts.update_identity
-    exports = ExportService(config, bot, events=events)
-    scheduler = ExportScheduler(exports)
-    rules = RuleService(config, bot)
+    if account_store:
+        export_registry = AccountExportRegistry(config_registry, bot, paths, events=events)
+        rule_registry = AccountRuleRegistry(config_registry, bot, stats_registry)
+        exports = export_registry
+        scheduler = export_registry
+        rules = rule_registry
+        accounts.on_account_finalized = export_registry.for_account
+
+        def discard_account(account_id: str) -> None:
+            export_registry.discard(account_id)
+            rule_registry.discard(account_id)
+            config_registry.discard(account_id)
+            stats_registry.discard(account_id)
+
+        accounts.on_account_deleted = discard_account
+    else:
+        export_registry = None
+        rule_registry = None
+        exports = ExportService(config, bot, events=events)
+        scheduler = ExportScheduler(exports)
+        rules = RuleService(config, bot)
     context = ApplicationContext(
         config=config,
         bot=bot,
@@ -79,6 +118,10 @@ async def lifespan(app: FastAPI):
         accounts=accounts,
         telegram_chats=telegram_chats,
         telegram_preview=telegram_preview,
+        config_registry=config_registry,
+        stats_registry=stats_registry,
+        export_registry=export_registry,
+        rule_registry=rule_registry,
     )
     app.state.context = context
 
@@ -86,6 +129,7 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     if account_store:
         await bot.start()
+        await migration.resolve_default_account(accounts)
     elif Path(f"{bot.session_name}.session").exists():
         await bot.start()
 
@@ -104,8 +148,13 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        scheduler.shutdown()
-        exports.shutdown()
+        if accounts:
+            await accounts.shutdown()
+        if export_registry:
+            export_registry.shutdown()
+        else:
+            scheduler.shutdown()
+            exports.shutdown()
         if bot.is_running:
             await bot.stop()
         logger.removeHandler(log_handler)

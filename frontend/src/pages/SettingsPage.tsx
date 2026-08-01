@@ -63,10 +63,26 @@ export function SettingsPage() {
     mutationFn: (accountId: string) =>
       request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
     onSuccess: async () => {
+      client.removeQueries({
+        predicate: (query) =>
+          new Set([
+            'bot-status',
+            'forward-queue-items',
+            'stats',
+            'history',
+            'rules',
+            'button-rules',
+            'config',
+            'export-tasks',
+            'export-runs',
+            'export-job',
+            'telegram-preview',
+          ]).has(String(query.queryKey[0] ?? '')),
+      })
       await Promise.all([
         client.invalidateQueries({ queryKey: ['telegram-accounts'] }),
         client.invalidateQueries({ queryKey: ['telegram-auth'] }),
-        client.removeQueries({ queryKey: ['telegram-preview'] }),
+        client.invalidateQueries({ queryKey: ['bot-status'] }),
       ])
     },
   })

@@ -44,7 +44,6 @@ REST API: `/api/v1`。OpenAPI 文档: `/api/docs`。SSE: `/api/v1/events`。
 
 ```bash
 cp .env.example .env
-cp config/config.yaml.example config/config.yaml
 ```
 
 在 `.env` 中设置 `API_ID` 和 `API_HASH`。Bot 模式还需 `BOT_TOKEN`。控制台可被外部访问时，设置 `WEB_AUTH_USERNAME` 和 `WEB_AUTH_PASSWORD`。
@@ -88,24 +87,23 @@ pnpm dev
 
 `.env` — 凭据和运行参数：API 凭据、`SESSION_TYPE`、代理、地址、端口、日志级别、运行时语言、Web Basic Auth、管理 Bot 和 Mini App 设置。
 
-`config/config.yaml` — 可变应用配置：转发和按钮规则、过滤和转发选项、队列设置、导出目录、时区、并发数。
+账号认证后会自动生成 `config/<telegram_user_id>.yaml`，并由控制台管理。它保存该账号的转发规则、按钮自动化、过滤和导出设置。
 
 控制台可导入导出 YAML 配置，`.env` 不包含在内。
 
 ## 数据
 
 ```text
-data/telegram_session.session    # 默认账号 session
-data/telegram_sessions/          # 其他账号 session
-data/telegram_accounts.json      # 账号注册表
-data/telegram_avatars/           # 头像缓存
-data/forward_queue.db            # 默认账号队列
-data/forward_queues/             # 其他账号队列
-data/stats.db                    # 转发统计
-data/exports.db                  # 导出任务
-data/db/msg_export_{chat_id}.sqlite3
-data/exports/                    # 生成文件
-logs/telerelay.log               # 轮转日志
+config/<telegram_user_id>.yaml             # 账号配置
+data/telegram_accounts.json                # 全局账号表
+data/<telegram_user_id>/telegram.session   # Telegram session
+data/<telegram_user_id>/forward_queue.db   # 转发队列
+data/<telegram_user_id>/stats.db           # 统计与历史
+data/<telegram_user_id>/exports.db         # 导出任务与运行记录
+data/<telegram_user_id>/db/                # 消息归档
+data/<telegram_user_id>/exports/           # 生成文件
+data/<telegram_user_id>/avatar.jpg         # 账号头像
+logs/telerelay.log                          # 轮转日志
 ```
 
 一起备份 `config/`、`data/` 和 `.env`。`.env` 和 session 文件均为敏感信息。
@@ -148,7 +146,6 @@ telerelay/
 │   └── main.py           # 入口
 ├── frontend/             # React + TypeScript 控制台
 │   └── src/
-├── config/               # YAML 配置
 ├── data/                 # Session、数据库、导出文件
 ├── logs/                 # 轮转日志
 ├── tests/

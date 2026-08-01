@@ -23,7 +23,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-cp config/config.yaml.example config/config.yaml
 
 python -m backend.main
 ```
@@ -101,7 +100,6 @@ frontend/src/
   i18next.d.ts            Typed translation resources
   global.css              Tailwind entry and shared styling
 
-config/config.yaml.example Mutable configuration template
 tests/                     Backend unit and API contract tests
 ```
 
@@ -113,14 +111,13 @@ Uvicorn must run with `workers=1`. The runtime registry, scheduler, event bus, a
 
 ### Parallel Telegram Accounts
 
-User mode runs every authenticated account concurrently on the FastAPI event loop. Each account owns an isolated `BotManager`, `AuthManager`, Telegram client, handler set, deduplication state, and persistent forwarding queue. An account connection or authentication failure must not stop other accounts.
+User mode runs every authenticated account concurrently on the FastAPI event loop. Each account owns an isolated `BotManager`, `AuthManager`, Telegram client, handler set, deduplication state, configuration, statistics database, export services, and persistent forwarding queue. An account connection or authentication failure must not stop other accounts.
 
 The selected account is only the control-console context for Telegram preview and manual exports. Selecting another account must not stop or restart any runtime. Global start, stop, restart, and rule changes apply to all eligible account runtimes.
 
-Rules, statistics, and export configuration remain global. Forwarding queues are per account so one runtime cannot claim another account's work. Do not silently change the remaining global data model without an explicit migration and product decision.
+Authenticated account IDs are Telegram numeric user IDs. Account configuration is stored at `config/<telegram_user_id>.yaml`; sessions, queues, statistics, export state, archives, and avatars are stored below `data/<telegram_user_id>/`. Pending accounts exist only in `data/telegram_accounts.json` and must not create account-scoped directories before authentication succeeds.
 
-The `default` account intentionally keeps using `data/telegram_session.session` for backward compatibility. Additional sessions belong in `data/telegram_sessions/`.
-The default account also keeps using the configured `data/forward_queue.db`; additional account queues belong in `data/forward_queues/`.
+The `default` ID and the former shared paths are legacy migration inputs only. Migration must be idempotent and must never overwrite an existing account-scoped destination.
 
 ### Read-Only Preview
 
@@ -133,7 +130,8 @@ Do not send MTProto `auth_key`, file references, or session material to the brow
 ### Credential Boundaries
 
 - `.env` owns Telegram credentials, Bot Tokens, Web auth, and process settings.
-- `config/config.yaml` owns mutable rules, queue settings, and export settings.
+- `config/<telegram_user_id>.yaml` owns that account's mutable rules, queue settings, and export settings. It is generated after authentication and managed through the console.
+- The entire `config/` directory is runtime data and must remain ignored by Git and Docker build contexts.
 - Configuration import/export must never include `.env` secrets.
 - HTTP Basic Auth applies to the versioned router when both Web credentials are configured.
 - `/api/v1/health` is intentionally outside the authenticated router.
@@ -183,17 +181,15 @@ Important paths:
 
 ```text
 .env
-config/config.yaml
-data/telegram_session.session
-data/telegram_sessions/
+config/<telegram_user_id>.yaml
 data/telegram_accounts.json
-data/telegram_avatars/
-data/forward_queue.db
-data/forward_queues/
-data/stats.db
-data/exports.db
-data/db/msg_export_{chat_id}.sqlite3
-data/exports/
+data/<telegram_user_id>/telegram.session
+data/<telegram_user_id>/forward_queue.db
+data/<telegram_user_id>/stats.db
+data/<telegram_user_id>/exports.db
+data/<telegram_user_id>/db/msg_export_{chat_id}.sqlite3
+data/<telegram_user_id>/exports/
+data/<telegram_user_id>/avatar.jpg
 data/telegram_preview_cache/
 data/.telegram_preview_cache.key
 logs/telerelay.log

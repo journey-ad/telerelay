@@ -106,6 +106,9 @@
     "switchTo": "切换到 {{name}}",
     "authenticate": "认证 {{name}}",
     "deleteNamed": "删除 {{name}}",
+    "editName": "重命名 {{name}}",
+    "saveName": "保存账号名称",
+    "cancelEdit": "取消重命名",
     "deleteConfirm": "确定删除“{{name}}”及其本地登录会话？该账号的缓存数据也会一并清除"
   },
   "chatInput": {

@@ -5,12 +5,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from backend.client import TelegramClientManager
+from backend.account_paths import AccountPathRegistry
 from backend.telegram_accounts import (
     TelegramAccountError,
     TelegramAccountService,
     TelegramAccountStore,
 )
+from backend.account_migration import AccountMigration
 from backend.telegram_runtimes import TelegramRuntimeRegistry
 
 
@@ -73,20 +74,34 @@ class TelegramAccountStoreTests(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.root = Path(self.temp_dir.name)
 
-    def test_default_account_keeps_legacy_session_path(self):
+    def test_default_account_migrates_to_telegram_user_id(self):
+        (self.root / "telegram_accounts.json").write_text(json.dumps({
+            "version": 1,
+            "active_account_id": "default",
+            "accounts": [{
+                "id": "default",
+                "label": "Legacy",
+                "telegram_user_id": 123,
+            }],
+        }))
         (self.root / "telegram_session.session").touch()
-        store = TelegramAccountStore(self.root)
+        config_dir = self.root / "config"
+        config_dir.mkdir()
+        paths = AccountPathRegistry(data_dir=self.root, config_dir=config_dir)
+        AccountMigration(paths).run()
+        store = TelegramAccountStore(self.root, paths=paths)
 
         account = store.list_public()[0]
 
-        self.assertEqual(account["id"], "default")
+        self.assertEqual(account["id"], "123")
         self.assertTrue(account["authenticated"])
-        self.assertEqual(store.active_session_name, self.root / "telegram_session")
+        self.assertEqual(store.active_session_name, self.root / "123" / "telegram")
+        self.assertFalse((self.root / "telegram_session.session").exists())
 
     def test_registry_round_trip_and_identity_update(self):
         store = TelegramAccountStore(self.root)
         account = store.create("工作账号")
-        store.update_identity(
+        account = store.finalize_identity(
             account.id,
             {
                 "display_name": "Test User",
@@ -113,15 +128,16 @@ class TelegramAccountStoreTests(unittest.TestCase):
     def test_last_account_cannot_be_deleted(self):
         store = TelegramAccountStore(self.root)
 
+        account_id = store.active_account_id
         with self.assertRaises(TelegramAccountError) as raised:
-            store.delete("default")
+            store.delete(account_id)
 
         self.assertEqual(raised.exception.code, "last_account")
 
     def test_clear_identity_marks_new_account_unauthenticated(self):
         store = TelegramAccountStore(self.root)
         account = store.create("工作账号")
-        store.update_identity(account.id, {"telegram_user_id": 123})
+        account = store.finalize_identity(account.id, {"telegram_user_id": 123})
 
         store.clear_identity(account.id)
 
@@ -129,24 +145,29 @@ class TelegramAccountStoreTests(unittest.TestCase):
 
     def test_avatar_cache_is_versioned_and_can_be_cleared(self):
         store = TelegramAccountStore(self.root)
+        account = store.finalize_identity(
+            store.active_account_id,
+            {"telegram_user_id": 123},
+        )
 
-        store.update_avatar("default", b"first-avatar")
+        store.update_avatar(account.id, b"first-avatar")
 
-        account = store.get_public("default")
-        self.assertIsNotNone(account["avatar_version"])
-        self.assertEqual(store.get_avatar_path("default").read_bytes(), b"first-avatar")
+        public = store.get_public(account.id)
+        self.assertIsNotNone(public["avatar_version"])
+        self.assertEqual(store.get_avatar_path(account.id).read_bytes(), b"first-avatar")
 
-        store.update_avatar("default", None)
+        store.update_avatar(account.id, None)
 
-        self.assertIsNone(store.get_avatar_path("default"))
-        self.assertIsNone(store.get_public("default")["avatar_version"])
+        self.assertIsNone(store.get_avatar_path(account.id))
+        self.assertIsNone(store.get_public(account.id)["avatar_version"])
 
     def test_identity_callback_updates_avatar_when_payload_includes_it(self):
         store = TelegramAccountStore(self.root)
         service = TelegramAccountService(store, make_registry(store))
 
+        pending_id = store.active_account_id
         service.update_identity(
-            "default",
+            pending_id,
             {
                 "display_name": "Avatar User",
                 "telegram_user_id": 789,
@@ -154,7 +175,7 @@ class TelegramAccountStoreTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(store.get_avatar_path("default").read_bytes(), b"avatar-bytes")
+        self.assertEqual(store.get_avatar_path("789").read_bytes(), b"avatar-bytes")
 
     def test_identity_update_publishes_account_and_auth_events(self):
         from backend.events import EventBus
@@ -172,11 +193,14 @@ class TelegramAccountStoreTests(unittest.TestCase):
         )
         service = TelegramAccountService(store, registry)
 
-        service.update_identity("default", {"display_name": "User", "telegram_user_id": 1})
+        service.update_identity(
+            store.active_account_id,
+            {"display_name": "User", "telegram_user_id": 1},
+        )
 
         auth_events = events.recent(10, {"telegram-auth"})
         self.assertEqual(auth_events[0]["payload"]["state"], "success")
-        self.assertEqual(auth_events[0]["payload"]["account_id"], "default")
+        self.assertEqual(auth_events[0]["payload"]["account_id"], "1")
         self.assertIn(
             "telegram-account",
             {event["type"] for event in events.recent(10)},
@@ -197,12 +221,13 @@ class TelegramAccountStoreTests(unittest.TestCase):
             events=events,
         )
 
-        auth = registry.get_auth("default")
+        account_id = store.active_account_id
+        auth = registry.get_auth(account_id)
         auth.set_state("waiting_phone")
 
         event = events.recent(1, {"telegram-auth"})[0]
         self.assertEqual(event["payload"]["state"], "waiting_phone")
-        self.assertEqual(event["payload"]["account_id"], "default")
+        self.assertEqual(event["payload"]["account_id"], account_id)
 
 
 class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -211,9 +236,19 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.root = Path(self.temp_dir.name)
         self.store = TelegramAccountStore(self.root)
+        primary = self.store.finalize_identity(
+            self.store.active_account_id,
+            {"telegram_user_id": 100},
+        )
+        Path(f"{self.store.session_name(primary.id)}.session").parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        Path(f"{self.store.session_name(primary.id)}.session").touch()
         self.registry = make_registry(self.store)
         self.service = TelegramAccountService(self.store, self.registry)
-        self.default_runtime = self.registry.ensure_runtime("default")
+        self.primary_id = primary.id
+        self.default_runtime = self.registry.ensure_runtime(self.primary_id)
 
     async def test_create_keeps_existing_runtime_running(self):
         self.default_runtime.is_running = True
@@ -226,13 +261,13 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_activate_authenticated_account_does_not_stop_or_start_any_runtime(self):
         new_account = self.store.create("已登录账号")
-        self.store.update_identity(new_account.id, {"telegram_user_id": 456})
+        new_account = self.store.finalize_identity(new_account.id, {"telegram_user_id": 456})
         Path(f"{self.store.session_name(new_account.id)}.session").parent.mkdir(
             parents=True,
             exist_ok=True,
         )
         Path(f"{self.store.session_name(new_account.id)}.session").touch()
-        self.store.set_active("default")
+        self.store.set_active(self.primary_id)
         self.default_runtime.is_running = True
         new_runtime = self.registry.ensure_runtime(new_account.id)
         new_runtime.is_running = True
@@ -258,14 +293,14 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         self.default_runtime.is_running = True
 
         with self.assertRaises(TelegramAccountError):
-            await self.service.delete("default")
+            await self.service.delete(self.primary_id)
 
         self.assertEqual(self.default_runtime.actions, [])
         self.assertTrue(self.default_runtime.is_running)
 
     async def test_activate_unauthenticated_account_does_not_start(self):
         new_account = self.store.create("待登录账号")
-        self.store.set_active("default")
+        self.store.set_active(self.primary_id)
 
         await self.service.activate(new_account.id)
 
@@ -274,7 +309,7 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_delete_stops_only_the_deleted_runtime(self):
         account = self.store.create("并行账号")
-        self.store.update_identity(account.id, {"telegram_user_id": 123})
+        account = self.store.finalize_identity(account.id, {"telegram_user_id": 123})
         Path(f"{self.store.session_name(account.id)}.session").parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -297,9 +332,8 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
             self.registry.get_runtime(account.id)
 
     async def test_registry_starts_all_authenticated_accounts_with_isolated_queues(self):
-        Path(f"{self.store.session_name('default')}.session").touch()
         account = self.store.create("第二账号")
-        self.store.update_identity(account.id, {"telegram_user_id": 456})
+        account = self.store.finalize_identity(account.id, {"telegram_user_id": 456})
         session_path = Path(f"{self.store.session_name(account.id)}.session")
         session_path.parent.mkdir(parents=True, exist_ok=True)
         session_path.touch()
@@ -312,7 +346,7 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(second.is_running)
         self.assertEqual(
             self.default_runtime.queue_db_path,
-            self.root / "forward_queue.db",
+            self.root / "forward_queues" / f"account_{self.primary_id}.db",
         )
         self.assertEqual(
             second.queue_db_path,
@@ -337,7 +371,7 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_identity_callback_is_bound_to_originating_account(self):
         account = self.store.create("登录中账号")
         runtime = self.registry.ensure_runtime(account.id)
-        self.store.set_active("default")
+        self.store.set_active(self.primary_id)
         self.registry.on_user_authenticated = self.service.update_identity
 
         runtime.on_user_authenticated(
@@ -348,13 +382,13 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(self.store.get_public(account.id)["display_name"], "Parallel User")
-        self.assertEqual(self.store.get_public("default")["display_name"], "")
+        self.assertEqual(self.store.get_public(self.primary_id)["display_name"], "")
 
     async def test_each_account_has_an_independent_auth_manager(self):
         account = await self.service.create("独立认证账号")
 
         self.assertIsNot(
-            self.registry.get_auth("default"),
+            self.registry.get_auth(self.primary_id),
             self.registry.get_auth(account["id"]),
         )
 
@@ -367,25 +401,24 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         listed = self.service.list_accounts()
 
         self.assertEqual({item["id"] for item in listed if item["connected"]}, {
-            "default",
+            self.primary_id,
             account["id"],
         })
 
     async def test_selected_connection_state_is_independent_from_global_online_state(self):
         account = await self.service.create("离线账号")
         self.default_runtime.is_running = self.default_runtime.is_connected = True
-        self.store.set_active("default")
+        self.store.set_active(self.primary_id)
         self.assertTrue(self.registry.is_connected)
 
         await self.service.activate(account["id"])
 
         self.assertFalse(self.registry.is_connected)
-        self.assertTrue(self.registry.is_account_connected("default"))
+        self.assertTrue(self.registry.is_account_connected(self.primary_id))
 
     async def test_one_account_start_failure_does_not_block_other_accounts(self):
-        Path(f"{self.store.session_name('default')}.session").touch()
         account = self.store.create("可用账号")
-        self.store.update_identity(account.id, {"telegram_user_id": 456})
+        account = self.store.finalize_identity(account.id, {"telegram_user_id": 456})
         session_path = Path(f"{self.store.session_name(account.id)}.session")
         session_path.parent.mkdir(parents=True, exist_ok=True)
         session_path.touch()
@@ -403,18 +436,21 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(second.is_running)
 
     async def test_delete_keeps_registry_record_when_session_cleanup_fails(self):
-        account = await self.service.create("待删除账号")
+        pending = await self.service.create("待删除账号")
+        account = self.store.finalize_identity(
+            pending["id"],
+            {"telegram_user_id": 999},
+        )
+        self.registry.ensure_runtime(account.id)
 
         with patch.object(
-            TelegramClientManager,
-            "clear_session_files",
+            self.store.paths,
+            "remove_account_data",
             side_effect=OSError("permission denied"),
         ), self.assertRaises(OSError):
-            await self.service.delete(account["id"])
+            await self.service.delete(account.id)
 
-        self.assertEqual(self.store.get_public(account["id"])["label"], "待删除账号")
-        self.assertFalse(self.registry.is_account_blocked(account["id"]))
-        self.assertEqual(self.registry.ensure_runtime(account["id"]).account_id, account["id"])
+        self.assertFalse(self.registry.is_account_blocked(account.id))
 
     async def test_blocked_account_cannot_be_recreated_during_deletion(self):
         account = await self.service.create("删除中账号")

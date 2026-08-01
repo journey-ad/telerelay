@@ -5,11 +5,13 @@ import {
   Check,
   ChevronDown,
   LogOut,
+  Pencil,
   Plus,
   Radio,
   Smartphone,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -32,12 +34,36 @@ function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   return t('accounts.awaitingAuth')
 }
 
+const accountScopedQueries = new Set([
+  'bot-status',
+  'forward-queue-items',
+  'stats',
+  'history',
+  'rules',
+  'button-rules',
+  'config',
+  'export-tasks',
+  'export-runs',
+  'export-job',
+  'telegram-preview',
+  'dashboard-events',
+])
+
+function clearAccountQueries(client: ReturnType<typeof useQueryClient>) {
+  client.removeQueries({
+    predicate: (query) => accountScopedQueries.has(String(query.queryKey[0] ?? '')),
+  })
+  clearAuthenticatedImages()
+}
+
 export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
   const { t } = useTranslation()
   const client = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [label, setLabel] = useState('')
   const [authValue, setAuthValue] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingLabel, setEditingLabel] = useState('')
   const [flowError, setFlowError] = useState<string | null>(null)
   const accounts = useQuery({
     queryKey: ['telegram-accounts'],
@@ -57,8 +83,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     mutationFn: (accountId: string) =>
       request<TelegramAccount>(`/api/v1/telegram-accounts/${accountId}/activate`, json('POST')),
     onSuccess: async (account) => {
-      client.removeQueries({ queryKey: ['telegram-preview'] })
-      clearAuthenticatedImages()
+      clearAccountQueries(client)
       if (!account.authenticated) {
         setDialogOpen(true)
         try {
@@ -84,8 +109,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
       return account
     },
     onSuccess: async () => {
-      client.removeQueries({ queryKey: ['telegram-preview'] })
-      clearAuthenticatedImages()
+      clearAccountQueries(client)
       setFlowError(null)
       setLabel('')
       await Promise.all([accounts.refetch(), auth.refetch()])
@@ -95,8 +119,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
   const startingAuth = useMutation({
     mutationFn: () => request('/api/v1/telegram-auth/start', json('POST')),
     onSuccess: async () => {
-      client.removeQueries({ queryKey: ['telegram-preview'] })
-      clearAuthenticatedImages()
+      clearAccountQueries(client)
       setFlowError(null)
       await auth.refetch()
     },
@@ -106,13 +129,26 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     mutationFn: (accountId: string) =>
       request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
     onSuccess: async () => {
-      client.removeQueries({ queryKey: ['telegram-preview'] })
-      clearAuthenticatedImages()
+      clearAccountQueries(client)
       await Promise.all([
         accounts.refetch(),
         auth.refetch(),
         client.invalidateQueries({ queryKey: ['bot-status'] }),
       ])
+    },
+    onError: (error) => setFlowError(messageFrom(error)),
+  })
+  const renaming = useMutation({
+    mutationFn: ({ accountId, nextLabel }: { accountId: string; nextLabel: string }) =>
+      request<TelegramAccount>(
+        `/api/v1/telegram-accounts/${accountId}`,
+        json('PUT', { label: nextLabel }),
+      ),
+    onSuccess: async () => {
+      setEditingId(null)
+      setEditingLabel('')
+      setFlowError(null)
+      await accounts.refetch()
     },
     onError: (error) => setFlowError(messageFrom(error)),
   })
@@ -127,6 +163,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (auth.data?.state === 'success') {
+      clearAccountQueries(client)
       void accounts.refetch()
     }
   }, [auth.data?.state]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -264,14 +301,61 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                 fallbackClassName="text-xs"
               />
               <div className="min-w-0">
-                <strong className="block truncate text-[13px] text-slate-700">
-                  {account.label}
-                </strong>
+                {editingId === account.id ? (
+                  <input
+                    className="h-8 w-full rounded-[5px] border border-blue-300 bg-white px-2 text-[13px] text-slate-700 outline-none ring-3 ring-blue-500/10"
+                    value={editingLabel}
+                    onChange={(event) => setEditingLabel(event.target.value)}
+                    maxLength={100}
+                    autoFocus
+                    aria-label={t('accounts.name')}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && editingLabel.trim()) {
+                        renaming.mutate({ accountId: account.id, nextLabel: editingLabel.trim() })
+                      }
+                      if (event.key === 'Escape') setEditingId(null)
+                    }}
+                  />
+                ) : (
+                  <strong className="block truncate text-[13px] text-slate-700">
+                    {account.label}
+                  </strong>
+                )}
                 <p className="mt-0.5 truncate text-[13px] text-slate-400">
                   {accountSubtitle(account, t)}
                 </p>
               </div>
               <div className="flex gap-1.5">
+                {editingId === account.id ? (
+                  <>
+                    <IconButton
+                      label={t('accounts.saveName')}
+                      icon={Check}
+                      onClick={() =>
+                        renaming.mutate({
+                          accountId: account.id,
+                          nextLabel: editingLabel.trim(),
+                        })
+                      }
+                      disabled={!editingLabel.trim() || renaming.isPending}
+                    />
+                    <IconButton
+                      label={t('accounts.cancelEdit')}
+                      icon={X}
+                      onClick={() => setEditingId(null)}
+                      disabled={renaming.isPending}
+                    />
+                  </>
+                ) : (
+                  <IconButton
+                    label={t('accounts.editName', { name: account.label })}
+                    icon={Pencil}
+                    onClick={() => {
+                      setEditingId(account.id)
+                      setEditingLabel(account.label)
+                    }}
+                  />
+                )}
                 {!account.active ? (
                   <IconButton
                     label={t('accounts.switchTo', { name: account.label })}
@@ -288,13 +372,15 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
                     disabled={startingAuth.isPending || authenticating}
                   />
                 ) : null}
-                <IconButton
-                  label={t('accounts.deleteNamed', { name: account.label })}
-                  icon={Trash2}
-                  className="hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                  onClick={() => void confirmDeleteAccount(account)}
-                  disabled={deleting.isPending || accounts.data.length === 1}
-                />
+                {editingId !== account.id ? (
+                  <IconButton
+                    label={t('accounts.deleteNamed', { name: account.label })}
+                    icon={Trash2}
+                    className="hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                    onClick={() => void confirmDeleteAccount(account)}
+                    disabled={deleting.isPending || accounts.data.length === 1}
+                  />
+                ) : null}
               </div>
             </div>
           ))}

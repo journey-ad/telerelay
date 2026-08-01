@@ -45,6 +45,7 @@ class BotManager:
         queue_db_path: str | Path | None = None,
         account_id: str | None = None,
         events: Any = None,
+        stats_db=None,
     ):
         """Initialize Bot Manager
 
@@ -58,6 +59,7 @@ class BotManager:
         self.queue_db_path = Path(queue_db_path) if queue_db_path else None
         self.account_id = account_id
         self.events = events
+        self.stats_db = stats_db or get_stats_db()
         self.on_user_authenticated: Callable[[dict[str, Any]], None] | None = None
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
@@ -236,6 +238,7 @@ class BotManager:
             message_filter=message_filter,
             bot_manager=self,
             target_label_cache=self._target_label_cache,
+            stats_db=self.stats_db,
         )
         return message_filter, forwarder
 
@@ -687,7 +690,7 @@ class BotManager:
                     total_filtered += stats.get("filtered", 0)
             else:
                 # Bot not running, read from DB
-                db = get_stats_db()
+                db = self.stats_db
                 all_stats = db.get_all_stats()
                 for stats in all_stats.values():
                     total_forwarded += stats.get("forwarded", 0)
@@ -715,7 +718,7 @@ class BotManager:
 
     def reset_stats(self) -> None:
         """Reset all forwarding statistics"""
-        db = get_stats_db()
+        db = self.stats_db
         db.reset_stats()
         # Also reset in-memory counters if forwarders are active
         if hasattr(self, 'forwarders'):

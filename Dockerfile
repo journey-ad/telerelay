@@ -21,7 +21,6 @@ ENV PYTHONUNBUFFERED=1 \
     PATH=/root/.local/bin:$PATH
 COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
-COPY config/*.example ./config/
 ARG GIT_SHA=""
 RUN echo "${GIT_SHA}" > ./backend/.commit
 ARG APP_VERSION=""
