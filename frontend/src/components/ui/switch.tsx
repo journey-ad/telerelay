@@ -6,31 +6,43 @@ export function Switch({
   onCheckedChange,
   label,
   detail,
+  className,
+  disabled = false,
+  showLabel = true,
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   label: string
   detail?: string
+  className?: string
+  disabled?: boolean
+  showLabel?: boolean
 }) {
   return (
     <label
       className={cn(
         'flex min-h-11 items-center justify-between gap-3 rounded-[5px]',
         'border border-slate-100 bg-slate-50 px-2.5 py-2',
+        disabled && 'cursor-not-allowed opacity-60',
+        className,
       )}
     >
-      <span className="flex flex-col">
-        <strong className="text-[13px] text-slate-600">{label}</strong>
-        {detail ? (
-          <small className="mt-0.5 text-xs leading-3.5 text-slate-400">{detail}</small>
-        ) : null}
-      </span>
+      {showLabel ? (
+        <span className="flex flex-col">
+          <strong className="text-[13px] text-slate-600">{label}</strong>
+          {detail ? (
+            <small className="mt-0.5 text-xs leading-3.5 text-slate-400">{detail}</small>
+          ) : null}
+        </span>
+      ) : null}
       <SwitchPrimitive.Root
         className={cn(
           'relative h-4.5 w-8 shrink-0 rounded-full bg-slate-300 p-0',
           'data-[state=checked]:bg-blue-600',
         )}
         checked={checked}
+        disabled={disabled}
+        aria-label={label}
         onCheckedChange={onCheckedChange}
       >
         <SwitchPrimitive.Thumb

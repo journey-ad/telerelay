@@ -93,29 +93,60 @@ export function RulesPage() {
     setOpen(true)
   }
   const save = useMutation({
-    mutationFn: () => {
-      const payload = structuredClone(form)
-      payload.filters.regex_patterns = lines(regex)
-      return request(
-        editing === null ? '/api/v1/rules' : `/api/v1/rules/${editing}`,
-        json(editing === null ? 'POST' : 'PUT', payload),
+    mutationFn: ({
+      rule,
+      regexPatterns,
+      index,
+    }: {
+      rule: ForwardingRule
+      regexPatterns: string[]
+      index: number | null
+    }) => {
+      const payload = structuredClone(rule)
+      payload.filters.regex_patterns = regexPatterns
+      return request<ForwardingRule>(
+        index === null ? '/api/v1/rules' : `/api/v1/rules/${index}`,
+        json(index === null ? 'POST' : 'PUT', payload),
       )
     },
-    onSuccess: () => {
+    onSuccess: (updated, { index }) => {
       setOpen(false)
-      void client.invalidateQueries({ queryKey: ['rules'] })
+      client.setQueryData<ForwardingRule[]>(['rules'], (current) => {
+        if (!current) return index === null ? [updated] : current
+        if (index === null) return [...current, updated]
+        return current.map((rule, position) => (position === index ? updated : rule))
+      })
+    },
+  })
+  const toggle = useMutation({
+    mutationFn: ({ index, enabled }: { index: number; enabled: boolean }) => {
+      const rule = rulesQuery.data?.[index]
+      if (!rule) throw new Error('Forwarding rule does not exist')
+      return request<ForwardingRule>(
+        `/api/v1/rules/${index}`,
+        json('PUT', { ...structuredClone(rule), enabled }),
+      )
+    },
+    onSuccess: (updated, { index }) => {
+      client.setQueryData<ForwardingRule[]>(['rules'], (current) =>
+        current?.map((rule, position) => (position === index ? updated : rule)),
+      )
     },
   })
   const remove = useMutation({
     mutationFn: (index: number) => request(`/api/v1/rules/${index}`, json('DELETE')),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ['rules'] })
+    onSuccess: (_, index) => {
+      client.setQueryData<ForwardingRule[]>(['rules'], (current) =>
+        current?.filter((_, position) => position !== index),
+      )
     },
   })
   function submit(event: FormEvent) {
     event.preventDefault()
     regexValidation.validate(regex).then((valid) => {
-      if (valid) save.mutate()
+      if (valid) {
+        save.mutate({ rule: structuredClone(form), regexPatterns: lines(regex), index: editing })
+      }
     })
   }
   async function deleteRule(index: number) {
@@ -179,8 +210,8 @@ export function RulesPage() {
           <table className={tableClass}>
             <thead>
               <tr>
-                <th>{t('rules.columns.rule')}</th>
                 <th>{t('rules.columns.status')}</th>
+                <th>{t('rules.columns.rule')}</th>
                 <th>{t('rules.columns.source')}</th>
                 <th>{t('rules.columns.destination')}</th>
                 <th>{t('rules.columns.filterMode')}</th>
@@ -190,6 +221,16 @@ export function RulesPage() {
             <tbody>
               {rules.map(({ rule, index }) => (
                 <tr key={`${rule.name}-${index}`}>
+                  <td>
+                    <Switch
+                      checked={rule.enabled}
+                      disabled={toggle.isPending}
+                      onCheckedChange={(enabled) => toggle.mutate({ index, enabled })}
+                      label={t('rules.enable')}
+                      showLabel={false}
+                      className="min-h-8 min-w-8 justify-center border-0 bg-transparent px-0 py-0"
+                    />
+                  </td>
                   <td>
                     <div className="flex min-w-38 items-center gap-2.5">
                       <span
@@ -207,11 +248,6 @@ export function RulesPage() {
                         </small>
                       </span>
                     </div>
-                  </td>
-                  <td>
-                    <Badge tone={rule.enabled ? 'green' : 'gray'}>
-                      {t(rule.enabled ? 'common.enabled' : 'common.disabled')}
-                    </Badge>
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
@@ -274,6 +310,13 @@ export function RulesPage() {
         description={t('rules.dialogDescription')}
       >
         <form onSubmit={submit}>
+          <div className="mb-4 border-b border-slate-100 pb-4">
+            <Switch
+              checked={form.enabled}
+              onCheckedChange={(enabled) => setForm((current) => ({ ...current, enabled }))}
+              label={t('rules.enable')}
+            />
+          </div>
           <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>{t('rules.name')}</span>
@@ -384,11 +427,6 @@ export function RulesPage() {
               {t('rules.behavior')}
             </h3>
             <div className="grid grid-cols-2 gap-2 max-md:grid-cols-1">
-              <Switch
-                checked={form.enabled}
-                onCheckedChange={(enabled) => setForm({ ...form, enabled })}
-                label={t('rules.enable')}
-              />
               <Switch
                 checked={form.forwarding.preserve_format}
                 onCheckedChange={(value) => setForwarding('preserve_format', value)}

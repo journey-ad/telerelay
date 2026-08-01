@@ -71,33 +71,64 @@ export function AutomationsPage() {
     setOpen(true)
   }
   const save = useMutation({
-    mutationFn: () =>
-      request(
-        editing === null ? '/api/v1/button-rules' : `/api/v1/button-rules/${editing}`,
-        json(editing === null ? 'POST' : 'PUT', {
-          ...form,
-          button_texts: lines(buttons),
+    mutationFn: ({
+      rule,
+      buttonTexts,
+      index,
+    }: {
+      rule: ButtonRule
+      buttonTexts: string[]
+      index: number | null
+    }) =>
+      request<ButtonRule>(
+        index === null ? '/api/v1/button-rules' : `/api/v1/button-rules/${index}`,
+        json(index === null ? 'POST' : 'PUT', {
+          ...rule,
+          button_texts: buttonTexts,
         }),
       ),
-    onSuccess: () => {
+    onSuccess: (updated, { index }) => {
       setOpen(false)
-      void client.invalidateQueries({ queryKey: ['button-rules'] })
+      client.setQueryData<ButtonRule[]>(['button-rules'], (current) => {
+        if (!current) return index === null ? [updated] : current
+        if (index === null) return [...current, updated]
+        return current.map((rule, position) => (position === index ? updated : rule))
+      })
+    },
+  })
+  const toggle = useMutation({
+    mutationFn: ({ index, enabled }: { index: number; enabled: boolean }) => {
+      const rule = query.data?.[index]
+      if (!rule) throw new Error('Button automation does not exist')
+      return request<ButtonRule>(
+        `/api/v1/button-rules/${index}`,
+        json('PUT', { ...structuredClone(rule), enabled }),
+      )
+    },
+    onSuccess: (updated, { index }) => {
+      client.setQueryData<ButtonRule[]>(['button-rules'], (current) =>
+        current?.map((rule, position) => (position === index ? updated : rule)),
+      )
     },
   })
   const remove = useMutation({
     mutationFn: (index: number) => request(`/api/v1/button-rules/${index}`, json('DELETE')),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ['button-rules'] })
+    onSuccess: (_, index) => {
+      client.setQueryData<ButtonRule[]>(['button-rules'], (current) =>
+        current?.filter((_, position) => position !== index),
+      )
     },
   })
   function submit(event: FormEvent) {
     event.preventDefault()
     if (form.match_mode !== 'regex') {
-      save.mutate()
+      save.mutate({ rule: structuredClone(form), buttonTexts: lines(buttons), index: editing })
       return
     }
     regexValidation.validate(buttons).then((valid) => {
-      if (valid) save.mutate()
+      if (valid) {
+        save.mutate({ rule: structuredClone(form), buttonTexts: lines(buttons), index: editing })
+      }
     })
   }
   async function deleteRule(index: number) {
@@ -155,8 +186,8 @@ export function AutomationsPage() {
           <table className={tableClass}>
             <thead>
               <tr>
-                <th>{t('automations.columns.automation')}</th>
                 <th>{t('automations.columns.status')}</th>
+                <th>{t('automations.columns.automation')}</th>
                 <th>{t('automations.columns.source')}</th>
                 <th>{t('automations.columns.matchMode')}</th>
                 <th>{t('automations.columns.buttonText')}</th>
@@ -166,6 +197,16 @@ export function AutomationsPage() {
             <tbody>
               {rules.map(({ rule, index }) => (
                 <tr key={`${rule.name}-${index}`}>
+                  <td>
+                    <Switch
+                      checked={rule.enabled}
+                      disabled={toggle.isPending}
+                      onCheckedChange={(enabled) => toggle.mutate({ index, enabled })}
+                      label={t('automations.enable')}
+                      showLabel={false}
+                      className="min-h-8 min-w-8 justify-center border-0 bg-transparent px-0 py-0"
+                    />
+                  </td>
                   <td>
                     <div className="flex min-w-38 items-center gap-2.5">
                       <span
@@ -183,11 +224,6 @@ export function AutomationsPage() {
                         </small>
                       </span>
                     </div>
-                  </td>
-                  <td>
-                    <Badge tone={rule.enabled ? 'green' : 'gray'}>
-                      {t(rule.enabled ? 'common.enabled' : 'common.disabled')}
-                    </Badge>
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
@@ -258,6 +294,13 @@ export function AutomationsPage() {
         description={t('automations.dialogDescription')}
       >
         <form onSubmit={submit}>
+          <div className="mb-4 border-b border-slate-100 pb-4">
+            <Switch
+              checked={form.enabled}
+              onCheckedChange={(enabled) => setForm((current) => ({ ...current, enabled }))}
+              label={t('automations.enable')}
+            />
+          </div>
           <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>{t('automations.name')}</span>
@@ -329,13 +372,10 @@ export function AutomationsPage() {
             )}
           >
             <Switch
-              checked={form.enabled}
-              onCheckedChange={(enabled) => setForm({ ...form, enabled })}
-              label={t('automations.enable')}
-            />
-            <Switch
               checked={form.click_all_matches}
-              onCheckedChange={(click_all_matches) => setForm({ ...form, click_all_matches })}
+              onCheckedChange={(click_all_matches) =>
+                setForm((current) => ({ ...current, click_all_matches }))
+              }
               label={t('automations.clickAll')}
             />
           </div>
