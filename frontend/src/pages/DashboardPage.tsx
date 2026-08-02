@@ -66,7 +66,7 @@ const chartTooltipStyle = {
 const liveEventLimit = 50
 const initialEventLimit = 10
 const queuePreviewLimit = 50
-const intensitySampleLimit = 30
+const intensitySampleLimit = 60
 const eventTypeKeys = {
   ready: 'dashboard.events.types.ready',
   log: 'dashboard.events.types.log',
@@ -442,7 +442,11 @@ export function DashboardPage() {
       null,
     )
     const activeDays = currentDaily.filter((item) => item.total > 0).length
-    const intensityDaily = sampleDailyIntensity(currentDaily)
+    const intensityDaily = sampleDailyIntensity(
+      allTime
+        ? fillDailySeries(source, Math.max(durationDays, intensitySampleLimit))
+        : currentDaily,
+    )
     const maxIntensityTotal = Math.max(...intensityDaily.map((item) => item.total), 1)
 
     return {
@@ -896,7 +900,12 @@ export function DashboardPage() {
               <span>{t('dashboard.dailyIntensity')}</span>
             </div>
             <div
-              className="grid h-7 grid-flow-col auto-cols-fr items-stretch gap-1 overflow-hidden"
+              className={cn(
+                'grid h-7 grid-flow-col items-stretch overflow-hidden',
+                report.intensityDaily.length > 40
+                  ? 'auto-cols-[minmax(3px,1fr)] gap-px'
+                  : 'auto-cols-fr gap-1',
+              )}
               data-testid="daily-intensity"
             >
               {report.intensityDaily.map((item) => (
