@@ -35,10 +35,11 @@ class AccountExportRegistry:
                 return service
             paths = self.paths.for_account(account_id)
             runtime = self.runtimes.get_runtime(account_id)
+            config = self.configs.for_account(account_id)
             service = ExportService(
-                self.configs.for_account(account_id),
+                config,
                 runtime,
-                store=ExportStore(paths.exports_db),
+                store=ExportStore(paths.exports_db, export_root=config.export_root_dir),
                 source=TelegramExportSource(runtime),
                 events=self.events,
                 session_type=self.runtimes.account_kind(account_id),

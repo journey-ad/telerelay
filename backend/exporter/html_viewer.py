@@ -168,7 +168,7 @@ h1{margin:0;font-size:22px;line-height:1.2;letter-spacing:0}.meta,.summary,.stat
 .scan{display:none;grid-template-columns:1fr auto;align-items:center;gap:10px;padding:8px 0;color:var(--muted);font-size:12px}.scan.active{display:grid}.scan progress{width:100%;height:6px;accent-color:var(--accent)}
 .thread-bar{display:none;align-items:center;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--line)}.thread-bar.active{display:flex}.thread-title{font-weight:700}.thread-summary{margin-left:8px;color:var(--muted);font-size:12px}.thread-active .filters{display:none}
 body.thread-active .message{padding-left:12px;padding-right:12px}
-.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px}.pager{display:flex;align-items:center;gap:7px;white-space:nowrap}.pager .field{display:flex;align-items:center;gap:6px}.pager select{height:30px;padding:3px 6px}.icon-button{width:32px;height:30px;padding:0;font-size:18px;line-height:1}.page-status{min-width:74px;text-align:center;font-variant-numeric:tabular-nums}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px}.pager{display:flex;align-items:center;gap:7px;white-space:nowrap}.pager .field{display:flex;align-items:center;gap:6px}.pager select{height:30px;padding:3px 6px}.pager input[type="number"]{width:58px;height:30px;padding:3px 6px;text-align:center;font-variant-numeric:tabular-nums}.icon-button{width:32px;height:30px;padding:0;font-size:18px;line-height:1}.page-status{min-width:74px;text-align:center;font-variant-numeric:tabular-nums}
 .bottom-toolbar{margin-top:14px;border-top:1px solid var(--line)}
 .date-heading{position:sticky;top:0;z-index:1;margin:14px 0 6px;padding:5px 0;background:var(--bg);color:var(--muted);font-size:12px;font-weight:700;border-bottom:1px solid var(--line)}
 .message{scroll-margin-top:34px;background:var(--paper);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;margin:0 0 6px}.message.flash{outline:2px solid var(--accent);outline-offset:1px}
@@ -443,18 +443,32 @@ _VIEWER_SCRIPT = r"""
     }
   }
 
+  function goToPage(input) {
+    const page = Math.min(Math.max(1, Math.floor(Number(input.value) || 1)), pageCount());
+    currentPage = page;
+    input.value = String(page);
+    renderPage();
+    window.scrollTo(0, 0);
+  }
+
   function updateToolbar() {
     const total = resultCount();
     const start = total ? (currentPage - 1) * pageSize() + 1 : 0;
     const end = Math.min(currentPage * pageSize(), total);
     const resultText = format(text("result_status", "{start}-{end} of {total}"), {start, end, total});
-    const pageText = format(text("page_status", "{page} / {pages}"), {page: currentPage, pages: pageCount()});
+    const pages = pageCount();
+    const pageText = format(text("page_of", "/ {pages}"), {pages});
     byId("status").textContent = resultText;
     byId("status-bottom").textContent = resultText;
     byId("page-status").textContent = pageText;
     byId("page-status-bottom").textContent = pageText;
+    for (const id of ["page-input", "page-input-bottom"]) {
+      const input = byId(id);
+      input.value = String(currentPage);
+      input.max = String(pages);
+    }
     for (const id of ["previous-page", "previous-page-bottom"]) byId(id).disabled = currentPage <= 1;
-    for (const id of ["next-page", "next-page-bottom"]) byId(id).disabled = currentPage >= pageCount();
+    for (const id of ["next-page", "next-page-bottom"]) byId(id).disabled = currentPage >= pages;
   }
 
   function rowMatches(record, query, from, to) {
@@ -634,6 +648,13 @@ _VIEWER_SCRIPT = r"""
     byId("reset-filters").textContent = text("reset_filters", "Reset");
     byId("close-thread").textContent = text("back_to_messages", "Back to messages");
     byId("page-size-label").textContent = text("page_size", "Per page");
+    const pageLabel = text("page_input", "Page");
+    for (const id of ["page-input", "page-input-bottom"]) {
+      const input = byId(id);
+      const labelId = id === "page-input" ? "page-input-label" : "page-input-bottom-label";
+      byId(labelId).textContent = pageLabel;
+      input.title = input.ariaLabel = pageLabel;
+    }
     for (const id of ["previous-page", "previous-page-bottom"]) {
       byId(id).title = byId(id).ariaLabel = text("previous_page", "Previous page");
     }
@@ -655,6 +676,16 @@ _VIEWER_SCRIPT = r"""
     const nextPage = () => { if (currentPage < pageCount()) { currentPage += 1; renderPage(); window.scrollTo(0, 0); } };
     for (const id of ["previous-page", "previous-page-bottom"]) byId(id).addEventListener("click", previousPage);
     for (const id of ["next-page", "next-page-bottom"]) byId(id).addEventListener("click", nextPage);
+    for (const id of ["page-input", "page-input-bottom"]) {
+      const input = byId(id);
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          goToPage(input);
+        }
+      });
+      input.addEventListener("change", () => goToPage(input));
+    }
     byId("close-thread").addEventListener("click", closeThread);
     byId("messages").addEventListener("click", (event) => {
       const thread = event.target.closest("[data-thread-index]");
@@ -725,6 +756,7 @@ def render_index_html(
     <div class="pager">
       <label class="field"><span id="page-size-label"></span><select id="page-size"></select></label>
       <button class="icon-button" id="previous-page" type="button">&#8249;</button>
+      <label class="field"><span id="page-input-label"></span><input class="page-input" id="page-input" type="number" min="1" step="1" inputmode="numeric"></label>
       <span class="page-status" id="page-status"></span>
       <button class="icon-button" id="next-page" type="button">&#8250;</button>
     </div>
@@ -734,6 +766,7 @@ def render_index_html(
     <p class="status" id="status-bottom"></p>
     <div class="pager">
       <button class="icon-button" id="previous-page-bottom" type="button">&#8249;</button>
+      <label class="field"><span id="page-input-bottom-label"></span><input class="page-input" id="page-input-bottom" type="number" min="1" step="1" inputmode="numeric"></label>
       <span class="page-status" id="page-status-bottom"></span>
       <button class="icon-button" id="next-page-bottom" type="button">&#8250;</button>
     </div>

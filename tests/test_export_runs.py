@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,7 +21,7 @@ class ExportRunDeletionTests(unittest.TestCase):
             export_concurrency=1,
             session_type="user",
         )
-        self.store = ExportStore(self.root / "exports.db")
+        self.store = ExportStore(self.root / "exports.db", export_root=self.exports)
         self.service = ExportService(
             config,
             bot_manager=None,
@@ -58,6 +59,21 @@ class ExportRunDeletionTests(unittest.TestCase):
     def test_delete_missing_run_raises(self):
         with self.assertRaises(KeyError):
             self.service.delete_run(999)
+
+    def test_legacy_run_files_remap_to_current_export_root(self):
+        legacy_root = self.root / "legacy-data" / "exports"
+        legacy_file = legacy_root / "messages" / "chat.html.zip"
+        legacy_file.parent.mkdir(parents=True)
+        legacy_file.write_bytes(b"archive")
+        run_id = self.store.start_run(task_id=None, run_type="instant")
+        self.store.finish_run(run_id, status="completed", files=[str(legacy_file)])
+
+        moved = self.exports / "messages" / legacy_file.name
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy_file), str(moved))
+
+        run = self.service.list_runs()[0]
+        self.assertEqual(run.files, (str(moved.resolve()),))
 
 
 if __name__ == "__main__":

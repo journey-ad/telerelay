@@ -71,16 +71,16 @@ class ExportService:
         self.config = config
         self.bot_manager = bot_manager
         self.account_id = getattr(bot_manager, "account_id", None)
-        self.store = store or ExportStore()
-        self.source = source or TelegramExportSource(bot_manager)
-        self.events = events
-        self.session_type = session_type
         self.export_root = Path(config.export_root_dir)
         self.export_root.mkdir(parents=True, exist_ok=True)
         self.message_db_root = Path(
             getattr(config, "export_message_db_dir", "data/db")
         )
         self.message_db_root.mkdir(parents=True, exist_ok=True)
+        self.store = store or ExportStore(export_root=self.export_root)
+        self.source = source or TelegramExportSource(bot_manager)
+        self.events = events
+        self.session_type = session_type
         self._executor = ThreadPoolExecutor(
             max_workers=max(1, int(config.export_concurrency)),
             thread_name_prefix="telerelay-export",
@@ -1040,9 +1040,11 @@ class ExportService:
             "apply_filters",
             "reset_filters",
             "page_size",
+            "page_input",
             "previous_page",
             "next_page",
             "page_status",
+            "page_of",
             "result_status",
             "filter_progress",
             "archive_summary",

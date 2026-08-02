@@ -18,12 +18,37 @@ def _utc_now_text() -> str:
 
 
 class ExportStore:
-    def __init__(self, db_path: Path = DEFAULT_EXPORT_DB_PATH):
+    def __init__(
+        self,
+        db_path: Path = DEFAULT_EXPORT_DB_PATH,
+        export_root: str | Path | None = None,
+    ):
         self.db_path = Path(db_path)
+        self.export_root = Path(export_root).resolve() if export_root is not None else None
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._init_db()
         self.db_path.chmod(0o600)
+
+    @staticmethod
+    def _legacy_relative_path(path: Path) -> Path | None:
+        try:
+            index = path.parts.index("exports")
+        except ValueError:
+            return None
+        return Path(*path.parts[index + 1 :])
+
+    def _resolve_file(self, file: str) -> str:
+        candidate = Path(file)
+        if self.export_root is not None:
+            relative = self._legacy_relative_path(candidate)
+            if relative is not None:
+                remapped = self.export_root / relative
+                if remapped.is_file():
+                    return str(remapped)
+        if candidate.is_file():
+            return str(candidate)
+        return file
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -108,8 +133,7 @@ class ExportStore:
             updated_at=row["updated_at"],
         )
 
-    @staticmethod
-    def _run_from_row(row: sqlite3.Row) -> ExportRun:
+    def _run_from_row(self, row: sqlite3.Row) -> ExportRun:
         return ExportRun(
             id=row["id"],
             task_id=row["task_id"],
@@ -120,7 +144,7 @@ class ExportStore:
             range_start=row["range_start"],
             range_end=row["range_end"],
             message_count=row["message_count"],
-            files=tuple(json.loads(row["files"] or "[]")),
+            files=tuple(self._resolve_file(file) for file in json.loads(row["files"] or "[]")),
             error=row["error"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],

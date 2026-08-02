@@ -130,15 +130,22 @@ function jobProgress(job: ExportJob): number {
 function ExportFilesRow({ files, accountId }: { files: string[]; accountId: string }) {
   const { t } = useTranslation()
   const [previewUrl, setPreviewUrl] = useState('')
+  const [previewError, setPreviewError] = useState('')
   const previewFile = files.find((file) => file.endsWith('.html.zip'))
   async function openPreview(file: string) {
-    const filename = file.split('/').pop() ?? file
-    const root = filename.replace(/\.html\.zip$/i, '')
-    const { token } = await accountRequest<{ token: string }>(
-      accountId,
-      `/api/v1/exports/preview-token?path=${encodeURIComponent(file)}`,
-    )
-    setPreviewUrl(`/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html`)
+    setPreviewUrl('')
+    setPreviewError('')
+    try {
+      const filename = file.split('/').pop() ?? file
+      const root = filename.replace(/\.html\.zip$/i, '')
+      const { token } = await accountRequest<{ token: string }>(
+        accountId,
+        `/api/v1/exports/preview-token?path=${encodeURIComponent(file)}`,
+      )
+      setPreviewUrl(`/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html`)
+    } catch (error) {
+      setPreviewError(messageFrom(error))
+    }
   }
   return (
     <>
@@ -152,19 +159,32 @@ function ExportFilesRow({ files, accountId }: { files: string[]; accountId: stri
           />
         ) : null}
       </div>
-      {previewUrl ? (
+      {previewUrl || previewError ? (
         <div className="fixed inset-0 z-120 bg-white">
           <header className="flex h-11 items-center justify-between border-b border-slate-200 px-4">
             <strong className="text-sm font-semibold text-slate-700">
               {t('exports.previewTitle')}
             </strong>
-            <IconButton label={t('common.close')} icon={X} onClick={() => setPreviewUrl('')} />
+            <IconButton
+              label={t('common.close')}
+              icon={X}
+              onClick={() => {
+                setPreviewUrl('')
+                setPreviewError('')
+              }}
+            />
           </header>
-          <iframe
-            src={previewUrl}
-            title={t('exports.previewTitle')}
-            className="block h-[calc(100dvh-2.75rem)] w-full border-0 bg-white"
-          />
+          {previewUrl ? (
+            <iframe
+              src={previewUrl}
+              title={t('exports.previewTitle')}
+              className="block h-[calc(100dvh-2.75rem)] w-full border-0 bg-white"
+            />
+          ) : (
+            <div className="grid h-[calc(100dvh-2.75rem)] place-items-center bg-white p-6 text-sm text-rose-600">
+              {previewError}
+            </div>
+          )}
         </div>
       ) : null}
     </>

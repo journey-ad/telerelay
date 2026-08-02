@@ -66,7 +66,7 @@ const chartTooltipStyle = {
 const liveEventLimit = 50
 const initialEventLimit = 10
 const queuePreviewLimit = 50
-const intensitySampleLimit = 48
+const intensitySampleLimit = 30
 const eventTypeKeys = {
   ready: 'dashboard.events.types.ready',
   log: 'dashboard.events.types.log',
