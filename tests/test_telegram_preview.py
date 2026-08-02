@@ -97,6 +97,10 @@ class FakeClient:
         self.calls.append(("iter_dialogs", options))
         archived = options.get("archived", False)
         values = [item for item in self.dialogs if (item.folder_id == 1) == archived]
+        if archived and not options.get("ignore_pinned"):
+            values = [
+                item for item in self.dialogs if item.pinned and item.folder_id != 1
+            ] + values
         for item in values[: options["limit"]]:
             yield item
 

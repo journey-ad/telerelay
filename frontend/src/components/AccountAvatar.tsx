@@ -1,3 +1,4 @@
+import { Bot } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ACCOUNT_ID_HEADER } from '../api/client'
 import { authorization } from '../api/credentials'
@@ -78,6 +79,11 @@ export function AccountAvatar({
           className="absolute inset-0 size-full object-cover"
           onError={() => setSource(null)}
         />
+      ) : null}
+      {account?.kind === 'bot' ? (
+        <span className="absolute right-0 bottom-0 z-10 grid size-[15px] place-items-center rounded-tl-[5px] rounded-br-[5px] bg-slate-900 text-white shadow-[inset_1px_1px_rgba(255,255,255,0.8)]">
+          <Bot size={11.5} strokeWidth={2.35} />
+        </span>
       ) : null}
     </span>
   )

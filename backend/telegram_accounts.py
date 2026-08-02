@@ -560,6 +560,14 @@ class TelegramAccountService:
             running_account_ids=running_ids,
         )
 
+    async def refresh_identity(self, account_id: str) -> dict[str, Any]:
+        self.store.get_public(account_id)
+        try:
+            await self.runtimes.get_runtime(account_id).refresh_identity()
+        except RuntimeError as exc:
+            raise TelegramAccountError("telegram_not_connected", str(exc)) from exc
+        return self._public(account_id)
+
     async def create(
         self,
         label: str,

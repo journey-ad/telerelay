@@ -140,6 +140,16 @@ class BotManager:
         if task:
             await task
 
+    async def refresh_identity(self) -> dict[str, Any]:
+        """Refresh account metadata and avatar for either user or bot runtimes."""
+        with account_log_context(self.account_id):
+            with self._lock:
+                connected = self._is_connected
+                client_manager = self.client_manager
+            if not connected or client_manager is None:
+                raise RuntimeError(t("message.export.telegram_not_connected"))
+            return await client_manager.refresh_identity()
+
     async def _bot_main(self) -> None:
         """Run the Telegram client and durable forwarding queue."""
         if not self.is_running:

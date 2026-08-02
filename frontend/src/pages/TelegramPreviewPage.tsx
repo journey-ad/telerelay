@@ -641,6 +641,8 @@ export function TelegramPreviewPage() {
   const [replyTargetId, setReplyTargetId] = useState<number | null>(null)
   const [loadingReplyId, setLoadingReplyId] = useState<number | null>(null)
   const [unavailableReplyId, setUnavailableReplyId] = useState<number | null>(null)
+  const dialogsViewportRef = useRef<HTMLDivElement>(null)
+  const dialogsLoadMoreRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const previousScrollHeight = useRef<number | null>(null)
   const stickToBottom = useRef(true)
@@ -729,6 +731,37 @@ export function TelegramPreviewPage() {
     }
     if (stickToBottom.current) viewport.scrollTop = viewport.scrollHeight
   }, [newestMessageId, selected?.id, messages.data?.pages.length])
+
+  useEffect(() => {
+    const viewport = dialogsViewportRef.current
+    const loadMore = dialogsLoadMoreRef.current
+    if (
+      !viewport ||
+      !loadMore ||
+      !dialogs.hasNextPage ||
+      dialogs.isFetchingNextPage ||
+      dialogs.isFetchNextPageError
+    ) {
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void dialogs.fetchNextPage()
+      },
+      { root: viewport, rootMargin: '0px 0px 120px 0px' },
+    )
+    observer.observe(loadMore)
+    return () => observer.disconnect()
+  }, [
+    accountId,
+    dialogFilter,
+    dialogs.fetchNextPage,
+    dialogs.hasNextPage,
+    dialogs.isFetchNextPageError,
+    dialogs.isFetchingNextPage,
+    folder,
+  ])
 
   useEffect(() => {
     if (replyTargetId === null) return
@@ -883,7 +916,7 @@ export function TelegramPreviewPage() {
               ) : null}
             </label>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={dialogsViewportRef} className="min-h-0 flex-1 overflow-y-auto">
             {!connected ? (
               <EmptyState
                 icon={Radio}
@@ -920,20 +953,32 @@ export function TelegramPreviewPage() {
                 }
               />
             )}
+            {dialogs.hasNextPage ? (
+              <div
+                ref={dialogsLoadMoreRef}
+                className={cn(
+                  'flex shrink-0 items-center justify-center text-xs text-slate-400',
+                  dialogs.isFetchingNextPage || dialogs.isFetchNextPageError
+                    ? 'h-10 border-t border-slate-100'
+                    : 'h-px',
+                )}
+              >
+                {dialogs.isFetchingNextPage ? (
+                  <span className="flex items-center gap-1.5">
+                    <LoaderCircle size={14} className="animate-spin" />
+                    {t('telegramPreview.loading')}
+                  </span>
+                ) : dialogs.isFetchNextPageError ? (
+                  <button
+                    className="border-0 bg-transparent text-blue-600 hover:text-blue-700"
+                    onClick={() => void dialogs.fetchNextPage()}
+                  >
+                    {t('telegramPreview.retryLoadChats')}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
-          {dialogs.hasNextPage ? (
-            <button
-              className="h-10 shrink-0 border-0 border-t border-slate-200 bg-white text-[13px] text-blue-600 hover:bg-blue-50"
-              onClick={() => void dialogs.fetchNextPage()}
-              disabled={dialogs.isFetchingNextPage}
-            >
-              {t(
-                dialogs.isFetchingNextPage
-                  ? 'telegramPreview.loading'
-                  : 'telegramPreview.loadMoreChats',
-              )}
-            </button>
-          ) : null}
         </aside>
 
         <article

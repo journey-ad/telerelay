@@ -58,7 +58,7 @@
   "node": {
     "title": "Telegram node",
     "connected": "Connected",
-    "accountsConnected": "{{connected}}/{{total}} account(s) online",
+    "accountsConnected": "{{connected}}/{{total}} accounts online",
     "waiting": "Waiting for connection",
     "online": "Node online",
     "offline": "Node offline",
@@ -614,6 +614,7 @@
     "archivedEmpty": "No archived chats",
     "loading": "Loading",
     "loadMoreChats": "Load more chats",
+    "retryLoadChats": "Retry loading chats",
     "backToChats": "Back to chat list",
     "kinds": {
       "private": "Private chat",

@@ -101,7 +101,7 @@ class TelegramClientManager:
             logger.error(t("log.client.proxy_parse_failed", error=str(e)))
             return None
 
-    async def _publish_identity(self, me: User) -> None:
+    async def _publish_identity(self, me: User) -> dict[str, Any]:
         """Capture the authenticated identity once a client is connected."""
         full_name = " ".join(filter(None, [me.first_name, me.last_name]))
         user_info = full_name
@@ -111,12 +111,12 @@ class TelegramClientManager:
             user_info += f" [ID: {me.id}]"
         if self.auth_manager:
             self.auth_manager.set_user_info(user_info)
+        identity = {
+            "display_name": full_name,
+            "username": me.username or "",
+            "telegram_user_id": me.id,
+        }
         if self.on_user_authenticated:
-            identity = {
-                "display_name": full_name,
-                "username": me.username or "",
-                "telegram_user_id": me.id,
-            }
             try:
                 identity["avatar_bytes"] = await self.client.download_profile_photo(
                     me,
@@ -126,6 +126,14 @@ class TelegramClientManager:
             except Exception as exc:
                 logger.warning(t("log.client.photo_refresh_failed", error=str(exc)))
             self.on_user_authenticated(identity)
+        return identity
+
+    async def refresh_identity(self) -> dict[str, Any]:
+        """Reload the connected account identity and profile photo from Telegram."""
+        if self.client is None:
+            raise RuntimeError(t("message.export.telegram_not_connected"))
+        me: User = await self.client.get_me()
+        return await self._publish_identity(me)
     
     async def connect(self) -> bool:
         """

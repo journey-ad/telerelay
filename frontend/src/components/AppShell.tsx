@@ -18,7 +18,7 @@ import {
 import { useCallback, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { accountRequest, request } from '../api/client'
+import { accountRequest, json, request } from '../api/client'
 import { useEvents } from '../hooks/useEvents'
 import type { BotStatus, RelayEvent, TelegramAccount } from '../types'
 import { cn } from '../utils/cn'
@@ -98,9 +98,21 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
     [queryClient],
   )
   useEvents(invalidateLiveData, { accountId: accountId || undefined })
-  const refreshData = useCallback(() => {
-    void queryClient.invalidateQueries()
-  }, [queryClient])
+  const refreshData = useCallback(async () => {
+    if (accountId && statusQuery.data?.is_connected) {
+      try {
+        const refreshed = await accountRequest<TelegramAccount>(
+          accountId,
+          `/api/v1/telegram-accounts/${accountId}/refresh`,
+          json('POST'),
+        )
+        queryClient.setQueryData<TelegramAccount[]>(['telegram-accounts'], (current) =>
+          current?.map((account) => (account.id === refreshed.id ? refreshed : account)),
+        )
+      } catch {}
+    }
+    await queryClient.invalidateQueries()
+  }, [accountId, queryClient, statusQuery.data?.is_connected])
   const current = navigation.find((item) => item.to === location.pathname) ?? navigation[0]
   const online = Boolean(statusQuery.data?.is_connected)
   const nodeLabel =
@@ -249,8 +261,13 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
               />
               {t(online ? 'node.online' : 'node.offline')}
             </div>
-            <LanguageToggle />
-            <IconButton label={t('nav.refresh')} icon={RefreshCw} onClick={refreshData} />
+            <LanguageToggle className="max-md:hidden" />
+            <IconButton
+              label={t('nav.refresh')}
+              icon={RefreshCw}
+              className="max-md:hidden"
+              onClick={refreshData}
+            />
             <AccountSwitcher onLogout={onLogout} onRefresh={refreshData} />
           </div>
         </header>

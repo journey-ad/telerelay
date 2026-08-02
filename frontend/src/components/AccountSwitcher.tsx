@@ -2,6 +2,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import {
+  Bot,
   Check,
   ChevronDown,
   Languages,
@@ -36,6 +37,35 @@ function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   if (account.authenticated) return t('accounts.saved')
   if (account.kind === 'bot') return t('accounts.bot')
   return t('accounts.awaitingAuth')
+}
+
+function accountStatus(account: TelegramAccount, t: TFunction) {
+  if (account.connected) {
+    return { label: t('accounts.connected'), className: 'bg-emerald-500' }
+  }
+  if (account.running) {
+    return { label: t('accounts.running'), className: 'bg-amber-400' }
+  }
+  if (account.authenticated) {
+    return { label: t('accounts.saved'), className: 'bg-blue-500' }
+  }
+  return { label: t('accounts.awaitingAuth'), className: 'bg-slate-300' }
+}
+
+function AccountStatusDot({ account, t }: { account: TelegramAccount; t: TFunction }) {
+  const status = accountStatus(account, t)
+  return (
+    <span
+      className={cn('size-2 shrink-0 rounded-full ring-2 ring-white', status.className)}
+      aria-label={status.label}
+      title={status.label}
+      role="img"
+    />
+  )
+}
+
+function accountSecondaryText(account: TelegramAccount, t: TFunction): string {
+  return account.username ? `@${account.username}` : accountSubtitle(account, t)
 }
 
 function setActiveAccount(client: ReturnType<typeof useQueryClient>, selected: TelegramAccount) {
@@ -246,12 +276,22 @@ export function AccountSwitcher({
             fallbackClassName="text-[13px]"
           />
           <span className="flex min-w-20 flex-1 flex-col items-start overflow-hidden max-md:hidden">
-            <strong className="w-full truncate text-left text-xs text-slate-700">
-              {active?.label ?? 'Telegram'}
+            <strong className="flex w-full min-w-0 items-center gap-1 text-left text-xs text-slate-700">
+              <span className="min-w-0 truncate">{active?.label ?? 'Telegram'}</span>
+              {active?.kind === 'bot' ? (
+                <Bot size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
+              ) : null}
             </strong>
-            <small className="w-full truncate text-left text-xs text-slate-400">
-              {active ? accountSubtitle(active, t) : t('accounts.loading')}
-            </small>
+            {active ? (
+              <small className="flex w-full min-w-0 items-center gap-1 text-left text-xs text-slate-400">
+                <span className="min-w-0 truncate">{accountSecondaryText(active, t)}</span>
+                <AccountStatusDot account={active} t={t} />
+              </small>
+            ) : (
+              <small className="w-full truncate text-left text-xs text-slate-400">
+                {t('accounts.loading')}
+              </small>
+            )}
           </span>
           <ChevronDown className="shrink-0 max-md:hidden" size={14} />
         </DropdownMenu.Trigger>
@@ -283,9 +323,15 @@ export function AccountSwitcher({
                   fallbackClassName="text-xs"
                 />
                 <span className="min-w-0">
-                  <strong className="block truncate text-xs text-slate-700">{account.label}</strong>
-                  <small className="block truncate text-xs text-slate-400">
-                    {accountSubtitle(account, t)}
+                  <strong className="flex min-w-0 items-center gap-1 text-xs text-slate-700">
+                    <span className="min-w-0 truncate">{account.label}</span>
+                    {account.kind === 'bot' ? (
+                      <Bot size={12} className="shrink-0 text-slate-500" aria-hidden="true" />
+                    ) : null}
+                  </strong>
+                  <small className="flex min-w-0 items-center gap-1 text-xs text-slate-400">
+                    <span className="min-w-0 truncate">{accountSecondaryText(account, t)}</span>
+                    <AccountStatusDot account={account} t={t} />
                   </small>
                 </span>
                 {account.active ? <Check size={14} className="text-blue-600" /> : null}

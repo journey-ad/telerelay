@@ -240,6 +240,18 @@ async def telegram_account_avatar(
     )
 
 
+@router.post("/telegram-accounts/{account_id}/refresh")
+async def refresh_telegram_account(
+    account_id: str,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _accounts(context).refresh_identity(account_id)
+    except TelegramAccountError as exc:
+        status_code = 404 if exc.code == "account_not_found" else 409
+        raise _error(exc.code, str(exc), status_code) from exc
+
+
 @router.get(
     "/telegram-accounts/{account_id}/chats",
     response_model=list[TelegramChatResponse],

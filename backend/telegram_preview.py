@@ -218,6 +218,7 @@ class TelegramPreviewService:
         options: dict[str, Any] = {
             "limit": limit + 1,
             "archived": folder == "archived",
+            "ignore_pinned": folder == "archived",
         }
         if cursor:
             cursor_data = self._decode_cursor(cursor, active_id, folder)

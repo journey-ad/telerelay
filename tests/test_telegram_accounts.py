@@ -282,6 +282,43 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(account["id"], self.store.active_account_id)
         self.assertEqual(self.registry.ensure_runtime(account["id"]).actions, [])
 
+    async def test_refresh_identity_updates_user_and_bot_avatars(self):
+        self.registry.on_user_authenticated = self.service.update_identity
+        bot = self.store.create("Avatar Bot", kind="bot")
+        self.store.set_bot_token(bot.id, "123456789:AA" + "x" * 30)
+        bot = self.store.finalize_identity(bot.id, {"telegram_user_id": 200})
+        Path(f"{self.store.session_name(bot.id)}.session").parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        Path(f"{self.store.session_name(bot.id)}.session").touch()
+
+        for account_id, display_name, avatar_bytes in (
+            (self.primary_id, "Updated User", b"user-avatar"),
+            (bot.id, "Updated Bot", b"bot-avatar"),
+        ):
+            runtime = self.registry.ensure_runtime(account_id)
+
+            async def refresh_identity(
+                target_runtime=runtime,
+                identity={
+                    "display_name": display_name,
+                    "telegram_user_id": int(account_id),
+                    "avatar_bytes": avatar_bytes,
+                },
+            ):
+                target_runtime.on_user_authenticated(identity)
+                return identity
+
+            runtime.refresh_identity = refresh_identity
+            refreshed = await self.service.refresh_identity(account_id)
+
+            self.assertEqual(refreshed["display_name"], display_name)
+            self.assertEqual(
+                self.store.get_avatar_path(account_id).read_bytes(),
+                avatar_bytes,
+            )
+
     async def test_bot_authentication_does_not_block_other_account_mutations(self):
         authentication_started = asyncio.Event()
         release_authentication = asyncio.Event()

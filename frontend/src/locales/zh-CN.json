@@ -614,6 +614,7 @@
     "archivedEmpty": "没有归档会话",
     "loading": "正在加载",
     "loadMoreChats": "加载更多会话",
+    "retryLoadChats": "重试加载会话",
     "backToChats": "返回会话列表",
     "kinds": {
       "private": "私聊",

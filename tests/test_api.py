@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -729,6 +729,25 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.content, b"fake-jpeg-avatar")
         account = self.client.get("/api/v1/telegram-accounts").json()[0]
         self.assertIsNotNone(account["avatar_version"])
+
+    def test_telegram_account_refresh_contract(self):
+        refreshed = {
+            **self.account_store.get_public(self.account_id),
+            "display_name": "Updated Account",
+            "avatar_version": "updated-avatar-version",
+        }
+        with patch.object(
+            self.accounts,
+            "refresh_identity",
+            AsyncMock(return_value=refreshed),
+        ) as refresh_identity:
+            response = self.client.post(
+                f"/api/v1/telegram-accounts/{self.account_id}/refresh"
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["avatar_version"], "updated-avatar-version")
+        refresh_identity.assert_awaited_once_with(self.account_id)
 
     def test_telegram_account_chats_contract(self):
         response = self.client.get(
