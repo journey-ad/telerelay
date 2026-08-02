@@ -47,6 +47,7 @@ const blankRule = (): ForwardingRule => ({
     delay: 0.5,
     force_forward: false,
     hide_sender: false,
+    hide_media_caption: false,
     deduplicate: false,
     deduplicate_window: 3600,
   },
@@ -486,14 +487,19 @@ export function RulesPage() {
                 label={t('rules.appendSource')}
               />
               <Switch
-                checked={form.forwarding.force_forward}
-                onCheckedChange={(value) => setForwarding('force_forward', value)}
-                label={t('rules.forceUpload')}
-              />
-              <Switch
                 checked={form.forwarding.hide_sender}
                 onCheckedChange={(value) => setForwarding('hide_sender', value)}
                 label={t('rules.hideSender')}
+              />
+              <Switch
+                checked={form.forwarding.hide_media_caption}
+                onCheckedChange={(value) => setForwarding('hide_media_caption', value)}
+                label={t('rules.hideMediaCaption')}
+              />
+              <Switch
+                checked={form.forwarding.force_forward}
+                onCheckedChange={(value) => setForwarding('force_forward', value)}
+                label={t('rules.forceUpload')}
               />
               <Switch
                 checked={form.forwarding.deduplicate}

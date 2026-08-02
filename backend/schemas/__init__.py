@@ -38,6 +38,7 @@ class ForwardingOptions(StrictModel):
     delay: float = Field(default=0.5, ge=0, le=3600)
     force_forward: bool = False
     hide_sender: bool = False
+    hide_media_caption: bool = False
     deduplicate: bool = False
     deduplicate_window: int = Field(default=3600, ge=0, le=604800)
 

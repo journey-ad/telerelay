@@ -207,12 +207,22 @@ class MessageForwarder:
 
     # -- Forwarding --
 
+    @staticmethod
+    def _has_media_files(messages: List[Message]) -> bool:
+        return any(
+            getattr(message, "media", None) is not None
+            and not isinstance(message.media, MessageMediaWebPage)
+            for message in messages
+        )
+
     async def _forward_normal(
         self, messages: List[Message], target, source_data: dict, source_text: str, is_noforwards: bool
     ) -> None:
         """Normal forwarding flow (no download needed)"""
         if self.rule.hide_sender:
             await self._forward_copy(messages, target, source_data, "")
+        elif self.rule.hide_media_caption and self._has_media_files(messages):
+            await self._forward_copy(messages, target, source_data, source_text)
         elif is_noforwards:
             # noforwards restriction → copy with reference
             await self._forward_copy(messages, target, None, source_text)
@@ -230,6 +240,9 @@ class MessageForwarder:
             msg = messages[0]
             text = msg.raw_text or ""
             entities = list(msg.entities) if msg.entities else []
+            if self.rule.hide_media_caption and self._has_media_files(messages):
+                text = ""
+                entities = []
             
             if source_data:
                 text, added_entities = self._format_source_append(text, source_data)
@@ -251,6 +264,9 @@ class MessageForwarder:
             first = messages[0]
             text = first.raw_text or ""
             entities = list(first.entities) if first.entities else []
+            if self.rule.hide_media_caption and self._has_media_files(messages):
+                text = ""
+                entities = []
             
             if source_data:
                 text, added_entities = self._format_source_append(text, source_data)
@@ -295,6 +311,9 @@ class MessageForwarder:
         first = messages[0]
         text = first.raw_text or ""
         entities = list(first.entities) if first.entities else []
+        if self.rule.hide_media_caption:
+            text = ""
+            entities = []
 
         file_passed = file_paths[0] if len(file_paths) == 1 else file_paths
         

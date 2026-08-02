@@ -185,6 +185,7 @@
     "appendSource": "Append source",
     "forceUpload": "Force upload",
     "hideSender": "Hide sender",
+    "hideMediaCaption": "Hide media caption",
     "deduplicate": "Deduplicate messages",
     "save": "Save rule",
     "deleteTitle": "Delete forwarding rule",

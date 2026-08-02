@@ -185,6 +185,7 @@
     "appendSource": "附加来源",
     "forceUpload": "强制上传",
     "hideSender": "隐藏发送者",
+    "hideMediaCaption": "隐藏媒体描述",
     "deduplicate": "消息去重",
     "save": "保存规则",
     "deleteTitle": "删除转发规则",

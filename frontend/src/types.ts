@@ -136,6 +136,7 @@ export interface ForwardingRule {
     delay: number
     force_forward: boolean
     hide_sender: boolean
+    hide_media_caption: boolean
     deduplicate: boolean
     deduplicate_window: number
   }

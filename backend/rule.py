@@ -36,6 +36,7 @@ class ForwardingRule:
     delay: float = 0.5
     force_forward: bool = False
     hide_sender: bool = False
+    hide_media_caption: bool = False
     deduplicate: bool = False
     deduplicate_window: int = 3600
     
@@ -66,6 +67,7 @@ class ForwardingRule:
             delay=forwarding.get("delay", 0.5),
             force_forward=forwarding.get("force_forward", False),
             hide_sender=forwarding.get("hide_sender", False),
+            hide_media_caption=forwarding.get("hide_media_caption", False),
             deduplicate=forwarding.get("deduplicate", False),
             deduplicate_window=forwarding.get("deduplicate_window", 3600),
         )
@@ -95,6 +97,7 @@ class ForwardingRule:
                 "delay": self.delay,
                 "force_forward": self.force_forward,
                 "hide_sender": self.hide_sender,
+                "hide_media_caption": self.hide_media_caption,
                 "deduplicate": self.deduplicate,
                 "deduplicate_window": self.deduplicate_window,
             },

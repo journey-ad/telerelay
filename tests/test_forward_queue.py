@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from telethon.errors import FloodWaitError
 
@@ -697,6 +697,47 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(calls, ["one", "two", "two", "three"])
         self.assertEqual(checkpoints, [1, 2, 3])
+
+    async def test_forward_normal_strips_media_caption_when_hidden(self):
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.rule = SimpleNamespace(
+            hide_sender=False,
+            hide_media_caption=True,
+            preserve_format=True,
+        )
+        forwarder.client = SimpleNamespace(
+            send_message=AsyncMock(),
+            forward_messages=AsyncMock(),
+        )
+        message = SimpleNamespace(
+            raw_text="media caption",
+            entities=[],
+            media=SimpleNamespace(),
+        )
+
+        await forwarder._forward_normal([message], "target", None, "", False)
+
+        forwarder.client.forward_messages.assert_not_called()
+        send_message = forwarder.client.send_message
+        self.assertEqual(send_message.call_args.args[1], "")
+        self.assertEqual(send_message.call_args.kwargs["file"], message.media)
+
+    async def test_send_files_strips_media_caption_when_hidden(self):
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.rule = SimpleNamespace(hide_media_caption=True)
+        forwarder.client = SimpleNamespace(send_file=AsyncMock())
+        message = SimpleNamespace(
+            raw_text="media caption",
+            entities=[],
+            media=SimpleNamespace(),
+        )
+
+        await forwarder._send_files(["photo.jpg"], [message], "target", None, "")
+
+        self.assertEqual(
+            forwarder.client.send_file.call_args.kwargs["caption"],
+            "",
+        )
 
 
 if __name__ == "__main__":
