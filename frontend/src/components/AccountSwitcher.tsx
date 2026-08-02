@@ -4,10 +4,12 @@ import type { TFunction } from 'i18next'
 import {
   Check,
   ChevronDown,
+  Languages,
   LogOut,
   Pencil,
   Plus,
   Radio,
+  RefreshCw,
   Smartphone,
   Trash2,
   UserRound,
@@ -15,7 +17,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { json, request } from '../api/client'
+import { accountRequest, json, request } from '../api/client'
 import type { TelegramAccount, TelegramAuth } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
@@ -34,30 +36,34 @@ function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   return t('accounts.awaitingAuth')
 }
 
-const accountScopedQueries = new Set([
-  'bot-status',
-  'forward-queue-items',
-  'stats',
-  'history',
-  'rules',
-  'button-rules',
-  'config',
-  'export-tasks',
-  'export-runs',
-  'export-job',
-  'telegram-preview',
-  'dashboard-events',
-])
-
-function clearAccountQueries(client: ReturnType<typeof useQueryClient>) {
-  client.removeQueries({
-    predicate: (query) => accountScopedQueries.has(String(query.queryKey[0] ?? '')),
+function setActiveAccount(client: ReturnType<typeof useQueryClient>, selected: TelegramAccount) {
+  client.setQueryData<TelegramAccount[]>(['telegram-accounts'], (current) => {
+    const accounts = current?.some((account) => account.id === selected.id)
+      ? current.map((account) => (account.id === selected.id ? selected : account))
+      : [...(current ?? []), selected]
+    return accounts.map((account) => ({ ...account, active: account.id === selected.id }))
   })
   clearAuthenticatedImages()
 }
 
-export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
-  const { t } = useTranslation()
+function removeAccount(client: ReturnType<typeof useQueryClient>, accountId: string) {
+  client.setQueryData<TelegramAccount[]>(['telegram-accounts'], (current) => {
+    const remaining = (current ?? []).filter((account) => account.id !== accountId)
+    if (remaining.some((account) => account.active) || !remaining[0]) return remaining
+    return remaining.map((account, index) => ({ ...account, active: index === 0 }))
+  })
+  client.removeQueries({ predicate: (query) => query.queryKey[1] === accountId })
+  clearAuthenticatedImages()
+}
+
+export function AccountSwitcher({
+  onLogout,
+  onRefresh,
+}: {
+  onLogout: () => void
+  onRefresh: () => void
+}) {
+  const { t, i18n } = useTranslation()
   const client = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [label, setLabel] = useState('')
@@ -70,24 +76,24 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
     refetchInterval: 30_000,
   })
-  const auth = useQuery({
-    queryKey: ['telegram-auth'],
-    queryFn: () => request<TelegramAuth>('/api/v1/telegram-auth'),
-    enabled: dialogOpen,
-  })
   const active = useMemo(
     () => accounts.data?.find((account) => account.active) ?? accounts.data?.[0],
     [accounts.data],
   )
+  const auth = useQuery({
+    queryKey: ['telegram-auth', active?.id ?? 'none'],
+    queryFn: () => accountRequest<TelegramAuth>(active?.id ?? '', '/api/v1/telegram-auth'),
+    enabled: dialogOpen,
+  })
   const switching = useMutation({
     mutationFn: (accountId: string) =>
       request<TelegramAccount>(`/api/v1/telegram-accounts/${accountId}/activate`, json('POST')),
     onSuccess: async (account) => {
-      clearAccountQueries(client)
+      setActiveAccount(client, account)
       if (!account.authenticated) {
         setDialogOpen(true)
         try {
-          await request('/api/v1/telegram-auth/start', json('POST'))
+          await accountRequest(account.id, '/api/v1/telegram-auth/start', json('POST'))
         } catch (error) {
           setFlowError(messageFrom(error))
         }
@@ -105,21 +111,23 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
         '/api/v1/telegram-accounts',
         json('POST', { label }),
       )
-      await request('/api/v1/telegram-auth/start', json('POST'))
+      await accountRequest(account.id, '/api/v1/telegram-auth/start', json('POST'))
       return account
     },
-    onSuccess: async () => {
-      clearAccountQueries(client)
+    onSuccess: async (account) => {
+      setActiveAccount(client, account)
       setFlowError(null)
       setLabel('')
-      await Promise.all([accounts.refetch(), auth.refetch()])
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['telegram-accounts'] }),
+        client.invalidateQueries({ queryKey: ['telegram-auth'] }),
+      ])
     },
     onError: (error) => setFlowError(messageFrom(error)),
   })
   const startingAuth = useMutation({
-    mutationFn: () => request('/api/v1/telegram-auth/start', json('POST')),
+    mutationFn: () => accountRequest(active?.id ?? '', '/api/v1/telegram-auth/start', json('POST')),
     onSuccess: async () => {
-      clearAccountQueries(client)
       setFlowError(null)
       await auth.refetch()
     },
@@ -128,11 +136,11 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
   const deleting = useMutation({
     mutationFn: (accountId: string) =>
       request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
-    onSuccess: async () => {
-      clearAccountQueries(client)
+    onSuccess: async (_, accountId) => {
+      removeAccount(client, accountId)
       await Promise.all([
-        accounts.refetch(),
-        auth.refetch(),
+        client.invalidateQueries({ queryKey: ['telegram-accounts'] }),
+        client.invalidateQueries({ queryKey: ['telegram-auth'] }),
         client.invalidateQueries({ queryKey: ['bot-status'] }),
       ])
     },
@@ -163,7 +171,7 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (auth.data?.state === 'success') {
-      clearAccountQueries(client)
+      clearAuthenticatedImages()
       void accounts.refetch()
     }
   }, [auth.data?.state]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -178,6 +186,10 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     auth.data?.state &&
     ['waiting_phone', 'waiting_code', 'waiting_password', 'connecting'].includes(auth.data.state),
   )
+  const switchingToEnglish = i18n.resolvedLanguage !== 'en-US'
+  const languageActionLabel = switchingToEnglish
+    ? t('language.switchToEnglish')
+    : t('language.switchToChinese')
 
   function openAccountDialog() {
     setFlowError(null)
@@ -190,7 +202,11 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
     const kind =
       state === 'waiting_phone' ? 'phone' : state === 'waiting_code' ? 'code' : 'password'
     try {
-      await request(`/api/v1/telegram-auth/${kind}`, json('POST', { value: authValue }))
+      await accountRequest(
+        active?.id ?? '',
+        `/api/v1/telegram-auth/${kind}`,
+        json('POST', { value: authValue }),
+      )
       setAuthValue('')
       setFlowError(null)
       await auth.refetch()
@@ -269,8 +285,35 @@ export function AccountSwitcher({ onLogout }: { onLogout: () => void }) {
               <Plus size={15} />
               {t('accounts.add')}
             </DropdownMenu.Item>
+            <DropdownMenu.Separator className="my-1 hidden h-px bg-slate-100 max-md:block" />
+            <div className="hidden grid-cols-3 gap-1 px-1 max-md:grid">
+              <DropdownMenu.Item
+                className="flex h-9 items-center justify-center rounded text-slate-600 outline-none data-[highlighted]:bg-slate-50"
+                aria-label={t('nav.refresh')}
+                title={t('nav.refresh')}
+                onSelect={onRefresh}
+              >
+                <RefreshCw size={16} aria-hidden="true" />
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="flex h-9 items-center justify-center rounded text-slate-600 outline-none data-[highlighted]:bg-slate-50"
+                aria-label={languageActionLabel}
+                title={languageActionLabel}
+                onSelect={() => void i18n.changeLanguage(switchingToEnglish ? 'en-US' : 'zh-CN')}
+              >
+                <Languages size={16} aria-hidden="true" />
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className="flex h-9 items-center justify-center rounded text-slate-600 outline-none data-[highlighted]:bg-slate-50"
+                aria-label={t('accounts.exitConsole')}
+                title={t('accounts.exitConsole')}
+                onSelect={onLogout}
+              >
+                <LogOut size={16} aria-hidden="true" />
+              </DropdownMenu.Item>
+            </div>
             <DropdownMenu.Item
-              className="flex h-9 items-center gap-2 rounded px-2 text-xs text-slate-600 outline-none data-[highlighted]:bg-slate-50"
+              className="flex h-9 items-center gap-2 rounded px-2 text-xs text-slate-600 outline-none data-[highlighted]:bg-slate-50 max-md:hidden"
               onSelect={onLogout}
             >
               <LogOut size={15} />

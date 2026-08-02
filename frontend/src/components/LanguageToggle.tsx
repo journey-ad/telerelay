@@ -5,7 +5,6 @@ import { cn } from '../utils/cn'
 export function LanguageToggle({ className }: { className?: string }) {
   const { t, i18n } = useTranslation()
   const switchingToEnglish = i18n.resolvedLanguage !== 'en-US'
-  const label = t(switchingToEnglish ? 'language.switchToEnglish' : 'language.switchToChinese')
 
   return (
     <button
@@ -18,8 +17,6 @@ export function LanguageToggle({ className }: { className?: string }) {
         'max-sm:min-w-8.5 max-sm:px-0 max-sm:[&>span]:hidden',
         className,
       )}
-      aria-label={label}
-      title={label}
       onClick={() => void i18n.changeLanguage(switchingToEnglish ? 'en-US' : 'zh-CN')}
     >
       <Languages size={15} aria-hidden="true" />

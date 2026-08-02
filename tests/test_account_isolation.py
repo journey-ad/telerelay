@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 import tempfile
 import unittest
@@ -84,6 +85,12 @@ class AccountIsolationTests(unittest.TestCase):
             self.data_dir / "stats.db": b"stats",
             self.data_dir / "exports.db": b"exports-db",
             self.data_dir / "telegram_avatars" / "default.jpg": b"avatar",
+            self.data_dir / ".telegram_preview_cache.key": b"k" * 32,
+            self.data_dir
+            / "telegram_preview_cache"
+            / hashlib.sha256(b"default").hexdigest()[:20]
+            / "avatars"
+            / "1.jpg": b"encrypted-avatar",
             self.data_dir / "db" / "messages.sqlite3": b"messages",
             self.data_dir / "exports" / "archive.zip": b"archive",
         }
@@ -106,6 +113,15 @@ class AccountIsolationTests(unittest.TestCase):
         self.assertEqual((target.message_db_dir / "messages.sqlite3").read_bytes(), b"messages")
         self.assertEqual((target.export_dir / "archive.zip").read_bytes(), b"archive")
         self.assertEqual(target.avatar.read_bytes(), b"avatar")
+        self.assertEqual(
+            (target.data_dir / ".telegram_preview_cache.key").read_bytes(),
+            b"k" * 32,
+        )
+        self.assertEqual(
+            (target.data_dir / "telegram_preview_cache" / "avatars" / "1.jpg").read_bytes(),
+            b"encrypted-avatar",
+        )
+        self.assertFalse((self.data_dir / "telegram_preview_cache").exists())
 
         restored = TelegramAccountStore(self.data_dir, paths=self.paths)
         self.assertEqual(restored.active_account_id, "123")
@@ -125,6 +141,24 @@ class AccountIsolationTests(unittest.TestCase):
         self.assertEqual(source.read_text(encoding="utf-8"), "source: true\n")
         self.assertEqual(destination.read_text(encoding="utf-8"), "destination: true\n")
 
+    def test_sqlite_conflict_keeps_legacy_database_and_sidecars_together(self):
+        self._write_legacy_registry()
+        source = self.data_dir / "forward_queue.db"
+        source_wal = Path(f"{source}-wal")
+        destination = self.paths.for_account("123").queue_db
+        destination_wal = Path(f"{destination}-wal")
+        source.write_bytes(b"legacy-database")
+        source_wal.write_bytes(b"legacy-wal")
+        destination.parent.mkdir(parents=True)
+        destination.write_bytes(b"isolated-database")
+
+        self.assertTrue(AccountMigration(self.paths).run())
+
+        self.assertEqual(source.read_bytes(), b"legacy-database")
+        self.assertEqual(source_wal.read_bytes(), b"legacy-wal")
+        self.assertEqual(destination.read_bytes(), b"isolated-database")
+        self.assertFalse(destination_wal.exists())
+
     def test_pending_account_only_persists_global_registry(self):
         store = TelegramAccountStore(self.data_dir, paths=self.paths)
         pending = store.create("Pending")
@@ -135,6 +169,40 @@ class AccountIsolationTests(unittest.TestCase):
             ["telegram_accounts.json"],
         )
         self.assertEqual(list(self.config_dir.iterdir()), [])
+
+    def test_adopt_session_moves_main_database_and_sidecars(self):
+        temporary_session = self.root / "pending" / "telegram"
+        source = Path(f"{temporary_session}.session")
+        source_wal = Path(f"{source}-wal")
+        source.parent.mkdir()
+        source.write_bytes(b"session")
+        source_wal.write_bytes(b"wal")
+
+        self.assertTrue(self.paths.adopt_session(temporary_session, "123"))
+
+        destination = Path(f"{self.paths.for_account('123').session_name}.session")
+        self.assertEqual(destination.read_bytes(), b"session")
+        self.assertEqual(Path(f"{destination}-wal").read_bytes(), b"wal")
+        self.assertFalse(source.exists())
+        self.assertFalse(source_wal.exists())
+
+    def test_adopt_session_conflict_leaves_temporary_session_intact(self):
+        temporary_session = self.root / "pending" / "telegram"
+        source = Path(f"{temporary_session}.session")
+        source_journal = Path(f"{source}-journal")
+        source.parent.mkdir()
+        source.write_bytes(b"pending-session")
+        source_journal.write_bytes(b"pending-journal")
+        destination = Path(f"{self.paths.for_account('123').session_name}.session")
+        destination.parent.mkdir(parents=True)
+        destination.write_bytes(b"existing-session")
+
+        self.assertFalse(self.paths.adopt_session(temporary_session, "123"))
+
+        self.assertEqual(source.read_bytes(), b"pending-session")
+        self.assertEqual(source_journal.read_bytes(), b"pending-journal")
+        self.assertEqual(destination.read_bytes(), b"existing-session")
+        self.assertFalse(Path(f"{destination}-journal").exists())
 
     def test_config_stats_and_export_stores_are_isolated(self):
         template_path = self.config_dir / "template.yaml"

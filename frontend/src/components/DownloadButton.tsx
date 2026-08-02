@@ -14,9 +14,11 @@ interface FileOption {
 
 export function DownloadButton({
   files,
+  accountId,
   className = '',
 }: {
   files: FileOption[]
+  accountId?: string
   className?: string
 }) {
   const { t } = useTranslation()
@@ -31,7 +33,7 @@ export function DownloadButton({
         <button
           type="button"
           aria-label={t('download.action', { label: file.label })}
-          onClick={() => void downloadFile(file.url, file.filename)}
+          onClick={() => void downloadFile(file.url, file.filename, accountId)}
           className={cn(
             'inline-flex min-h-9 items-center gap-2 rounded-[5px] border px-3.5',
             'border-slate-200 bg-white text-[13px] font-semibold text-slate-600',
@@ -50,7 +52,7 @@ export function DownloadButton({
         <button
           type="button"
           aria-label={t('download.action', { label: selected.label })}
-          onClick={() => void downloadFile(selected.url, selected.filename)}
+          onClick={() => void downloadFile(selected.url, selected.filename, accountId)}
           className={cn(
             'inline-flex min-h-9 items-center gap-2 rounded-l-[5px] border border-r-0 px-3.5',
             'border-slate-200 bg-white text-[13px] font-semibold text-slate-600',

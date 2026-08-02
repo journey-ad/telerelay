@@ -868,6 +868,7 @@ TRANSLATIONS = {
         "unknown_field": "⚠️ Unknown field: {field}",
         "rule_updated": "✅ Rule '{name}' updated: {field} = {value}",
         "rule_set_error": "❌ Set failed: {error}",
+        "account_not_authenticated": "⚠️ The current account is not authenticated yet",
         # Mini App
         "webapp_button": "Open Config Panel",
         "webapp_open": "Click the button below to open WebUI config panel 👇",

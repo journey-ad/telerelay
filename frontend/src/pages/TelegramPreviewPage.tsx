@@ -37,6 +37,7 @@ import { request } from '../api/client'
 import { downloadFile } from '../api/downloads'
 import { AuthenticatedImage } from '../components/AuthenticatedImage'
 import { EmptyState, IconButton, PageHeader } from '../components/ui'
+import { useAccountScope } from '../hooks/useAccountScope'
 import type {
   TelegramAccount,
   TelegramPreviewDialog,
@@ -633,6 +634,7 @@ export function TelegramPreviewPage() {
   const { t, i18n } = useTranslation()
   const locale = i18n.resolvedLanguage ?? 'zh-CN'
   const queryClient = useQueryClient()
+  const accountId = useAccountScope()
   const [folder, setFolder] = useState<DialogFolder>('main')
   const [dialogFilter, setDialogFilter] = useState('')
   const [selected, setSelected] = useState<TelegramPreviewDialog | null>(null)
@@ -652,8 +654,7 @@ export function TelegramPreviewPage() {
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
     refetchInterval: 30_000,
   })
-  const active = accounts.data?.find((account) => account.active)
-  const accountId = active?.id ?? ''
+  const active = accounts.data?.find((account) => account.id === accountId)
 
   useEffect(() => {
     replyRequestId.current += 1
@@ -666,7 +667,7 @@ export function TelegramPreviewPage() {
   }, [accountId])
 
   const dialogs = useInfiniteQuery({
-    queryKey: ['telegram-preview', 'dialogs', accountId, folder],
+    queryKey: ['telegram-preview', accountId, 'dialogs', folder],
     enabled: Boolean(accountId && active?.connected),
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) => {
@@ -678,7 +679,7 @@ export function TelegramPreviewPage() {
   })
 
   const messages = useInfiniteQuery({
-    queryKey: ['telegram-preview', 'messages', accountId, selected?.id ?? null, messageQuery],
+    queryKey: ['telegram-preview', accountId, 'messages', selected?.id ?? null, messageQuery],
     enabled: Boolean(accountId && active?.connected && selected),
     initialPageParam: null as number | null,
     queryFn: ({ pageParam }) => {
@@ -752,7 +753,7 @@ export function TelegramPreviewPage() {
     replyRequestId.current += 1
     stickToBottom.current = true
     void queryClient.invalidateQueries({
-      queryKey: ['telegram-preview', 'messages', accountId, dialog.id, ''],
+      queryKey: ['telegram-preview', accountId, 'messages', dialog.id, ''],
       exact: true,
     })
     setSelected(dialog)
@@ -795,7 +796,7 @@ export function TelegramPreviewPage() {
       )
       if (requestId !== replyRequestId.current) return
       queryClient.setQueryData<InfiniteData<TelegramPreviewMessagesPage>>(
-        ['telegram-preview', 'messages', accountId, selected.id, messageQuery],
+        ['telegram-preview', accountId, 'messages', selected.id, messageQuery],
         (current) => {
           if (!current?.pages.length) return current
           if (current.pages.some((page) => page.items.some((item) => item.id === message.id))) {

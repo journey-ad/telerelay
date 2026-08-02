@@ -85,15 +85,31 @@ class AccountPathRegistry:
     def adopt_session(self, session_name: str | Path, account_id: str | int) -> bool:
         """Move a disconnected temporary Telethon session into its final account."""
         paths = self.for_account(account_id)
-        moved = self._move_file(
-            Path(f"{session_name}.session"),
-            Path(f"{paths.session_name}.session"),
-        )
-        self._move_file(
-            Path(f"{session_name}.session-journal"),
-            Path(f"{paths.session_name}.session-journal"),
-        )
-        return moved
+        source = Path(f"{session_name}.session")
+        destination = Path(f"{paths.session_name}.session")
+        if not source.is_file():
+            return False
+
+        pairs = [(source, destination)]
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = Path(f"{source}{suffix}")
+            if sidecar.is_file():
+                pairs.append((sidecar, Path(f"{destination}{suffix}")))
+        if any(target.exists() for _, target in pairs):
+            return False
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for current_source, current_target in pairs:
+                shutil.move(str(current_source), str(current_target))
+                moved.append((current_source, current_target))
+        except Exception:
+            for current_source, current_target in reversed(moved):
+                if current_target.exists() and not current_source.exists():
+                    shutil.move(str(current_target), str(current_source))
+            raise
+        return True
 
     def remove_account_data(self, account_id: str | int) -> None:
         """Remove a finalized account's isolated data and configuration."""

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import unittest
@@ -142,6 +143,19 @@ class TelegramAccountStoreTests(unittest.TestCase):
         store.clear_identity(account.id)
 
         self.assertFalse(store.get_public(account.id)["authenticated"])
+
+    def test_finalized_account_rejects_a_different_telegram_identity(self):
+        store = TelegramAccountStore(self.root)
+        account = store.finalize_identity(
+            store.active_account_id,
+            {"telegram_user_id": 123},
+        )
+
+        with self.assertRaises(TelegramAccountError) as raised:
+            store.finalize_identity(account.id, {"telegram_user_id": 456})
+
+        self.assertEqual(raised.exception.code, "telegram_account_mismatch")
+        self.assertEqual(store.get_public(account.id)["telegram_user_id"], 123)
 
     def test_avatar_cache_is_versioned_and_can_be_cleared(self):
         store = TelegramAccountStore(self.root)
@@ -392,6 +406,24 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
             self.registry.get_auth(account["id"]),
         )
 
+    async def test_cleared_numeric_account_reauthenticates_in_temporary_session(self):
+        session_path = Path(f"{self.store.session_name(self.primary_id)}.session")
+        session_path.unlink()
+
+        with patch.object(
+            self.service,
+            "_authenticate_pending",
+            return_value=None,
+        ) as authenticate:
+            started = await self.service.start_authentication(self.primary_id)
+            await asyncio.sleep(0)
+
+        self.assertTrue(started)
+        authenticate.assert_called_once()
+        pending = authenticate.call_args.args[0]
+        self.assertEqual(pending.account_id, self.primary_id)
+        self.assertNotEqual(pending.session_name, self.store.session_name(self.primary_id))
+
     async def test_account_list_reports_all_connected_runtimes(self):
         account = await self.service.create("在线账号")
         second = self.registry.get_runtime(account["id"])
@@ -451,6 +483,9 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
             await self.service.delete(account.id)
 
         self.assertFalse(self.registry.is_account_blocked(account.id))
+        self.assertEqual(self.store.get_public(account.id)["id"], account.id)
+        restored = TelegramAccountStore(self.root)
+        self.assertEqual(restored.get_public(account.id)["id"], account.id)
 
     async def test_blocked_account_cannot_be_recreated_during_deletion(self):
         account = await self.service.create("删除中账号")

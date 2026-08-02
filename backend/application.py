@@ -1,6 +1,7 @@
 """Application dependency container constructed by FastAPI lifespan."""
 
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from threading import Thread
 
 from backend.account_paths import is_telegram_user_id
@@ -28,11 +29,23 @@ class ApplicationContext:
     stats_registry: object | None = None
     export_registry: object | None = None
     rule_registry: object | None = None
+    request_account_id: ContextVar[str | None] = field(
+        default_factory=lambda: ContextVar("telerelay_request_account_id", default=None),
+        repr=False,
+    )
 
-    def active_account_id(self) -> str | None:
+    def selected_account_id(self) -> str | None:
+        """Return the account captured when the current request started."""
         if not self.accounts:
             return None
-        account_id = self.accounts.store.active_account_id
+        account_id = self.request_account_id.get() or self.accounts.store.active_account_id
+        self.accounts.store.get_public(account_id)
+        return account_id
+
+    def active_account_id(self) -> str | None:
+        account_id = self.selected_account_id()
+        if account_id is None:
+            return None
         account_scoping_enabled = any(
             value is not None
             for value in (

@@ -7,6 +7,7 @@ from collections import deque
 from contextlib import suppress
 from datetime import datetime, timezone
 from itertools import count
+from collections.abc import Callable
 from typing import Any, AsyncIterator
 
 
@@ -45,6 +46,7 @@ class EventBus:
         self,
         limit: int = 10,
         event_types: set[str] | None = None,
+        predicate: Callable[[dict[str, Any]], bool] | None = None,
     ) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
@@ -52,12 +54,17 @@ class EventBus:
         for event in reversed(self._history):
             if event_types and event["type"] not in event_types:
                 continue
+            if predicate and not predicate(event):
+                continue
             result.append(event)
             if len(result) >= limit:
                 break
         return result
 
-    async def stream(self) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        predicate: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> AsyncIterator[str]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(self.queue_size)
         self._subscribers.add(queue)
         try:
@@ -65,6 +72,8 @@ class EventBus:
             while True:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=20)
+                    if predicate and not predicate(event):
+                        continue
                     data = json.dumps(event, ensure_ascii=False, default=str)
                     yield f"event: {event['type']}\ndata: {data}\n\n"
                 except asyncio.TimeoutError:

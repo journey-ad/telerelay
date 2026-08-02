@@ -1,4 +1,5 @@
 import asyncio
+from contextvars import ContextVar
 import os
 import tempfile
 import unittest
@@ -15,7 +16,11 @@ from backend.auth_manager import AuthManager
 from backend.config import Config
 from backend.events import EventBus
 from backend.services import RuleService
-from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
+from backend.telegram_accounts import (
+    TelegramAccountError,
+    TelegramAccountService,
+    TelegramAccountStore,
+)
 from backend.telegram_chats import TelegramChat
 from backend.telegram_runtimes import TelegramRuntimeRegistry
 
@@ -137,6 +142,43 @@ class FakeExports:
             raise KeyError("missing")
 
 
+class FakeScopedRules:
+    def __init__(self, name):
+        self.rule = {
+            "name": name,
+            "enabled": False,
+            "source_chats": [],
+            "target_chats": [],
+            "filters": {
+                "mode": "whitelist",
+                "keywords": [],
+                "regex_patterns": [],
+                "media_types": [],
+                "max_file_size": 0,
+                "min_file_size": 0,
+            },
+            "ignore": {"user_ids": [], "keywords": []},
+            "forwarding": {
+                "preserve_format": True,
+                "add_source_info": True,
+                "delay": 0.5,
+                "force_forward": False,
+                "hide_sender": False,
+                "deduplicate": False,
+                "deduplicate_window": 3600,
+            },
+        }
+
+    def list_rules(self):
+        return [dict(self.rule)]
+
+    async def update_rule(self, index, payload):
+        if index != 0:
+            raise AssertionError("unexpected rule index")
+        self.rule = payload.model_dump()
+        return dict(self.rule)
+
+
 def make_app(context: ApplicationContext) -> FastAPI:
     app = FastAPI()
     app.state.context = context
@@ -203,6 +245,20 @@ class ApiContractTests(unittest.TestCase):
         status = self.client.get("/api/v1/bot/status")
         self.assertEqual(status.status_code, 200)
         self.assertFalse(status.json()["is_running"])
+
+    def test_auth_state_reports_persisted_session_when_runtime_state_is_idle(self):
+        original_get_public = self.account_store.get_public
+
+        def authenticated_account(account_id, *args, **kwargs):
+            account = original_get_public(account_id, *args, **kwargs)
+            return {**account, "authenticated": True}
+
+        with patch.object(self.account_store, "get_public", authenticated_account):
+            response = self.client.get("/api/v1/telegram-auth")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["state"], "idle")
+        self.assertTrue(response.json()["authenticated"])
 
     def test_meta_contract(self):
         meta = self.client.get("/api/v1/meta")
@@ -284,14 +340,16 @@ class ApiContractTests(unittest.TestCase):
                 "updated_at": 120.0,
             }
         ]
-        self.bot.list_queue_items = lambda limit: calls.append(limit) or expected
+        self.bot.list_queue_items = (
+            lambda limit, account_id=None: calls.append((limit, account_id)) or expected
+        )
 
         response = self.client.get("/api/v1/queue/items", params={"limit": 25})
         invalid = self.client.get("/api/v1/queue/items", params={"limit": 101})
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), expected)
-        self.assertEqual(calls, [25])
+        self.assertEqual(calls, [(25, self.account_id)])
         self.assertEqual(invalid.status_code, 422)
 
     def test_recent_events_contract_filters_types_and_limits_results(self):
@@ -311,6 +369,76 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual([event["id"] for event in response.json()], [3, 1])
         self.assertEqual(invalid.status_code, 422)
+
+    def test_recent_events_hide_other_accounts(self):
+        self.events.publish("forward", {"account_id": self.account_id, "status": "completed"})
+        self.events.publish("forward", {"account_id": "another", "status": "completed"})
+
+        response = self.client.get("/api/v1/events/recent")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["payload"]["account_id"], self.account_id)
+
+    def test_recent_events_deliver_account_id_finalization_to_pending_account(self):
+        self.events.publish(
+            "telegram-auth",
+            {
+                "state": "success",
+                "account_id": "89336672",
+                "previous_account_id": self.account_id,
+            },
+        )
+
+        response = self.client.get("/api/v1/events/recent")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["payload"]["account_id"], "89336672")
+
+    def test_account_header_pins_rule_requests_when_active_account_changes(self):
+        account_ids = {"101", "202"}
+        store = SimpleNamespace(
+            active_account_id="202",
+            get_public=lambda account_id: (
+                {"id": account_id}
+                if account_id in account_ids
+                else (_ for _ in ()).throw(
+                    TelegramAccountError("account_not_found", "missing")
+                )
+            ),
+        )
+        services = {account_id: FakeScopedRules(account_id) for account_id in account_ids}
+        request_account_id = ContextVar("test_request_account_id", default=None)
+        context = SimpleNamespace(
+            config=SimpleNamespace(web_auth_username="", web_auth_password=""),
+            accounts=SimpleNamespace(store=store),
+            request_account_id=request_account_id,
+            active_rules=lambda: services[
+                request_account_id.get() or store.active_account_id
+            ],
+        )
+        client = TestClient(make_app(context))
+        self.addCleanup(client.close)
+
+        read = client.get(
+            "/api/v1/rules", headers={"X-TeleRelay-Account-ID": "101"}
+        )
+        payload = {**services["101"].rule, "name": "updated-101"}
+        updated = client.put(
+            "/api/v1/rules/0",
+            headers={"X-TeleRelay-Account-ID": "101"},
+            json=payload,
+        )
+        missing = client.get(
+            "/api/v1/rules", headers={"X-TeleRelay-Account-ID": "303"}
+        )
+
+        self.assertEqual(read.json()[0]["name"], "101")
+        self.assertEqual(updated.json()["name"], "updated-101")
+        self.assertEqual(services["101"].rule["name"], "updated-101")
+        self.assertEqual(services["202"].rule["name"], "202")
+        self.assertEqual(missing.status_code, 404)
 
     def test_stats_accepts_date_limit_presets(self):
         calls = []

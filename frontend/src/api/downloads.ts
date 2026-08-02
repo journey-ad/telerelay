@@ -1,10 +1,15 @@
-import { ApiError } from './client'
+import { ACCOUNT_ID_HEADER, ApiError } from './client'
 import { authorization } from './credentials'
 
-export async function downloadFile(path: string, fallbackName = 'download'): Promise<void> {
+export async function downloadFile(
+  path: string,
+  fallbackName = 'download',
+  accountId?: string,
+): Promise<void> {
   const headers = new Headers()
   const auth = authorization()
   if (auth) headers.set('Authorization', auth)
+  if (accountId) headers.set(ACCOUNT_ID_HEADER, accountId)
   const response = await fetch(path, { headers })
   if (!response.ok) {
     throw new ApiError(response.status, `http_${response.status}`, response.statusText)

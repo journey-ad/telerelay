@@ -142,16 +142,34 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_first_cache_key_creation_discards_plaintext_cache(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            cache_file = Path(temp_dir) / "telegram_preview_cache" / "account" / "avatar.jpg"
+            cache_root = Path(temp_dir) / "work" / "telegram_preview_cache"
+            cache_file = cache_root / "avatars" / "avatar.jpg"
             cache_file.parent.mkdir(parents=True)
             cache_file.write_bytes(b"plaintext")
             registry, store = preview_dependencies(self.client, temp_dir)
 
             service = TelegramPreviewService(registry, store)
+            service._cache_key(cache_root)
 
-            self.assertFalse(service.cache_root.exists())
-            self.assertEqual(len(service.cache_key_path.read_bytes()), service.CACHE_KEY_BYTES)
-            self.assertEqual(service.cache_key_path.stat().st_mode & 0o777, 0o600)
+            cache_key_path = Path(temp_dir) / "work" / ".telegram_preview_cache.key"
+            self.assertFalse(cache_root.exists())
+            self.assertEqual(len(cache_key_path.read_bytes()), service.CACHE_KEY_BYTES)
+            self.assertEqual(cache_key_path.stat().st_mode & 0o777, 0o600)
+
+    async def test_cache_keys_and_files_are_isolated_by_account(self):
+        first = self.service._cache_path("work", "avatars", "101.jpg")
+        second = self.service._cache_path("personal", "avatars", "101.jpg")
+
+        self.service._write_cache(first, b"work-avatar")
+        self.service._write_cache(second, b"personal-avatar")
+
+        self.assertNotEqual(first.parents[2], second.parents[2])
+        self.assertEqual(self.service._read_cache(first, 60), b"work-avatar")
+        self.assertEqual(self.service._read_cache(second, 60), b"personal-avatar")
+        self.assertNotEqual(
+            (first.parents[2] / ".telegram_preview_cache.key").read_bytes(),
+            (second.parents[2] / ".telegram_preview_cache.key").read_bytes(),
+        )
 
     async def test_lists_main_and_archived_dialogs(self):
         main = await self.service.list_dialogs(
@@ -436,7 +454,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(path.read_bytes(), b"full-image")
         self.assertEqual(media_type, "image/jpeg")
         self.assertEqual(filename, "photo.jpg")
-        self.assertFalse(self.service.cache_root.exists())
+        self.assertFalse(self.service._account_cache_path("work").exists())
 
     async def test_gif_and_sticker_files_can_be_downloaded_without_persistent_cache(self):
         for kind in ("gif", "sticker"):
@@ -467,7 +485,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(path.read_bytes(), f"full-{kind}".encode())
                 self.assertTrue(filename.startswith(f"media-{kind}"))
-                self.assertFalse(self.service.cache_root.exists())
+                self.assertFalse(self.service._account_cache_path("work").exists())
 
     async def test_non_visual_media_is_not_downloaded(self):
         media_message = self.client.messages[101][-1]
@@ -497,7 +515,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.code, "visual_media_not_found")
         self.assertEqual(downloads, 0)
-        self.assertFalse(self.service.cache_root.exists())
+        self.assertFalse(self.service._account_cache_path("work").exists())
 
 
 if __name__ == "__main__":

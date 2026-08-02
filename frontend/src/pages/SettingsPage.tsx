@@ -14,8 +14,9 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { json, request } from '../api/client'
+import { accountRequest, json, request } from '../api/client'
 import { downloadFile } from '../api/downloads'
+import { useAccountScope } from '../hooks/useAccountScope'
 import {
   Badge,
   Button,
@@ -36,16 +37,17 @@ import { messageFrom } from '../utils/format'
 export function SettingsPage() {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const accountId = useAccountScope()
   const [rawConfig, setRawConfig] = useState('')
   const [authValue, setAuthValue] = useState('')
   const importRef = useRef<HTMLInputElement>(null)
   const config = useQuery({
-    queryKey: ['config'],
-    queryFn: () => request<AppConfig>('/api/v1/config'),
+    queryKey: ['config', accountId],
+    queryFn: () => accountRequest<AppConfig>(accountId, '/api/v1/config'),
   })
   const auth = useQuery({
-    queryKey: ['telegram-auth'],
-    queryFn: () => request<TelegramAuth>('/api/v1/telegram-auth'),
+    queryKey: ['telegram-auth', accountId],
+    queryFn: () => accountRequest<TelegramAuth>(accountId, '/api/v1/telegram-auth'),
     refetchInterval: (query) =>
       ['connecting', 'waiting_phone', 'waiting_code', 'waiting_password'].includes(
         query.state.data?.state ?? '',
@@ -58,26 +60,18 @@ export function SettingsPage() {
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
     enabled: Boolean(auth.data && auth.data.state !== 'not_required'),
   })
-  const activeAccount = accounts.data?.find((account) => account.active)
+  const activeAccount = accounts.data?.find((account) => account.id === accountId)
   const deleteAccount = useMutation({
-    mutationFn: (accountId: string) =>
-      request(`/api/v1/telegram-accounts/${accountId}`, json('DELETE')),
-    onSuccess: async () => {
+    mutationFn: (deletedAccountId: string) =>
+      request(`/api/v1/telegram-accounts/${deletedAccountId}`, json('DELETE')),
+    onSuccess: async (_, deletedAccountId) => {
+      client.setQueryData<TelegramAccount[]>(['telegram-accounts'], (current) => {
+        const remaining = (current ?? []).filter((account) => account.id !== deletedAccountId)
+        if (remaining.some((account) => account.active) || !remaining[0]) return remaining
+        return remaining.map((account, index) => ({ ...account, active: index === 0 }))
+      })
       client.removeQueries({
-        predicate: (query) =>
-          new Set([
-            'bot-status',
-            'forward-queue-items',
-            'stats',
-            'history',
-            'rules',
-            'button-rules',
-            'config',
-            'export-tasks',
-            'export-runs',
-            'export-job',
-            'telegram-preview',
-          ]).has(String(query.queryKey[0] ?? '')),
+        predicate: (query) => query.queryKey[1] === deletedAccountId,
       })
       await Promise.all([
         client.invalidateQueries({ queryKey: ['telegram-accounts'] }),
@@ -97,8 +91,9 @@ export function SettingsPage() {
     if (config.data) setRawConfig(JSON.stringify(config.data.config, null, 2))
   }, [config.data])
   const save = useMutation({
-    mutationFn: () => request('/api/v1/config', json('PUT', { config: JSON.parse(rawConfig) })),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ['config'] }),
+    mutationFn: () =>
+      accountRequest(accountId, '/api/v1/config', json('PUT', { config: JSON.parse(rawConfig) })),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['config', accountId] }),
   })
   const waitingLabels = {
     waiting_phone: 'settings.phone',
@@ -107,19 +102,23 @@ export function SettingsPage() {
   } as const
   const waitingLabel = waitingLabels[auth.data?.state as keyof typeof waitingLabels]
   async function startAuth() {
-    await request('/api/v1/telegram-auth/start', json('POST'))
+    await accountRequest(accountId, '/api/v1/telegram-auth/start', json('POST'))
     await auth.refetch()
   }
   async function submitAuth() {
     const state = auth.data?.state
     const kind =
       state === 'waiting_phone' ? 'phone' : state === 'waiting_code' ? 'code' : 'password'
-    await request(`/api/v1/telegram-auth/${kind}`, json('POST', { value: authValue }))
+    await accountRequest(
+      accountId,
+      `/api/v1/telegram-auth/${kind}`,
+      json('POST', { value: authValue }),
+    )
     setAuthValue('')
     await auth.refetch()
   }
   const clearSession = useMutation({
-    mutationFn: () => request('/api/v1/telegram-auth/session', json('DELETE')),
+    mutationFn: () => accountRequest(accountId, '/api/v1/telegram-auth/session', json('DELETE')),
     onSuccess: async () => {
       await auth.refetch()
     },
@@ -145,7 +144,7 @@ export function SettingsPage() {
     if (!file) return
     const data = new FormData()
     data.append('file', file)
-    await request('/api/v1/config/import', { method: 'POST', body: data })
+    await accountRequest(accountId, '/api/v1/config/import', { method: 'POST', body: data })
     await config.refetch()
   }
   const authStateLabels = {
@@ -158,7 +157,14 @@ export function SettingsPage() {
     error: 'settings.authState.error',
     not_required: 'settings.authState.notRequired',
   } as const
-  const authSuccess = auth.data?.state === 'success'
+  const authSuccess = Boolean(
+    activeAccount?.authenticated || auth.data?.authenticated || auth.data?.state === 'success',
+  )
+  const authStateLabel =
+    authSuccess && (!auth.data?.state || ['idle', 'success'].includes(auth.data.state))
+      ? 'settings.authState.success'
+      : (authStateLabels[auth.data?.state as keyof typeof authStateLabels] ??
+        'settings.authState.unknown')
 
   return (
     <>
@@ -193,10 +199,7 @@ export function SettingsPage() {
               title={t('settings.telegramSession')}
               meta={
                 <Badge tone={authSuccess ? 'green' : auth.data?.state === 'error' ? 'red' : 'gray'}>
-                  {t(
-                    authStateLabels[auth.data?.state as keyof typeof authStateLabels] ??
-                      'settings.authState.unknown',
-                  )}
+                  {t(authStateLabel)}
                 </Badge>
               }
             >
@@ -294,7 +297,7 @@ export function SettingsPage() {
                   variant="secondary"
                   icon={Download}
                   onClick={() =>
-                    void downloadFile('/api/v1/config/export', 'telerelay-config.yaml')
+                    void downloadFile('/api/v1/config/export', 'telerelay-config.yaml', accountId)
                   }
                 >
                   {t('settings.exportYaml')}

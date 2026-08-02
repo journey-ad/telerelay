@@ -239,6 +239,7 @@ export interface ExportJob {
 
 export interface TelegramAuth {
   state: string
+  authenticated: boolean
   error?: string
   user_info?: string
   account_id?: string | null

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -74,6 +75,11 @@ class AccountMigration:
                 account["id"] = target_id
                 id_map[legacy_id] = target_id
                 changed = True
+            elif account.get("telegram_user_id") is not None:
+                self._migrate_preview_cache(
+                    legacy_id,
+                    self.paths.for_account(target_id),
+                )
             normalized_accounts.append(account)
 
         active_id = str(payload.get("active_account_id") or "")
@@ -88,6 +94,7 @@ class AccountMigration:
             payload["accounts"] = normalized_accounts
             payload["active_account_id"] = active_id
             self._save_registry(payload)
+        self._cleanup_legacy_preview_cache()
         return changed
 
     async def resolve_default_account(self, accounts: TelegramAccountService) -> bool:
@@ -176,6 +183,7 @@ class AccountMigration:
             self.paths.data_dir / "telegram_avatars" / "default.jpg",
             target.avatar,
         )
+        self._migrate_preview_cache(self.LEGACY_DEFAULT_ID, target)
 
     def _migrate_named_account(self, legacy_id: str, target: AccountPaths) -> None:
         config_candidates = (
@@ -205,9 +213,39 @@ class AccountMigration:
             self.paths.data_dir / "telegram_avatars" / f"{legacy_id}.jpg",
             target.avatar,
         )
+        self._migrate_preview_cache(legacy_id, target)
+
+    def _migrate_preview_cache(self, legacy_id: str, target: AccountPaths) -> None:
+        legacy_root = self.paths.data_dir / "telegram_preview_cache"
+        digest = hashlib.sha256(legacy_id.encode("utf-8")).hexdigest()[:20]
+        source = legacy_root / digest
+        if not source.is_dir():
+            return
+        source_key = self.paths.data_dir / ".telegram_preview_cache.key"
+        target_key = target.data_dir / ".telegram_preview_cache.key"
+        if not source_key.is_file() or (
+            target_key.exists() and target_key.read_bytes() != source_key.read_bytes()
+        ):
+            shutil.rmtree(source, ignore_errors=True)
+            return
+        self._copy_file(source_key, target_key)
+        self._merge_directory(source, target.data_dir / "telegram_preview_cache")
+
+    def _cleanup_legacy_preview_cache(self) -> None:
+        legacy_root = self.paths.data_dir / "telegram_preview_cache"
+        if legacy_root.is_dir():
+            # Finder metadata must not keep an otherwise migrated cache root alive.
+            (legacy_root / ".DS_Store").unlink(missing_ok=True)
+            try:
+                legacy_root.rmdir()
+            except OSError:
+                return
+        if not legacy_root.exists():
+            (self.paths.data_dir / ".telegram_preview_cache.key").unlink(missing_ok=True)
 
     def _move_sqlite(self, source: Path, destination: Path) -> None:
-        self._move_file(source, destination)
+        if not self._move_file(source, destination):
+            return
         for suffix in ("-wal", "-shm", "-journal"):
             self._move_file(Path(f"{source}{suffix}"), Path(f"{destination}{suffix}"))
 
@@ -230,6 +268,17 @@ class AccountMigration:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(source), str(destination))
         logger.info("Migrated account data: %s -> %s", source, destination)
+        return True
+
+    @staticmethod
+    def _copy_file(source: Path, destination: Path) -> bool:
+        if not source.is_file():
+            return False
+        if destination.exists():
+            return destination.read_bytes() == source.read_bytes()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        logger.info("Migrated shared account data: %s -> %s", source, destination)
         return True
 
     def _merge_directory(self, source: Path, destination: Path) -> None:

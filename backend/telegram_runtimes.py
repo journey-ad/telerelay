@@ -258,10 +258,10 @@ class TelegramRuntimeRegistry:
     def submit_telegram(self, callback, *args):
         return self.current_runtime.submit_telegram(callback, *args)
 
-    def get_status(self) -> dict[str, Any]:
+    def get_status(self, account_id: str | None = None) -> dict[str, Any]:
         with self._state_lock:
             runtime_statuses = {}
-            for account_id, runtime in self._runtimes.items():
+            for runtime_account_id, runtime in self._runtimes.items():
                 queue_status = {"counts": {}, "paused_until": 0, "pause_reason": None}
                 queue_store = getattr(runtime, "forward_queue_store", None)
                 if queue_store:
@@ -271,7 +271,7 @@ class TelegramRuntimeRegistry:
                         "paused_until": paused_until,
                         "pause_reason": pause_reason,
                     }
-                runtime_statuses[account_id] = {
+                runtime_statuses[runtime_account_id] = {
                     "is_running": runtime.is_running,
                     "is_connected": runtime.is_connected,
                     "queue": queue_status,
@@ -279,7 +279,8 @@ class TelegramRuntimeRegistry:
         counts: dict[str, int] = {}
         paused_until = 0.0
         pause_reasons: list[str] = []
-        active_id = self.account_store.active_account_id
+        active_id = account_id or self.account_store.active_account_id
+        self.account_store.get_public(active_id)
         active_status = runtime_statuses.get(active_id, {})
         for status in [active_status] if active_status else []:
             queue = status.get("queue", {})
@@ -332,10 +333,15 @@ class TelegramRuntimeRegistry:
             },
         }
 
-    def list_queue_items(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_queue_items(
+        self,
+        limit: int = 50,
+        account_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         accounts = {account["id"]: account for account in self.account_store.list_public()}
         with self._state_lock:
-            active_id = self.account_store.active_account_id
+            active_id = account_id or self.account_store.active_account_id
+            self.account_store.get_public(active_id)
             runtime = self._runtimes.get(active_id)
             runtimes = [(active_id, runtime)] if runtime is not None else []
         items = []
@@ -356,8 +362,9 @@ class TelegramRuntimeRegistry:
         )
         return items[: max(1, min(int(limit), 100))]
 
-    def reset_stats(self) -> None:
-        active_id = self.account_store.active_account_id
+    def reset_stats(self, account_id: str | None = None) -> None:
+        active_id = account_id or self.account_store.active_account_id
+        self.account_store.get_public(active_id)
         database = (
             self.stats_registry.for_account(active_id)
             if self.stats_registry is not None and is_telegram_user_id(active_id)

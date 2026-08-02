@@ -19,7 +19,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from backend.api.dependencies import get_context, require_auth
+from backend.api.dependencies import bind_account_scope, get_context, require_auth
 from backend.application import ApplicationContext
 from backend.client import TelegramClientManager
 from backend.exporter.service import ExportError
@@ -44,7 +44,10 @@ from backend.telegram_accounts import TelegramAccountError
 from backend.telegram_chats import TelegramChatError
 from backend.telegram_preview import TelegramPreviewError
 
-router = APIRouter(prefix="/api/v1", dependencies=[Depends(require_auth)])
+router = APIRouter(
+    prefix="/api/v1",
+    dependencies=[Depends(require_auth), Depends(bind_account_scope)],
+)
 
 StatsDateLimit = Literal["7day", "14day", "30day", "all"]
 STATS_DATE_LIMIT_DAYS: dict[StatsDateLimit, int | None] = {
@@ -119,6 +122,35 @@ def _active_account_id(context: ApplicationContext) -> str:
     if account_id is None:
         raise _error("not_user_mode", "Telegram accounts are only available in user mode", 409)
     return account_id
+
+
+def _selected_account_id(context: ApplicationContext) -> str:
+    try:
+        account_id = context.selected_account_id()
+    except ValueError as exc:
+        raise _error("account_not_found", str(exc), 404) from exc
+    if account_id is None:
+        raise _error("not_user_mode", "Telegram accounts are only available in user mode", 409)
+    return account_id
+
+
+def _event_visible_to_account(event: dict, account_id: str | None) -> bool:
+    """Keep account-tagged runtime events inside one request-bound account."""
+    if account_id is None:
+        return True
+    payload = event.get("payload") or {}
+    event_account_ids = {
+        str(value)
+        for value in (
+            payload.get("account_id"),
+            payload.get("id"),
+            payload.get("previous_account_id"),
+        )
+        if value is not None
+    }
+    if not event_account_ids:
+        return True
+    return account_id in event_account_ids
 
 
 def _telegram_chat_error(exc: TelegramChatError) -> HTTPException:
@@ -393,6 +425,9 @@ async def update_check() -> dict:
 
 @router.get("/bot/status")
 async def bot_status(context: ApplicationContext = Depends(get_context)) -> dict:
+    if context.accounts:
+        account_id = _selected_account_id(context)
+        return await asyncio.to_thread(context.bot.get_status, account_id)
     return await asyncio.to_thread(context.bot.get_status)
 
 
@@ -401,86 +436,110 @@ async def queue_items(
     limit: int = Query(50, ge=1, le=100),
     context: ApplicationContext = Depends(get_context),
 ) -> list[dict]:
+    account_id = _selected_account_id(context) if context.accounts else None
+    if context.accounts:
+        return await asyncio.to_thread(context.bot.list_queue_items, limit, account_id)
     return await asyncio.to_thread(context.bot.list_queue_items, limit)
 
 
 @router.post("/bot/start", response_model=ApiMessage)
 async def bot_start(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
-    config = _active_resource(context, "active_config")
+    account_id = _active_account_id(context) if context.accounts else None
+    config = (
+        context.config_registry.for_account(account_id)
+        if account_id and context.config_registry
+        else context.config
+    )
     valid, message = config.validate()
     if not valid:
         raise _error("invalid_config", message, 422)
     started = (
-        await context.bot.start_account(_active_account_id(context))
+        await context.bot.start_account(account_id)
         if context.accounts
         else await context.bot.start()
     )
     if not started:
         raise _error("already_running", "Telegram runtime is already running", 409)
-    context.events.publish("bot", {"action": "start"})
+    context.events.publish("bot", {"action": "start", "account_id": account_id})
     return ApiMessage(code="bot_started")
 
 
 @router.post("/bot/stop", response_model=ApiMessage)
 async def bot_stop(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
+    account_id = _active_account_id(context) if context.accounts else None
     stopped = (
-        await context.bot.stop_account(_active_account_id(context))
+        await context.bot.stop_account(account_id)
         if context.accounts
         else await context.bot.stop()
     )
     if not stopped:
         raise _error("not_running", "Telegram runtime is not running", 409)
-    context.events.publish("bot", {"action": "stop"})
+    context.events.publish("bot", {"action": "stop", "account_id": account_id})
     return ApiMessage(code="bot_stopped")
 
 
 @router.post("/bot/restart", response_model=ApiMessage)
 async def bot_restart(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
-    config = _active_resource(context, "active_config")
+    account_id = _active_account_id(context) if context.accounts else None
+    config = (
+        context.config_registry.for_account(account_id)
+        if account_id and context.config_registry
+        else context.config
+    )
     config.load()
     restarted = (
-        await context.bot.get_runtime(_active_account_id(context)).restart()
+        await context.bot.get_runtime(account_id).restart()
         if context.accounts
         else await context.bot.restart()
     )
     if not restarted:
         raise _error("restart_failed", "Telegram runtime could not restart", 500)
-    context.events.publish("bot", {"action": "restart"})
+    context.events.publish("bot", {"action": "restart", "account_id": account_id})
     return ApiMessage(code="bot_restarted")
 
 
 @router.post("/bot/reset-stats", response_model=ApiMessage)
 async def reset_stats(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
+    account_id = _active_account_id(context) if context.accounts else None
     if context.accounts:
-        _active_resource(context, "active_stats")
-    await asyncio.to_thread(context.bot.reset_stats)
-    context.events.publish("stats", {"action": "reset"})
+        await asyncio.to_thread(context.bot.reset_stats, account_id)
+    else:
+        await asyncio.to_thread(context.bot.reset_stats)
+    context.events.publish("stats", {"action": "reset", "account_id": account_id})
     return ApiMessage(code="stats_reset")
 
 
 @router.get("/telegram-auth")
 async def telegram_auth_state(context: ApplicationContext = Depends(get_context)) -> dict:
     if context.accounts:
-        auth = context.accounts.get_auth()
+        account_id = _selected_account_id(context)
+        account = context.accounts.store.get_public(account_id)
+        auth = context.accounts.get_auth(account_id)
         return {
             **auth.get_state(),
-            "account_id": context.accounts.store.active_account_id,
+            "account_id": account_id,
+            "authenticated": account["authenticated"],
         }
-    return {"state": "not_required", "error": "", "user_info": ""}
+    return {
+        "state": "not_required",
+        "error": "",
+        "user_info": "",
+        "authenticated": True,
+    }
 
 
 @router.post("/telegram-auth/start", response_model=ApiMessage)
 async def telegram_auth_start(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
     if context.accounts:
-        account_id = context.accounts.store.active_account_id
+        account_id = _selected_account_id(context)
         if context.accounts.is_authentication_running(account_id):
             return ApiMessage(code="auth_in_progress")
-        auth = context.accounts.get_auth()
+        auth = context.accounts.get_auth(account_id)
         auth.reset()
         valid, message = context.config.validate_connection()
         if not valid:
             raise _error("invalid_connection_config", message, 422)
-        await context.accounts.start_authentication()
+        await context.accounts.start_authentication(account_id)
         context.events.publish("telegram-auth", {"state": "started", "account_id": account_id})
         return ApiMessage(code="auth_started")
     raise _error("not_user_mode", "Telegram authentication is only used in user mode", 409)
@@ -489,13 +548,14 @@ async def telegram_auth_start(context: ApplicationContext = Depends(get_context)
 def _submit_auth(context: ApplicationContext, kind: str, value: str) -> ApiMessage:
     if not context.accounts:
         raise _error("not_user_mode", "Telegram authentication is only used in user mode", 409)
-    auth = context.accounts.get_auth()
+    account_id = _selected_account_id(context)
+    auth = context.accounts.get_auth(account_id)
     submitter = getattr(auth, f"submit_{kind}")
     if not submitter(value):
         raise _error("auth_value_rejected", f"No {kind} challenge is waiting", 409)
     context.events.publish(
         "telegram-auth",
-        {"submitted": kind, "account_id": context.accounts.store.active_account_id},
+        {"submitted": kind, "account_id": account_id},
     )
     return ApiMessage(code=f"{kind}_submitted")
 
@@ -528,13 +588,13 @@ async def submit_password(
 async def clear_telegram_session(
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
+    account_id = _selected_account_id(context) if context.accounts else None
     if context.accounts:
-        await context.accounts.clear_active_session()
+        await context.accounts.clear_session(account_id)
     else:
         if context.bot.is_running:
             await context.bot.stop()
         await asyncio.to_thread(TelegramClientManager(context.config).clear_session)
-    account_id = context.accounts.store.active_account_id if context.accounts else None
     context.events.publish("telegram-account", {"action": "deauthenticated", "account_id": account_id})
     context.events.publish("telegram-auth", {"state": "cleared", "account_id": account_id})
     return ApiMessage(code="telegram_session_cleared")
@@ -666,8 +726,9 @@ async def logs(lines: int = Query(200, ge=1, le=2000)) -> dict:
 
 @router.get("/events")
 async def events(context: ApplicationContext = Depends(get_context)) -> StreamingResponse:
+    account_id = _selected_account_id(context) if context.accounts else None
     return StreamingResponse(
-        context.events.stream(),
+        context.events.stream(lambda event: _event_visible_to_account(event, account_id)),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -680,7 +741,12 @@ async def recent_events(
     context: ApplicationContext = Depends(get_context),
 ) -> list[dict]:
     event_types = {value for value in (types or []) if value}
-    return context.events.recent(limit, event_types or None)
+    account_id = _selected_account_id(context) if context.accounts else None
+    return context.events.recent(
+        limit,
+        event_types or None,
+        lambda event: _event_visible_to_account(event, account_id),
+    )
 
 
 @router.get("/exports/availability")
@@ -707,7 +773,7 @@ async def start_message_export(
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        account_id = _accounts(context).store.active_account_id
+        account_id = _selected_account_id(context)
         chat = await asyncio.to_thread(
             _telegram_chats(context).get_chat, account_id, payload.chat_id
         )
@@ -756,7 +822,7 @@ async def export_tasks(context: ApplicationContext = Depends(get_context)) -> li
 async def _save_task(
     context: ApplicationContext, payload: ExportTaskPayload, task_id=None
 ):
-    account_id = _accounts(context).store.active_account_id
+    account_id = _selected_account_id(context)
     chat = await asyncio.to_thread(
         _telegram_chats(context).get_chat, account_id, payload.chat_id
     )

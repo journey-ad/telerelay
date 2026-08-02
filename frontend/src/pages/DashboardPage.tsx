@@ -32,9 +32,10 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { json, request } from '../api/client'
+import { accountRequest, json, request } from '../api/client'
 import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
+import { useAccountScope } from '../hooks/useAccountScope'
 import type { BotStatus, ForwardQueueItem, RelayEvent, Stats, TelegramAccount } from '../types'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
@@ -357,28 +358,33 @@ export function DashboardPage() {
   const { t, i18n } = useTranslation()
   const locale = i18n.resolvedLanguage ?? 'zh-CN'
   const client = useQueryClient()
+  const accountId = useAccountScope()
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('14day')
   const [queuePreviewOpen, setQueuePreviewOpen] = useState(false)
   const reportDays = reportPeriod === 'all' ? null : periodDays[reportPeriod]
   const allTime = reportDays === null
   const statusQuery = useQuery({
-    queryKey: ['bot-status'],
-    queryFn: () => request<BotStatus>('/api/v1/bot/status'),
+    queryKey: ['bot-status', accountId],
+    queryFn: () => accountRequest<BotStatus>(accountId, '/api/v1/bot/status'),
   })
   const queueQuery = useQuery({
-    queryKey: ['forward-queue-items'],
-    queryFn: () => request<ForwardQueueItem[]>(`/api/v1/queue/items?limit=${queuePreviewLimit}`),
+    queryKey: ['forward-queue-items', accountId],
+    queryFn: () =>
+      accountRequest<ForwardQueueItem[]>(
+        accountId,
+        `/api/v1/queue/items?limit=${queuePreviewLimit}`,
+      ),
     enabled: queuePreviewOpen,
     refetchInterval: queuePreviewOpen ? 5_000 : false,
   })
   const statsQuery = useQuery({
-    queryKey: ['stats', reportPeriod],
-    queryFn: () => request<Stats>(`/api/v1/stats?date_limit=${reportPeriod}`),
+    queryKey: ['stats', accountId, reportPeriod],
+    queryFn: () => accountRequest<Stats>(accountId, `/api/v1/stats?date_limit=${reportPeriod}`),
     refetchInterval: 15_000,
   })
   const eventHistoryQuery = useQuery({
-    queryKey: ['dashboard-events', initialEventLimit],
-    queryFn: () => request<RelayEvent[]>(recentEventsPath),
+    queryKey: ['dashboard-events', accountId, initialEventLimit],
+    queryFn: () => accountRequest<RelayEvent[]>(accountId, recentEventsPath),
     refetchOnMount: 'always',
     gcTime: 0,
   })
@@ -398,13 +404,14 @@ export function DashboardPage() {
     [client],
   )
   const { recent, connected } = useEvents(handleDashboardEvent, {
+    accountId,
     maxRecent: liveEventLimit,
     initialRecent: eventHistoryQuery.data,
     shouldStore: shouldStoreDashboardEvent,
   })
   const control = useMutation({
     mutationFn: (action: 'start' | 'stop' | 'restart') =>
-      request(`/api/v1/bot/${action}`, json('POST')),
+      accountRequest(accountId, `/api/v1/bot/${action}`, json('POST')),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['bot-status'] }),
   })
 
@@ -508,24 +515,6 @@ export function DashboardPage() {
         eyebrow={t('dashboard.eyebrow')}
         title={t('dashboard.title')}
         description={t('dashboard.description')}
-        actions={
-          <div
-            className={cn(
-              'flex h-8.5 items-center gap-2 rounded-[5px] border px-3 text-xs',
-              status.is_connected
-                ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
-                : 'border-slate-200 bg-white text-slate-500',
-            )}
-          >
-            <span
-              className={cn(
-                'size-2 rounded-full',
-                status.is_connected ? 'bg-emerald-500' : 'bg-slate-300',
-              )}
-            />
-            {telegramStatusLabel}
-          </div>
-        }
       />
 
       <div className="mb-3 grid grid-cols-4 gap-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
@@ -905,7 +894,6 @@ export function DashboardPage() {
           <div className="mt-3 border-t border-slate-100 pt-3">
             <div className="mb-2 flex justify-between text-xs text-slate-400">
               <span>{t('dashboard.dailyIntensity')}</span>
-              <span>{t('dashboard.lowToHigh')}</span>
             </div>
             <div
               className="grid h-7 grid-flow-col auto-cols-fr items-stretch gap-1 overflow-hidden"

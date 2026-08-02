@@ -1,5 +1,7 @@
 import { authorization } from './credentials'
 
+export const ACCOUNT_ID_HEADER = 'X-TeleRelay-Account-ID'
+
 export interface ApiErrorBody {
   detail?: { code?: string; message?: string } | string
   message?: string
@@ -40,6 +42,16 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   }
   if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+export function accountRequest<T>(
+  accountId: string,
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const headers = new Headers(options.headers)
+  headers.set(ACCOUNT_ID_HEADER, accountId)
+  return request<T>(path, { ...options, headers })
 }
 
 export function json(method: string, body?: unknown): RequestInit {

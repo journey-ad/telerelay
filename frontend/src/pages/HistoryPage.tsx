@@ -3,7 +3,8 @@ import { ChevronLeft, ChevronRight, History, Search, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import Linkify from 'linkify-react'
-import { request } from '../api/client'
+import { accountRequest } from '../api/client'
+import { useAccountScope } from '../hooks/useAccountScope'
 import {
   Badge,
   Button,
@@ -21,21 +22,22 @@ import { shortDate } from '../utils/format'
 
 export function HistoryPage() {
   const { t } = useTranslation()
+  const accountId = useAccountScope()
   const [rule, setRule] = useState('all')
   const [keyword, setKeyword] = useState('')
   const [filters, setFilters] = useState({ rule: 'all', keyword: '' })
   const [page, setPage] = useState(1)
   const rulesQuery = useQuery({
-    queryKey: ['rules'],
-    queryFn: () => request<ForwardingRule[]>('/api/v1/rules'),
+    queryKey: ['rules', accountId],
+    queryFn: () => accountRequest<ForwardingRule[]>(accountId, '/api/v1/rules'),
   })
   const historyQuery = useQuery({
-    queryKey: ['history', filters, page],
+    queryKey: ['history', accountId, filters, page],
     queryFn: () => {
       const params = new URLSearchParams({ page: String(page), page_size: '20' })
       if (filters.rule !== 'all') params.set('rule_name', filters.rule)
       if (filters.keyword) params.set('keyword', filters.keyword)
-      return request<HistoryResult>(`/api/v1/history?${params}`)
+      return accountRequest<HistoryResult>(accountId, `/api/v1/history?${params}`)
     },
   })
   const pages = Math.max(1, Math.ceil((historyQuery.data?.total ?? 0) / 20))

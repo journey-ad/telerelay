@@ -21,10 +21,10 @@
     "requestFailed": "Request failed. Please try again later."
   },
   "language": {
-    "switchToEnglish": "Switch to English",
-    "switchToChinese": "Switch to Chinese",
     "englishShort": "EN",
-    "chineseShort": "中文"
+    "chineseShort": "中文",
+    "switchToEnglish": "Switch to English",
+    "switchToChinese": "Switch to Chinese"
   },
   "brand": {
     "subtitle": "Message relay console"
@@ -55,7 +55,7 @@
   "node": {
     "title": "Telegram node",
     "connected": "Connected",
-    "accountsConnected": "{{connected}} account(s) online",
+    "accountsConnected": "{{connected}}/{{total}} account(s) online",
     "waiting": "Waiting for connection",
     "online": "Node online",
     "offline": "Node offline",
@@ -232,9 +232,9 @@
     "telegramDisconnected": "Telegram disconnected",
     "telegramAccountsConnected": "Telegram accounts: {{connected}}/{{total}} online",
     "periods": {
-      "sevenDays": "7 days",
-      "fourteenDays": "14 days",
-      "thirtyDays": "30 days",
+      "sevenDays": "7d",
+      "fourteenDays": "14d",
+      "thirtyDays": "30d",
       "all": "All"
     },
     "comparedToPrevious": "vs previous period {{value}}",
@@ -262,7 +262,6 @@
     "activeDays": "Active days",
     "periodCoverage": "Period coverage",
     "dailyIntensity": "Daily traffic intensity",
-    "lowToHigh": "Low → High",
     "dayTraffic": "{{date}}: {{count}} messages",
     "rangeAverageTraffic": "{{date}}: {{count}} messages/day",
     "trafficComposition": "Traffic composition",

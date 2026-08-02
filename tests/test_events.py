@@ -28,6 +28,19 @@ class EventBusTests(unittest.TestCase):
         self.assertEqual(len(recent), 1)
         self.assertEqual(recent[0]["type"], "stats")
 
+    def test_recent_applies_account_predicate_before_limit(self):
+        events = EventBus()
+        events.publish("forward", {"account_id": "101", "status": "completed"})
+        events.publish("forward", {"account_id": "202", "status": "completed"})
+
+        recent = events.recent(
+            1,
+            predicate=lambda event: event["payload"].get("account_id") == "101",
+        )
+
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0]["payload"]["account_id"], "101")
+
 
 if __name__ == "__main__":
     unittest.main()

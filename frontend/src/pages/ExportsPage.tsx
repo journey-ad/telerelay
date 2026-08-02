@@ -17,8 +17,10 @@ import {
 import type { TFunction } from 'i18next'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { json, request } from '../api/client'
+import { accountRequest, json } from '../api/client'
+import { ChatSelect } from '../components/ChatSelect'
 import { useTelegramChats } from '../hooks/useTelegramChats'
+import { useAccountScope } from '../hooks/useAccountScope'
 import { DownloadButton } from '../components/DownloadButton'
 import {
   Badge,
@@ -125,22 +127,25 @@ function jobProgress(job: ExportJob): number {
   return job.processed > 0 ? 18 : 2
 }
 
-function ExportFilesRow({ files }: { files: string[] }) {
+function ExportFilesRow({ files, accountId }: { files: string[]; accountId: string }) {
   const { t } = useTranslation()
   const [previewUrl, setPreviewUrl] = useState('')
   const previewFile = files.find((file) => file.endsWith('.html.zip'))
   async function openPreview(file: string) {
     const filename = file.split('/').pop() ?? file
     const root = filename.replace(/\.html\.zip$/i, '')
-    const { token } = await request<{ token: string }>(
+    const { token } = await accountRequest<{ token: string }>(
+      accountId,
       `/api/v1/exports/preview-token?path=${encodeURIComponent(file)}`,
     )
-    setPreviewUrl(`/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html`)
+    setPreviewUrl(
+      `/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html?account_id=${encodeURIComponent(accountId)}`,
+    )
   }
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <DownloadButton files={files.map(downloadOption)} />
+        <DownloadButton files={files.map(downloadOption)} accountId={accountId} />
         {previewFile ? (
           <IconButton
             label={t('exports.preview')}
@@ -168,14 +173,10 @@ function ExportFilesRow({ files }: { files: string[] }) {
   )
 }
 
-function chatOptionLabel(chat: { id: number; title: string; username?: string | null }) {
-  const username = chat.username ? ` (@${chat.username})` : ''
-  return `${chat.title}${username} [${chat.id}]`
-}
-
 export function ExportsPage() {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const accountId = useAccountScope()
   const [jobId, setJobId] = useState('')
   const [taskOpen, setTaskOpen] = useState(false)
   const [messageForm, setMessageForm] = useState({
@@ -202,17 +203,18 @@ export function ExportsPage() {
   })
   const chats = useTelegramChats()
   const tasks = useQuery({
-    queryKey: ['export-tasks'],
-    queryFn: () => request<ExportTask[]>('/api/v1/exports/tasks'),
+    queryKey: ['export-tasks', accountId],
+    queryFn: () => accountRequest<ExportTask[]>(accountId, '/api/v1/exports/tasks'),
     refetchInterval: 10_000,
   })
   const runs = useQuery({
-    queryKey: ['export-runs'],
-    queryFn: () => request<ExportRun[]>('/api/v1/exports/runs?limit=30'),
+    queryKey: ['export-runs', accountId],
+    queryFn: () => accountRequest<ExportRun[]>(accountId, '/api/v1/exports/runs?limit=30'),
     refetchInterval: 10_000,
   })
   const deleteRun = useMutation({
-    mutationFn: (runId: number) => request(`/api/v1/exports/runs/${runId}`, json('DELETE')),
+    mutationFn: (runId: number) =>
+      accountRequest(accountId, `/api/v1/exports/runs/${runId}`, json('DELETE')),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['export-runs'] })
     },
@@ -226,8 +228,8 @@ export function ExportsPage() {
     })
   }
   const job = useQuery({
-    queryKey: ['export-job', jobId],
-    queryFn: () => request<ExportJob>(`/api/v1/exports/jobs/${jobId}`),
+    queryKey: ['export-job', accountId, jobId],
+    queryFn: () => accountRequest<ExportJob>(accountId, `/api/v1/exports/jobs/${jobId}`),
     enabled: Boolean(jobId),
     refetchInterval: (query) =>
       ['completed', 'failed', 'cancelled'].includes(
@@ -243,7 +245,8 @@ export function ExportsPage() {
 
   const startExport = useMutation({
     mutationFn: () =>
-      request<{ job_id: string }>(
+      accountRequest<{ job_id: string }>(
+        accountId,
         '/api/v1/exports/jobs/messages',
         json('POST', {
           ...messageForm,
@@ -256,7 +259,8 @@ export function ExportsPage() {
   })
   const saveTask = useMutation({
     mutationFn: () =>
-      request(
+      accountRequest(
+        accountId,
         '/api/v1/exports/tasks',
         json('POST', {
           ...taskForm,
@@ -270,7 +274,8 @@ export function ExportsPage() {
     },
   })
   const removeTask = useMutation({
-    mutationFn: (id: number) => request(`/api/v1/exports/tasks/${id}`, json('DELETE')),
+    mutationFn: (id: number) =>
+      accountRequest(accountId, `/api/v1/exports/tasks/${id}`, json('DELETE')),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['export-tasks'] })
     },
@@ -286,7 +291,8 @@ export function ExportsPage() {
     })
   }
   async function runTask(id: number) {
-    const result = await request<{ job_id: string }>(
+    const result = await accountRequest<{ job_id: string }>(
+      accountId,
       `/api/v1/exports/tasks/${id}/run`,
       json('POST'),
     )
@@ -367,14 +373,10 @@ export function ExportsPage() {
               >
                 <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
                   <span>{t('exports.selectChat')}</span>
-                  <Select
+                  <ChatSelect
                     value={messageForm.chat_id}
                     onValueChange={(chat_id) => setMessageForm({ ...messageForm, chat_id })}
                     placeholder={t('exports.selectChatPlaceholder')}
-                    options={(chats.data ?? []).map((chat) => ({
-                      value: String(chat.id),
-                      label: chatOptionLabel(chat),
-                    }))}
                   />
                 </label>
                 <label className={fieldClass}>
@@ -522,7 +524,7 @@ export function ExportsPage() {
                     <p className={cn('col-span-full', errorClass)}>{job.data.error}</p>
                   ) : null}
                   <div className="col-span-full">
-                    <ExportFilesRow files={job.data.files} />
+                    <ExportFilesRow files={job.data.files} accountId={accountId} />
                   </div>
                 </div>
               ) : (
@@ -655,7 +657,7 @@ export function ExportsPage() {
                       </td>
                       <td>
                         <div className="flex justify-end gap-1">
-                          <ExportFilesRow files={run.files} />
+                          <ExportFilesRow files={run.files} accountId={accountId} />
                           <IconButton
                             label={t('exports.deleteRun')}
                             icon={Trash2}
@@ -691,13 +693,9 @@ export function ExportsPage() {
             </label>
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>{t('exports.chat')}</span>
-              <Select
+              <ChatSelect
                 value={taskForm.chat_id}
                 onValueChange={(chat_id) => setTaskForm({ ...taskForm, chat_id })}
-                options={(chats.data ?? []).map((chat) => ({
-                  value: String(chat.id),
-                  label: chatOptionLabel(chat),
-                }))}
               />
             </label>
             <label className={fieldClass}>

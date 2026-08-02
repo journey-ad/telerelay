@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import hmac
 import json
 import mimetypes
@@ -12,6 +11,7 @@ import os
 import secrets
 import shutil
 import tempfile
+import threading
 import time
 import weakref
 from datetime import datetime, timezone
@@ -172,15 +172,12 @@ class TelegramPreviewService:
     def __init__(self, bot_manager: Any, account_store: Any):
         self.bot_manager = bot_manager
         self.account_store = account_store
-        self.cache_root = Path(account_store.data_dir) / "telegram_preview_cache"
-        self.cache_key_path = Path(account_store.data_dir) / ".telegram_preview_cache.key"
-        self._cache_key, key_created = self._load_or_create_cache_key()
-        if key_created:
-            shutil.rmtree(self.cache_root, ignore_errors=True)
+        self._cache_keys: dict[Path, bytes] = {}
+        self._cache_key_lock = threading.Lock()
         self._cache_locks: weakref.WeakValueDictionary[Path, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
-        self._last_cache_prune = 0.0
+        self._last_cache_prune: dict[Path, float] = {}
 
     def _active_account(self, account_id: str | None = None) -> str:
         target = account_id or self.account_store.active_account_id
@@ -390,8 +387,14 @@ class TelegramPreviewService:
         return content, "image/jpeg"
 
     async def clear_account_cache(self, account_id: str) -> None:
-        path = self._account_cache_path(account_id)
+        try:
+            path = self._account_cache_path_unchecked(account_id)
+        except ValueError:
+            return
         await asyncio.to_thread(shutil.rmtree, path, True)
+        with self._cache_key_lock:
+            self._cache_keys.pop(path, None)
+        self._last_cache_prune.pop(path, None)
 
     async def download_visual_media(
         self,
@@ -467,8 +470,22 @@ class TelegramPreviewService:
         return client, message
 
     def _account_cache_path(self, account_id: str) -> Path:
-        digest = hashlib.sha256(account_id.encode("utf-8")).hexdigest()[:20]
-        return self.cache_root / digest
+        target = self._active_account(account_id)
+        try:
+            return self._account_cache_path_unchecked(target)
+        except ValueError as exc:
+            raise TelegramPreviewError(
+                "account_not_authenticated",
+                "Telegram account must be authenticated first",
+            ) from exc
+
+    def _account_cache_path_unchecked(self, account_id: str) -> Path:
+        paths = getattr(self.account_store, "paths", None)
+        if paths is not None:
+            account_data_dir = paths.for_account(account_id).data_dir
+        else:
+            account_data_dir = Path(self.account_store.data_dir) / account_id
+        return account_data_dir / "telegram_preview_cache"
 
     def _cache_path(self, account_id: str, category: str, filename: str) -> Path:
         return self._account_cache_path(account_id) / category / filename
@@ -497,7 +514,14 @@ class TelegramPreviewService:
             if not stored.startswith(self.CACHE_MAGIC):
                 path.unlink(missing_ok=True)
                 return None
-            content = self._decrypt_cache(stored)
+            cache_root = path.parents[1]
+            key = self._cache_keys.get(cache_root)
+            if key is None:
+                key_path = cache_root.parent / ".telegram_preview_cache.key"
+                if not key_path.is_file():
+                    return None
+                key = self._cache_key(cache_root)
+            content = self._decrypt_cache(stored, key)
             if content is None:
                 path.unlink(missing_ok=True)
                 return None
@@ -507,6 +531,7 @@ class TelegramPreviewService:
             return None
 
     def _write_cache(self, path: Path, content: bytes) -> None:
+        key = self._cache_key(path.parents[1])
         path.parent.mkdir(parents=True, exist_ok=True)
         file_descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{path.name}-",
@@ -515,23 +540,35 @@ class TelegramPreviewService:
         )
         try:
             with os.fdopen(file_descriptor, "wb") as handle:
-                handle.write(self._encrypt_cache(content))
+                handle.write(self._encrypt_cache(content, key))
             os.replace(temporary_name, path)
         finally:
             if os.path.exists(temporary_name):
                 os.unlink(temporary_name)
-        self._prune_cache()
+        self._prune_cache(path.parents[1])
 
-    def _load_or_create_cache_key(self) -> tuple[bytes, bool]:
+    def _cache_key(self, cache_root: Path) -> bytes:
+        with self._cache_key_lock:
+            key = self._cache_keys.get(cache_root)
+            if key is not None:
+                return key
+            key, created = self._load_or_create_cache_key(cache_root)
+            if created:
+                shutil.rmtree(cache_root, ignore_errors=True)
+            self._cache_keys[cache_root] = key
+            return key
+
+    def _load_or_create_cache_key(self, cache_root: Path) -> tuple[bytes, bool]:
+        cache_key_path = cache_root.parent / ".telegram_preview_cache.key"
         try:
-            key = self.cache_key_path.read_bytes()
+            key = cache_key_path.read_bytes()
             created = False
         except FileNotFoundError:
             key = secrets.token_bytes(self.CACHE_KEY_BYTES)
             created = True
-            self.cache_key_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_key_path.parent.mkdir(parents=True, exist_ok=True)
             file_descriptor = os.open(
-                self.cache_key_path,
+                cache_key_path,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL,
                 0o600,
             )
@@ -541,26 +578,26 @@ class TelegramPreviewService:
                     handle.flush()
                     os.fsync(handle.fileno())
             except Exception:
-                self.cache_key_path.unlink(missing_ok=True)
+                cache_key_path.unlink(missing_ok=True)
                 raise
         if len(key) != self.CACHE_KEY_BYTES:
             raise RuntimeError("Telegram preview cache key is invalid")
         try:
-            self.cache_key_path.chmod(0o600)
+            cache_key_path.chmod(0o600)
         except OSError:
             pass
         return key, created
 
-    def _encrypt_cache(self, content: bytes) -> bytes:
-        encrypted = self._xor_cache(content)
+    def _encrypt_cache(self, content: bytes, key: bytes) -> bytes:
+        encrypted = self._xor_cache(content, key)
         tag = hmac.digest(
-            self._cache_key,
+            key,
             self.CACHE_MAGIC + encrypted,
             "sha256",
         )[: self.CACHE_TAG_BYTES]
         return self.CACHE_MAGIC + tag + encrypted
 
-    def _decrypt_cache(self, stored: bytes) -> bytes | None:
+    def _decrypt_cache(self, stored: bytes, key: bytes) -> bytes | None:
         header_size = len(self.CACHE_MAGIC) + self.CACHE_TAG_BYTES
         if len(stored) <= header_size:
             return None
@@ -569,28 +606,29 @@ class TelegramPreviewService:
         tag = stored[tag_start:content_start]
         encrypted = stored[content_start:]
         expected = hmac.digest(
-            self._cache_key,
+            key,
             self.CACHE_MAGIC + encrypted,
             "sha256",
         )[: self.CACHE_TAG_BYTES]
         if not hmac.compare_digest(tag, expected):
             return None
-        return self._xor_cache(encrypted)
+        return self._xor_cache(encrypted, key)
 
-    def _xor_cache(self, content: bytes) -> bytes:
-        key_size = len(self._cache_key)
+    @staticmethod
+    def _xor_cache(content: bytes, key: bytes) -> bytes:
+        key_size = len(key)
         return bytes(
-            value ^ self._cache_key[index % key_size]
+            value ^ key[index % key_size]
             for index, value in enumerate(content)
         )
 
-    def _prune_cache(self) -> None:
+    def _prune_cache(self, cache_root: Path) -> None:
         now = time.monotonic()
-        if now - self._last_cache_prune < 60:
+        if now - self._last_cache_prune.get(cache_root, 0.0) < 60:
             return
-        self._last_cache_prune = now
+        self._last_cache_prune[cache_root] = now
         try:
-            files = [path for path in self.cache_root.rglob("*") if path.is_file()]
+            files = [path for path in cache_root.rglob("*") if path.is_file()]
             entries = [(path, path.stat()) for path in files]
         except OSError:
             return

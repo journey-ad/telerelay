@@ -38,7 +38,11 @@ from backend.meta import current_version
 from backend.services import RuleService
 from backend.services.rules import AccountRuleRegistry
 from backend.stats_db import AccountStatsRegistry
-from backend.telegram_accounts import TelegramAccountService, TelegramAccountStore
+from backend.telegram_accounts import (
+    TelegramAccountError,
+    TelegramAccountService,
+    TelegramAccountStore,
+)
 from backend.telegram_chats import TelegramChatService
 from backend.telegram_preview import TelegramPreviewService
 from backend.telegram_runtimes import TelegramRuntimeRegistry
@@ -136,7 +140,7 @@ async def lifespan(app: FastAPI):
     if config.admin_bot_token and config.admin_chat_id:
         from backend.bot_commands import AdminBotManager
 
-        admin = AdminBotManager(config, bot)
+        admin = AdminBotManager(config, bot, context)
         context.admin_thread = threading.Thread(
             target=admin.run,
             daemon=True,
@@ -174,8 +178,25 @@ def create_app() -> FastAPI:
         return {"status": "ok", "service": "telerelay"}
 
     @app.get("/api/v1/exports/preview/{token}/{file:path}", tags=["system"])
-    async def export_preview(token: str, file: str, request: Request) -> Response:
-        exports = request.app.state.context.exports
+    async def export_preview(
+        token: str,
+        file: str,
+        request: Request,
+        account_id: str | None = None,
+    ) -> Response:
+        context = request.app.state.context
+        try:
+            if context.accounts:
+                target_id = account_id or context.accounts.store.active_account_id
+                context.accounts.store.get_public(target_id)
+                exports = context.export_registry.for_account(target_id)
+            else:
+                exports = context.exports
+        except (ValueError, TelegramAccountError) as exc:
+            return JSONResponse(
+                {"code": "account_not_authenticated", "message": str(exc)},
+                status_code=409,
+            )
         zip_path = exports.resolve_preview_token(token)
         if zip_path is None:
             return JSONResponse(

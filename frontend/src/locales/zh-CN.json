@@ -21,10 +21,10 @@
     "requestFailed": "请求失败，请稍后重试"
   },
   "language": {
-    "switchToEnglish": "切换到英文",
-    "switchToChinese": "切换到中文",
     "englishShort": "EN",
-    "chineseShort": "中文"
+    "chineseShort": "中文",
+    "switchToEnglish": "切换到英文",
+    "switchToChinese": "切换到中文"
   },
   "brand": {
     "subtitle": "消息中继控制台"
@@ -55,7 +55,7 @@
   "node": {
     "title": "Telegram 节点",
     "connected": "连接正常",
-    "accountsConnected": "{{connected}} 个账号在线",
+    "accountsConnected": "{{connected}}/{{total}} 个账号在线",
     "waiting": "等待连接",
     "online": "节点在线",
     "offline": "节点离线",
@@ -262,7 +262,6 @@
     "activeDays": "活跃天数",
     "periodCoverage": "周期覆盖率",
     "dailyIntensity": "每日流量强度",
-    "lowToHigh": "低 → 高",
     "dayTraffic": "{{date}}：{{count}} 条",
     "rangeAverageTraffic": "{{date}}：日均 {{count}} 条",
     "trafficComposition": "流量结构",

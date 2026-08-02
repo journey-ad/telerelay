@@ -18,9 +18,9 @@ import {
 import { useCallback, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { request } from '../api/client'
+import { accountRequest, request } from '../api/client'
 import { useEvents } from '../hooks/useEvents'
-import type { BotStatus, RelayEvent, SessionInfo } from '../types'
+import type { BotStatus, RelayEvent, SessionInfo, TelegramAccount } from '../types'
 import { cn } from '../utils/cn'
 import { AccountSwitcher } from './AccountSwitcher'
 import { Brand } from './Brand'
@@ -57,9 +57,20 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
   const [mobileOpen, setMobileOpen] = useState(false)
   const queryClient = useQueryClient()
   const location = useLocation()
+  const accountsQuery = useQuery({
+    queryKey: ['telegram-accounts'],
+    queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
+    enabled: session.session_type === 'user',
+    refetchInterval: 30_000,
+  })
+  const accountId =
+    session.session_type === 'user'
+      ? (accountsQuery.data?.find((account) => account.active)?.id ?? '')
+      : 'bot'
   const statusQuery = useQuery({
-    queryKey: ['bot-status'],
-    queryFn: () => request<BotStatus>('/api/v1/bot/status'),
+    queryKey: ['bot-status', accountId],
+    queryFn: () => accountRequest<BotStatus>(accountId, '/api/v1/bot/status'),
+    enabled: Boolean(accountId),
     refetchInterval: 15_000,
   })
   const invalidateLiveData = useCallback(
@@ -79,15 +90,18 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
     },
     [queryClient],
   )
-  useEvents(invalidateLiveData)
+  useEvents(invalidateLiveData, { accountId: accountId || undefined })
+  const refreshData = useCallback(() => {
+    void queryClient.invalidateQueries()
+  }, [queryClient])
   const current = navigation.find((item) => item.to === location.pathname) ?? navigation[0]
   const online = Boolean(statusQuery.data?.is_connected)
   const nodeLabel =
     typeof statusQuery.data?.connected_account_count === 'number' &&
-    typeof statusQuery.data?.authenticated_account_count === 'number'
+    accountsQuery.data !== undefined
       ? t('node.accountsConnected', {
           connected: statusQuery.data.connected_account_count,
-          total: statusQuery.data.authenticated_account_count,
+          total: accountsQuery.data.length,
         })
       : t(online ? 'node.connected' : 'node.waiting')
   const previewRoute =
@@ -228,14 +242,17 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
               />
               {t(online ? 'node.online' : 'node.offline')}
             </div>
-            <LanguageToggle />
+            <LanguageToggle
+              className={session.session_type === 'user' ? 'max-md:hidden' : undefined}
+            />
             <IconButton
               label={t('nav.refresh')}
               icon={RefreshCw}
-              onClick={() => void queryClient.invalidateQueries()}
+              className={session.session_type === 'user' ? 'max-md:hidden' : undefined}
+              onClick={refreshData}
             />
             {session.session_type === 'user' ? (
-              <AccountSwitcher onLogout={onLogout} />
+              <AccountSwitcher onLogout={onLogout} onRefresh={refreshData} />
             ) : (
               <span className="ml-1 flex h-9.5 items-center rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-600">
                 {t('node.botSession')}
@@ -249,7 +266,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
             previewRoute && 'flex min-h-0 flex-1 flex-col',
           )}
         >
-          <Outlet />
+          {accountId ? <Outlet key={accountId} context={{ accountId }} /> : null}
         </div>
       </main>
 

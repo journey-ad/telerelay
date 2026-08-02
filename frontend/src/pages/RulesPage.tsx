@@ -2,11 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Braces, Edit3, Plus, Route, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { json, request } from '../api/client'
+import { accountRequest, json } from '../api/client'
 import { ChatTagInput } from '../components/ChatTagInput'
 import { MultiValueInput } from '../components/MultiValueInput'
 import { RegexField, useRegexValidation } from '../components/RegexField'
 import { useTelegramChats } from '../hooks/useTelegramChats'
+import { useAccountScope } from '../hooks/useAccountScope'
 import {
   Badge,
   Button,
@@ -54,6 +55,8 @@ const blankRule = (): ForwardingRule => ({
 export function RulesPage() {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const accountId = useAccountScope()
+  const rulesKey = ['rules', accountId] as const
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
@@ -61,8 +64,8 @@ export function RulesPage() {
   const [regex, setRegex] = useState('')
   const regexValidation = useRegexValidation()
   const rulesQuery = useQuery({
-    queryKey: ['rules'],
-    queryFn: () => request<ForwardingRule[]>('/api/v1/rules'),
+    queryKey: rulesKey,
+    queryFn: () => accountRequest<ForwardingRule[]>(accountId, '/api/v1/rules'),
   })
   const chatsQuery = useTelegramChats()
   const chatLabels = useMemo(
@@ -82,6 +85,7 @@ export function RulesPage() {
     setForm(blankRule())
     setRegex('')
     regexValidation.reset()
+    toggle.reset()
     setOpen(true)
   }
   function editRule(index: number) {
@@ -90,6 +94,7 @@ export function RulesPage() {
     setForm(value)
     setRegex(value.filters.regex_patterns.join('\n'))
     regexValidation.reset()
+    toggle.reset()
     setOpen(true)
   }
   const save = useMutation({
@@ -104,14 +109,15 @@ export function RulesPage() {
     }) => {
       const payload = structuredClone(rule)
       payload.filters.regex_patterns = regexPatterns
-      return request<ForwardingRule>(
+      return accountRequest<ForwardingRule>(
+        accountId,
         index === null ? '/api/v1/rules' : `/api/v1/rules/${index}`,
         json(index === null ? 'POST' : 'PUT', payload),
       )
     },
     onSuccess: (updated, { index }) => {
       setOpen(false)
-      client.setQueryData<ForwardingRule[]>(['rules'], (current) => {
+      client.setQueryData<ForwardingRule[]>(rulesKey, (current) => {
         if (!current) return index === null ? [updated] : current
         if (index === null) return [...current, updated]
         return current.map((rule, position) => (position === index ? updated : rule))
@@ -122,21 +128,37 @@ export function RulesPage() {
     mutationFn: ({ index, enabled }: { index: number; enabled: boolean }) => {
       const rule = rulesQuery.data?.[index]
       if (!rule) throw new Error('Forwarding rule does not exist')
-      return request<ForwardingRule>(
+      return accountRequest<ForwardingRule>(
+        accountId,
         `/api/v1/rules/${index}`,
         json('PUT', { ...structuredClone(rule), enabled }),
       )
     },
     onSuccess: (updated, { index }) => {
-      client.setQueryData<ForwardingRule[]>(['rules'], (current) =>
+      client.setQueryData<ForwardingRule[]>(rulesKey, (current) =>
         current?.map((rule, position) => (position === index ? updated : rule)),
       )
     },
   })
+  function setEnabled(enabled: boolean) {
+    if (editing === null) {
+      setForm((current) => ({ ...current, enabled }))
+      return
+    }
+    const previous = form.enabled
+    setForm((current) => ({ ...current, enabled }))
+    toggle.mutate(
+      { index: editing, enabled },
+      {
+        onError: () => setForm((current) => ({ ...current, enabled: previous })),
+      },
+    )
+  }
   const remove = useMutation({
-    mutationFn: (index: number) => request(`/api/v1/rules/${index}`, json('DELETE')),
+    mutationFn: (index: number) =>
+      accountRequest(accountId, `/api/v1/rules/${index}`, json('DELETE')),
     onSuccess: (_, index) => {
-      client.setQueryData<ForwardingRule[]>(['rules'], (current) =>
+      client.setQueryData<ForwardingRule[]>(rulesKey, (current) =>
         current?.filter((_, position) => position !== index),
       )
     },
@@ -313,7 +335,8 @@ export function RulesPage() {
           <div className="mb-4 border-b border-slate-100 pb-4">
             <Switch
               checked={form.enabled}
-              onCheckedChange={(enabled) => setForm((current) => ({ ...current, enabled }))}
+              disabled={editing !== null && toggle.isPending}
+              onCheckedChange={setEnabled}
               label={t('rules.enable')}
             />
           </div>
@@ -454,21 +477,21 @@ export function RulesPage() {
               />
             </div>
           </div>
-          {save.error ? (
+          {save.error || toggle.error ? (
             <p
               className={cn(
                 'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
                 'text-[13px] text-rose-700',
               )}
             >
-              {messageFrom(save.error)}
+              {messageFrom(save.error ?? toggle.error)}
             </p>
           ) : null}
           <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4">
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={save.isPending}>
+            <Button type="submit" disabled={save.isPending || toggle.isPending}>
               {t(save.isPending ? 'common.saving' : 'rules.save')}
             </Button>
           </div>

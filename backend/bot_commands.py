@@ -4,9 +4,16 @@ Provides Telegram Bot command interface for managing forwarding rules and bot li
 Uses a separate Bot instance from the main forwarding system.
 """
 import asyncio
+import os
 import shlex
+import shutil
+import tempfile
 import threading
-from typing import Optional, List
+from contextvars import ContextVar
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional, List
+
+import yaml
 from telethon import TelegramClient, events
 from telethon.tl.types import (
     KeyboardButtonWebView,
@@ -22,13 +29,21 @@ from backend.logger import get_logger
 from backend.rule import ForwardingRule, save_rules_to_config
 from backend.i18n import t
 
+if TYPE_CHECKING:
+    from backend.application import ApplicationContext
+
 logger = get_logger()
 
 
 class AdminBotManager:
     """Admin Bot Manager - manages configuration and rules via Telegram commands"""
 
-    def __init__(self, config: Config, bot_manager):
+    def __init__(
+        self,
+        config: Config,
+        bot_manager,
+        context: "ApplicationContext | None" = None,
+    ):
         """
         Initialize Admin Bot Manager
 
@@ -38,8 +53,13 @@ class AdminBotManager:
         """
         self.config = config
         self.bot_manager = bot_manager
+        self.context = context
         self.client: Optional[TelegramClient] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self._command_account_id: ContextVar[str | None] = ContextVar(
+            "admin_bot_account_id",
+            default=None,
+        )
 
     def run(self) -> None:
         """Run Admin Bot in a separate thread (blocking)"""
@@ -55,7 +75,6 @@ class AdminBotManager:
 
     async def _start(self) -> None:
         """Start Admin Bot client and register command handlers"""
-        from pathlib import Path
         from urllib.parse import urlparse
 
         session_dir = Path("data")
@@ -119,13 +138,81 @@ class AdminBotManager:
         await self.client.run_until_disconnected()
 
     async def _control_runtime(self, action: str) -> bool:
-        """Execute BotManager lifecycle operations on FastAPI's event loop."""
+        """Execute the captured account's lifecycle operation on FastAPI's loop."""
         owner_loop = self.bot_manager.loop
         if owner_loop is None or owner_loop.is_closed():
             return False
-        operation = getattr(self.bot_manager, action)
+        account_id = self._command_account_id.get()
+        if account_id and self.context and self.context.accounts:
+            if action == "start":
+                operation = lambda: self.bot_manager.start_account(account_id)
+            elif action == "stop":
+                operation = lambda: self.bot_manager.stop_account(account_id)
+            else:
+                operation = getattr(self.bot_manager.get_runtime(account_id), action)
+        else:
+            operation = getattr(self.bot_manager, action)
+        if asyncio.get_running_loop() is owner_loop:
+            return await operation()
         future = asyncio.run_coroutine_threadsafe(operation(), owner_loop)
         return await asyncio.wrap_future(future)
+
+    async def _control_sync(self, operation) -> None:
+        """Execute a synchronous runtime mutation on FastAPI's event loop."""
+        owner_loop = self.bot_manager.loop
+        if owner_loop is None or owner_loop.is_closed():
+            operation()
+            return
+
+        async def execute() -> None:
+            operation()
+
+        if asyncio.get_running_loop() is owner_loop:
+            await execute()
+            return
+        future = asyncio.run_coroutine_threadsafe(execute(), owner_loop)
+        await asyncio.wrap_future(future)
+
+    async def _run_account_command(self, event, handler) -> None:
+        """Pin a command to one account even if the active account changes mid-command."""
+        account_id = None
+        if self.context and self.context.accounts:
+            try:
+                account_id = self.context.active_account_id()
+            except ValueError:
+                await event.reply(t("bot_cmd.account_not_authenticated"))
+                return
+        token = self._command_account_id.set(account_id)
+        try:
+            await handler(event)
+        finally:
+            self._command_account_id.reset(token)
+
+    def _active_config(self) -> Config:
+        account_id = self._command_account_id.get()
+        if account_id and self.context and self.context.config_registry:
+            return self.context.config_registry.for_account(account_id)
+        return self.config
+
+    def _active_stats(self):
+        account_id = self._command_account_id.get()
+        if account_id and self.context and self.context.stats_registry:
+            return self.context.stats_registry.for_account(account_id)
+        from backend.stats_db import get_stats_db
+
+        return get_stats_db()
+
+    def _active_runtime(self):
+        account_id = self._command_account_id.get()
+        if account_id and self.context and self.context.accounts:
+            return self.bot_manager.get_runtime(account_id)
+        return self.bot_manager
+
+    def _active_status(self) -> dict:
+        account_id = self._command_account_id.get()
+        if account_id and self.context and self.context.accounts:
+            return self.bot_manager.get_status(account_id)
+        return self.bot_manager.get_status()
 
     def _register_handlers(self) -> None:
         """Register all command handlers"""
@@ -161,21 +248,21 @@ class AdminBotManager:
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            await self._handle_status(event)
+            await self._run_account_command(event, self._handle_status)
 
         @self.client.on(events.NewMessage(pattern=r'^/bot\b'))
         async def handle_bot(event):
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            await self._handle_bot_cmd(event)
+            await self._run_account_command(event, self._handle_bot_cmd)
 
         @self.client.on(events.NewMessage(pattern=r'^/rule\b'))
         async def handle_rule(event):
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            await self._handle_rule_cmd(event)
+            await self._run_account_command(event, self._handle_rule_cmd)
 
         @self.client.on(events.NewMessage(pattern=r'^/webapp\b'))
         async def handle_webapp(event):
@@ -189,21 +276,21 @@ class AdminBotManager:
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            await self._handle_stats_cmd(event)
+            await self._run_account_command(event, self._handle_stats_cmd)
 
         @self.client.on(events.NewMessage(pattern=r'^/history\b'))
         async def handle_history(event):
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            await self._handle_history_cmd(event)
+            await self._run_account_command(event, self._handle_history_cmd)
 
         @self.client.on(events.NewMessage(pattern=r'^/config\b'))
         async def handle_config(event):
             if not self._check_permission(event):
                 await event.reply(t("bot_cmd.no_permission"))
                 return
-            await self._handle_config_cmd(event)
+            await self._run_account_command(event, self._handle_config_cmd)
 
     def _check_permission(self, event) -> bool:
         """Check if the sender is the authorized admin"""
@@ -226,13 +313,13 @@ class AdminBotManager:
 
     async def _handle_status(self, event) -> None:
         """Handle /status command"""
-        status = self.bot_manager.get_status()
+        status = self._active_status()
         stats = status.get("stats", {})
 
         running_icon = "🟢" if status["is_running"] else "⚫"
         connected_icon = "🟢" if status["is_connected"] else "⚫"
 
-        rules = self.config.get_forwarding_rules()
+        rules = self._active_config().get_forwarding_rules()
         enabled_count = sum(1 for r in rules if r.enabled)
 
         msg = t("bot_cmd.status_msg",
@@ -259,13 +346,15 @@ class AdminBotManager:
             return
 
         subcmd = args[0].lower()
+        runtime = self._active_runtime()
+        config = self._active_config()
 
         if subcmd == "start":
-            if self.bot_manager.is_running:
+            if runtime.is_running:
                 await event.reply(t("bot_cmd.bot_already_running"))
                 return
             # Reload config before starting
-            self.config.load()
+            config.load()
             success = await self._control_runtime("start")
             if success:
                 await event.reply(t("bot_cmd.bot_started"))
@@ -273,7 +362,7 @@ class AdminBotManager:
                 await event.reply(t("bot_cmd.bot_start_failed"))
 
         elif subcmd == "stop":
-            if not self.bot_manager.is_running:
+            if not runtime.is_running:
                 await event.reply(t("bot_cmd.bot_not_running"))
                 return
             success = await self._control_runtime("stop")
@@ -284,7 +373,7 @@ class AdminBotManager:
 
         elif subcmd == "restart":
             await event.reply(t("bot_cmd.bot_restarting"))
-            self.config.load()
+            config.load()
             success = await self._control_runtime("restart")
             if success:
                 await event.reply(t("bot_cmd.bot_restarted"))
@@ -326,7 +415,7 @@ class AdminBotManager:
 
     async def _rule_list(self, event) -> None:
         """List all forwarding rules"""
-        rules = self.config.get_forwarding_rules()
+        rules = self._active_config().get_forwarding_rules()
         if not rules:
             await event.reply(t("bot_cmd.no_rules"))
             return
@@ -402,7 +491,7 @@ class AdminBotManager:
         new_rule = ForwardingRule(name=rule_name, enabled=False)
 
         # Add to config
-        rules = self.config.get_forwarding_rules()
+        rules = self._active_config().get_forwarding_rules()
         rules.append(new_rule)
         self._save_rules(rules)
 
@@ -415,7 +504,7 @@ class AdminBotManager:
             return
 
         rule_name = args[0]
-        rules = self.config.get_forwarding_rules()
+        rules = self._active_config().get_forwarding_rules()
 
         # Find the rule
         idx = None
@@ -436,8 +525,7 @@ class AdminBotManager:
         self._save_rules(rules)
 
         # Delete stats from DB
-        from backend.stats_db import get_stats_db
-        get_stats_db().delete_rule(rule_name)
+        self._active_stats().delete_rule(rule_name)
 
         await event.reply(t("bot_cmd.rule_deleted", name=rule_name))
 
@@ -454,7 +542,7 @@ class AdminBotManager:
             await event.reply(t("bot_cmd.rule_name_empty"))
             return
 
-        rules = self.config.get_forwarding_rules()
+        rules = self._active_config().get_forwarding_rules()
 
         # Find the rule to rename
         rule = None
@@ -476,8 +564,7 @@ class AdminBotManager:
         self._save_rules(rules)
 
         # Also rename in stats DB
-        from backend.stats_db import get_stats_db
-        get_stats_db().rename_rule(old_name, new_name)
+        self._active_stats().rename_rule(old_name, new_name)
 
         await event.reply(t("bot_cmd.rule_renamed", old_name=old_name, new_name=new_name))
 
@@ -488,7 +575,7 @@ class AdminBotManager:
             return
 
         rule_name = args[0]
-        rules = self.config.get_forwarding_rules()
+        rules = self._active_config().get_forwarding_rules()
 
         for rule in rules:
             if rule.name == rule_name:
@@ -520,7 +607,7 @@ class AdminBotManager:
         field = args[1].lower()
         value = args[2]
 
-        rules = self.config.get_forwarding_rules()
+        rules = self._active_config().get_forwarding_rules()
 
         rule = None
         for r in rules:
@@ -600,7 +687,11 @@ class AdminBotManager:
         subcmd = args[0].lower()
 
         if subcmd == "reset":
-            self.bot_manager.reset_stats()
+            account_id = self._command_account_id.get()
+            if account_id and self.context and self.context.accounts:
+                await self._control_sync(lambda: self.bot_manager.reset_stats(account_id))
+            else:
+                await self._control_sync(self.bot_manager.reset_stats)
             await event.reply(t("bot_cmd.stats_reset_done"))
         else:
             await event.reply(t("bot_cmd.stats_usage"), parse_mode='md')
@@ -620,8 +711,7 @@ class AdminBotManager:
             else:
                 rule_name = arg
 
-        from backend.stats_db import get_stats_db
-        rows, total = get_stats_db().query_history(
+        rows, total = self._active_stats().query_history(
             rule_name=rule_name, limit=limit, offset=0
         )
 
@@ -649,10 +739,10 @@ class AdminBotManager:
             return
 
         subcmd = args[0].lower()
+        config = self._active_config()
 
         if subcmd == "export":
-            config_path = self.config.config_file
-            import os
+            config_path = config.config_file
             if os.path.exists(config_path):
                 await event.reply(
                     file=config_path,
@@ -668,10 +758,14 @@ class AdminBotManager:
                 await event.reply(t("bot_cmd.config_import_usage"))
                 return
 
-            import tempfile, yaml, shutil
+            tmp_path = None
             try:
                 # Download the file
-                tmp_path = os.path.join(tempfile.gettempdir(), "config_import.yaml")
+                file_descriptor, tmp_path = tempfile.mkstemp(
+                    prefix="telerelay-config-import-",
+                    suffix=".yaml",
+                )
+                os.close(file_descriptor)
                 await reply_msg.download_media(file=tmp_path)
 
                 # Validate YAML
@@ -685,14 +779,20 @@ class AdminBotManager:
                     return
 
                 # Backup and replace
-                config_path = self.config.config_file
+                config_path = config.config_file
                 if os.path.exists(config_path):
                     shutil.copy2(config_path, config_path + ".bak")
 
-                shutil.copy2(tmp_path, config_path)
-                self.config.load()
+                account_id = self._command_account_id.get()
+                if account_id and self.context and self.context.config_registry:
+                    config = self.context.config_registry.replace(account_id, new_config)
+                    if self.context.export_registry:
+                        self.context.export_registry.recreate(account_id)
+                else:
+                    shutil.copy2(tmp_path, config_path)
+                    config.load()
 
-                if self.bot_manager.is_running:
+                if self._active_runtime().is_running:
                     await self._control_runtime("restart")
                     await event.reply(t("bot_cmd.config_imported_restarted"))
                 else:
@@ -700,6 +800,9 @@ class AdminBotManager:
 
             except Exception as e:
                 await event.reply(t("bot_cmd.config_import_error", error=str(e)))
+            finally:
+                if tmp_path:
+                    Path(tmp_path).unlink(missing_ok=True)
 
         else:
             await event.reply(t("bot_cmd.config_usage"), parse_mode='md')
@@ -757,7 +860,7 @@ class AdminBotManager:
 
     def _find_rule(self, name: str) -> Optional[ForwardingRule]:
         """Find a rule by name"""
-        for rule in self.config.get_forwarding_rules():
+        for rule in self._active_config().get_forwarding_rules():
             if rule.name == name:
                 return rule
         return None
@@ -765,8 +868,9 @@ class AdminBotManager:
     def _save_rules(self, rules: List[ForwardingRule]) -> None:
         """Save rules to config file"""
         rules_data = save_rules_to_config(rules)
-        self.config.config_data.update(rules_data)
-        self.config.save()
+        config = self._active_config()
+        config.config_data.update(rules_data)
+        config.save()
 
     @staticmethod
     def _parse_chat_ids(value: str) -> list:

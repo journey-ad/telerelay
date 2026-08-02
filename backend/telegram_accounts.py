@@ -188,6 +188,11 @@ class TelegramAccountStore:
         target_id = normalize_telegram_user_id(telegram_user_id)
         with self._lock:
             self._find(account_id)
+            if is_telegram_user_id(account_id) and account_id != target_id:
+                raise TelegramAccountError(
+                    "telegram_account_mismatch",
+                    "Authenticated Telegram id does not match this account",
+                )
             if any(account.id == target_id and account.id != account_id for account in self._accounts):
                 raise TelegramAccountError(
                     "duplicate_telegram_account",
@@ -445,18 +450,19 @@ class TelegramAccountService:
                         account_id,
                         clear_queue=getattr(self.runtimes, "paths", None) is None,
                     )
-                    self.store.delete(account_id)
                     if self.on_account_deleted:
                         self.on_account_deleted(account_id)
                     await asyncio.to_thread(self.store.paths.remove_account_data, account_id)
+                    self.store.delete(account_id)
                 finally:
                     self.runtimes.unblock_account(account_id)
             else:
                 self.store.delete(account_id)
 
-    async def clear_active_session(self) -> None:
+    async def clear_session(self, account_id: str | None = None) -> None:
         async with self._mutation_lock:
-            account_id = self.store.active_account_id
+            account_id = account_id or self.store.active_account_id
+            self.store.get_public(account_id)
             await self.runtimes.stop_account(account_id)
             await asyncio.to_thread(
                 TelegramClientManager.clear_session_files,
@@ -485,8 +491,9 @@ class TelegramAccountService:
             )
             events.publish("telegram-auth", {"state": "success", "account_id": finalized_id})
 
-    def get_auth(self):
-        account_id = self.store.active_account_id
+    def get_auth(self, account_id: str | None = None):
+        account_id = account_id or self.store.active_account_id
+        self.store.get_public(account_id)
         pending = self._pending_authentications.get(account_id)
         if pending:
             return pending.auth
@@ -510,8 +517,8 @@ class TelegramAccountService:
         account_id = account_id or self.store.active_account_id
         self.store.get_public(account_id)
         self._recent_auth = None
-        if is_telegram_user_id(account_id):
-            self.get_auth().reset()
+        if is_telegram_user_id(account_id) and self.store.has_session(account_id):
+            self.get_auth(account_id).reset()
             return await self.runtimes.start_account(account_id)
         pending = self._pending_authentications.get(account_id)
         if pending and pending.task and not pending.task.done():
@@ -612,9 +619,20 @@ class TelegramAccountService:
             if events:
                 events.publish(
                     "telegram-account",
-                    {"action": "authenticated", "account_id": account.id},
+                    {
+                        "action": "authenticated",
+                        "account_id": account.id,
+                        "previous_account_id": pending.account_id,
+                    },
                 )
-                events.publish("telegram-auth", {"state": "success", "account_id": account.id})
+                events.publish(
+                    "telegram-auth",
+                    {
+                        "state": "success",
+                        "account_id": account.id,
+                        "previous_account_id": pending.account_id,
+                    },
+                )
             runtime = self.runtimes.ensure_runtime(account.id)
             if self.on_account_finalized:
                 self.on_account_finalized(account.id)

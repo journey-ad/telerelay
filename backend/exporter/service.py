@@ -69,6 +69,7 @@ class ExportService:
     ):
         self.config = config
         self.bot_manager = bot_manager
+        self.account_id = getattr(bot_manager, "account_id", None)
         self.store = store or ExportStore()
         self.source = source or TelegramExportSource(bot_manager)
         self.events = events
@@ -230,6 +231,7 @@ class ExportService:
             task = self.store.get_task(task_id)
             payload = {
                 "status": status,
+                "account_id": self.account_id,
                 "task_id": task_id,
                 "task_name": task.name,
                 "chat_id": task.chat_id,
@@ -237,7 +239,12 @@ class ExportService:
                 **values,
             }
         except KeyError:
-            payload = {"status": status, "task_id": task_id, **values}
+            payload = {
+                "status": status,
+                "account_id": self.account_id,
+                "task_id": task_id,
+                **values,
+            }
         self.events.publish_threadsafe("scheduled-export", payload)
 
     def get_job(self, job_id: Optional[str]) -> Optional[ExportJobSnapshot]:

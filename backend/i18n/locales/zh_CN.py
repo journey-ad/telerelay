@@ -868,6 +868,7 @@ TRANSLATIONS = {
         "unknown_field": "⚠️ 未知属性: {field}",
         "rule_updated": "✅ 规则 '{name}' 已更新: {field} = {value}",
         "rule_set_error": "❌ 设置失败: {error}",
+        "account_not_authenticated": "⚠️ 当前账号尚未完成认证",
         # Mini App
         "webapp_button": "打开配置面板",
         "webapp_open": "点击下方按钮打开 WebUI 配置面板 👇",

@@ -2,9 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bot, Edit3, MousePointerClick, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { json, request } from '../api/client'
+import { accountRequest, json } from '../api/client'
 import { ChatTagInput } from '../components/ChatTagInput'
 import { RegexField, useRegexValidation } from '../components/RegexField'
+import { useAccountScope } from '../hooks/useAccountScope'
 import {
   Badge,
   Button,
@@ -37,6 +38,8 @@ const blankRule = (): ButtonRule => ({
 export function AutomationsPage() {
   const { t } = useTranslation()
   const client = useQueryClient()
+  const accountId = useAccountScope()
+  const rulesKey = ['button-rules', accountId] as const
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
   const [search, setSearch] = useState('')
@@ -44,8 +47,8 @@ export function AutomationsPage() {
   const [buttons, setButtons] = useState('')
   const regexValidation = useRegexValidation()
   const query = useQuery({
-    queryKey: ['button-rules'],
-    queryFn: () => request<ButtonRule[]>('/api/v1/button-rules'),
+    queryKey: rulesKey,
+    queryFn: () => accountRequest<ButtonRule[]>(accountId, '/api/v1/button-rules'),
   })
   const rules = useMemo(
     () =>
@@ -80,7 +83,8 @@ export function AutomationsPage() {
       buttonTexts: string[]
       index: number | null
     }) =>
-      request<ButtonRule>(
+      accountRequest<ButtonRule>(
+        accountId,
         index === null ? '/api/v1/button-rules' : `/api/v1/button-rules/${index}`,
         json(index === null ? 'POST' : 'PUT', {
           ...rule,
@@ -89,7 +93,7 @@ export function AutomationsPage() {
       ),
     onSuccess: (updated, { index }) => {
       setOpen(false)
-      client.setQueryData<ButtonRule[]>(['button-rules'], (current) => {
+      client.setQueryData<ButtonRule[]>(rulesKey, (current) => {
         if (!current) return index === null ? [updated] : current
         if (index === null) return [...current, updated]
         return current.map((rule, position) => (position === index ? updated : rule))
@@ -100,21 +104,23 @@ export function AutomationsPage() {
     mutationFn: ({ index, enabled }: { index: number; enabled: boolean }) => {
       const rule = query.data?.[index]
       if (!rule) throw new Error('Button automation does not exist')
-      return request<ButtonRule>(
+      return accountRequest<ButtonRule>(
+        accountId,
         `/api/v1/button-rules/${index}`,
         json('PUT', { ...structuredClone(rule), enabled }),
       )
     },
     onSuccess: (updated, { index }) => {
-      client.setQueryData<ButtonRule[]>(['button-rules'], (current) =>
+      client.setQueryData<ButtonRule[]>(rulesKey, (current) =>
         current?.map((rule, position) => (position === index ? updated : rule)),
       )
     },
   })
   const remove = useMutation({
-    mutationFn: (index: number) => request(`/api/v1/button-rules/${index}`, json('DELETE')),
+    mutationFn: (index: number) =>
+      accountRequest(accountId, `/api/v1/button-rules/${index}`, json('DELETE')),
     onSuccess: (_, index) => {
-      client.setQueryData<ButtonRule[]>(['button-rules'], (current) =>
+      client.setQueryData<ButtonRule[]>(rulesKey, (current) =>
         current?.filter((_, position) => position !== index),
       )
     },
