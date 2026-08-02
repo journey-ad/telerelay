@@ -9,7 +9,7 @@ export function useTelegramChats() {
   return useQuery({
     queryKey: ['telegram-chats', accountId],
     queryFn: () => request<TelegramChat[]>(`/api/v1/telegram-accounts/${accountId}/chats`),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
     retry: false,
   })
 }

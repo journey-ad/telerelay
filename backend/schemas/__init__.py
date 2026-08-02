@@ -76,6 +76,13 @@ class AuthValue(StrictModel):
 
 class TelegramAccountCreate(StrictModel):
     label: str = Field(min_length=1, max_length=100)
+    kind: Literal["user", "bot"] = "user"
+    bot_token: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        validate_default=True,
+    )
 
     @field_validator("label")
     @classmethod
@@ -85,15 +92,34 @@ class TelegramAccountCreate(StrictModel):
             raise ValueError("Account label is required")
         return value
 
+    @field_validator("bot_token")
+    @classmethod
+    def clean_bot_token(cls, value: str | None, info) -> str | None:
+        if info.data.get("kind") == "bot" and not value:
+            raise ValueError("Bot token is required")
+        return value.strip() if value else None
 
-class TelegramAccountUpdate(TelegramAccountCreate):
-    pass
+
+class TelegramAccountUpdate(StrictModel):
+    label: str = Field(min_length=1, max_length=100)
+
+    @field_validator("label")
+    @classmethod
+    def clean_update_label(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Account label is required")
+        return value
+
+
+class BotTokenPayload(StrictModel):
+    bot_token: str = Field(min_length=1, max_length=200)
 
 
 class TelegramChatResponse(StrictModel):
     id: int
     title: str
-    kind: Literal["bot", "group", "supergroup", "channel"]
+    kind: Literal["bot", "private", "group", "supergroup", "channel"]
     username: str | None = None
 
 

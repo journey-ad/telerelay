@@ -138,9 +138,7 @@ function ExportFilesRow({ files, accountId }: { files: string[]; accountId: stri
       accountId,
       `/api/v1/exports/preview-token?path=${encodeURIComponent(file)}`,
     )
-    setPreviewUrl(
-      `/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html?account_id=${encodeURIComponent(accountId)}`,
-    )
+    setPreviewUrl(`/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html`)
   }
   return (
     <>

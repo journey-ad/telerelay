@@ -45,7 +45,6 @@ class Config:
             env_path = Path(self.env_file)
             if env_path.exists():
                 load_dotenv(env_path, override=True)
-                logger.debug(t("log.config.env_loaded", path=env_path))
             else:
                 logger.debug(t("log.config.env_not_found", path=env_path))
 
@@ -55,7 +54,9 @@ class Config:
                     self.config_data = yaml.safe_load(file) or {}
                 logger.debug(t("log.config.yaml_loaded", path=config_path))
             else:
-                logger.warning(t("log.config.yaml_not_found", path=config_path))
+                # The YAML file is optional: .env drives runtime settings and
+                # account configs are generated under config/<telegram_user_id>.yaml.
+                logger.debug(t("log.config.yaml_not_found", path=config_path))
                 self.config_data = {}
     
     def save(self) -> None:
@@ -105,16 +106,11 @@ class Config:
     def api_hash(self) -> Optional[str]:
         """Telegram API Hash"""
         return os.getenv("API_HASH")
-    
-    @property
-    def bot_token(self) -> Optional[str]:
-        """Telegram Bot Token"""
-        return os.getenv("BOT_TOKEN")
-    
-    @property
-    def session_type(self) -> str:
-        """Session type: user or bot"""
-        return os.getenv("SESSION_TYPE", "user")
+
+    def _session_type(self) -> str:
+        """Account session kind, stored in the account YAML by AccountConfigRegistry."""
+        value = self.config_data.get("session_type")
+        return str(value) if value in ("user", "bot") else "user"
     
     @property
     def proxy_url(self) -> Optional[str]:
@@ -358,9 +354,9 @@ class Config:
         """Get enabled message-button interaction rules."""
         return [rule for rule in self.get_button_action_rules() if rule.enabled]
     
-    def validate(self) -> tuple[bool, str]:
+    def validate(self, bot_token: str | None = None) -> tuple[bool, str]:
         """Validate if configuration is complete"""
-        valid, message = self.validate_connection()
+        valid, message = self.validate_connection(bot_token=bot_token)
         if not valid:
             return valid, message
 
@@ -377,13 +373,13 @@ class Config:
 
         return True, t("message.validation.passed")
 
-    def validate_connection(self) -> tuple[bool, str]:
+    def validate_connection(self, bot_token: str | None = None) -> tuple[bool, str]:
         """Validate credentials required to connect, independent of forwarding rules."""
         if not self.api_id or not self.api_hash:
             return False, t("message.validation.api_missing")
 
-        # If in bot mode, Bot Token is required
-        if self.session_type == "bot" and not self.bot_token:
+        # Bot accounts require their store-owned token; user accounts do not.
+        if self._session_type() == "bot" and not bot_token:
             return False, t("message.validation.bot_token_required")
 
         return True, t("message.validation.passed")
@@ -398,8 +394,6 @@ class Config:
         return {
             "api_id": self.api_id,
             "api_hash": "***" if self.api_hash else None,  # Hide sensitive information
-            "bot_token": "***" if self.bot_token else None,
-            "session_type": self.session_type,
             "web_host": self.web_host,
             "web_port": self.web_port,
             "log_level": self.log_level,
@@ -415,49 +409,61 @@ class AccountConfigRegistry:
         base_config: Config,
         data_dir: str | Path = "data",
         paths: AccountPathRegistry | None = None,
+        account_store: Any = None,
     ):
         self.base_config = base_config
         self.paths = paths or AccountPathRegistry(
             config_dir=Path(base_config.config_file).parent,
             data_dir=data_dir,
         )
+        self.account_store = account_store
         self._configs: dict[str, Config] = {}
         self._lock = threading.RLock()
 
     def for_account(self, account_id: str) -> Config:
+        from backend.logger import account_log_context
+
         account_paths = self.paths.for_account(account_id)
-        with self._lock:
-            config = self._configs.get(account_id)
-            if config is not None:
+        with account_log_context(account_id):
+            with self._lock:
+                config = self._configs.get(account_id)
+                if config is not None:
+                    return config
+                path = account_paths.config_file
+                exists = path.is_file()
+                config = Config(
+                    env_file=self.base_config.env_file,
+                    config_file=str(path),
+                )
+                if not exists:
+                    config.replace(self._initial_config(account_id))
+                else:
+                    self._enforce_paths(config, account_id)
+                self._configs[account_id] = config
                 return config
-            path = account_paths.config_file
-            exists = path.is_file()
-            config = Config(
-                env_file=self.base_config.env_file,
-                config_file=str(path),
-            )
-            if not exists:
-                config.replace(self._initial_config(account_id))
-            else:
-                self._enforce_paths(config, account_id)
-            self._configs[account_id] = config
-            return config
 
     def config_path(self, account_id: str) -> Path:
         return self.paths.for_account(account_id).config_file
 
     def replace(self, account_id: str, config_data: dict[str, Any]) -> Config:
-        config = self.for_account(account_id)
-        normalized = copy.deepcopy(config_data)
-        self._set_paths(normalized, account_id)
-        config.replace(normalized)
-        return config
+        from backend.logger import account_log_context
+
+        with account_log_context(account_id):
+            config = self.for_account(account_id)
+            normalized = copy.deepcopy(config_data)
+            self._set_paths(normalized, account_id)
+            self._set_session_type(normalized, account_id)
+            config.replace(normalized)
+            return config
 
     def load_all(self) -> None:
+        from backend.logger import account_log_context
+
         with self._lock:
-            configs = list(self._configs.values())
-        for config in configs:
-            config.load()
+            configs = list(self._configs.items())
+        for account_id, config in configs:
+            with account_log_context(account_id):
+                config.load()
 
     def discard(self, account_id: str) -> None:
         with self._lock:
@@ -478,11 +484,15 @@ class AccountConfigRegistry:
         data["forwarding_rules"] = []
         data["button_action_rules"] = []
         self._set_paths(data, account_id)
+        self._set_session_type(data, account_id)
         return data
 
     def _enforce_paths(self, config: Config, account_id: str) -> None:
         normalized = copy.deepcopy(config.config_data)
-        if self._set_paths(normalized, account_id):
+        changed = self._set_paths(normalized, account_id)
+        if self._set_session_type(normalized, account_id):
+            changed = True
+        if changed:
             config.replace(normalized)
 
     def _set_paths(self, data: dict[str, Any], account_id: str) -> bool:
@@ -505,6 +515,25 @@ class AccountConfigRegistry:
             changed = True
         data["forward_queue"] = queue
         return changed
+
+    def _set_session_type(self, data: dict[str, Any], account_id: str) -> bool:
+        """Keep the account session type in sync with the account registry."""
+        session_type = self._account_kind(account_id)
+        if session_type is None:
+            return False
+        if data.get("session_type") == session_type:
+            return False
+        data["session_type"] = session_type
+        return True
+
+    def _account_kind(self, account_id: str) -> str | None:
+        store = self.account_store
+        if store is None:
+            return None
+        try:
+            return str(store.get_public(account_id).get("kind") or "user")
+        except Exception:
+            return None
 
 
 # Factory function

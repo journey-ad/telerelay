@@ -33,7 +33,7 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import Linkify from 'linkify-react'
-import { request } from '../api/client'
+import { accountRequest, request } from '../api/client'
 import { downloadFile } from '../api/downloads'
 import { AuthenticatedImage } from '../components/AuthenticatedImage'
 import { EmptyState, IconButton, PageHeader } from '../components/ui'
@@ -99,17 +99,17 @@ function fileSize(value?: number | null): string {
   return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 
-function peerAvatarPath(accountId: string, peerId?: number | null): string | null {
+function peerAvatarPath(peerId?: number | null): string | null {
   if (!peerId) return null
-  return `/api/v1/telegram-preview/peers/${peerId}/avatar?account_id=${encodeURIComponent(accountId)}`
+  return `/api/v1/telegram-preview/peers/${peerId}/avatar`
 }
 
-function thumbnailPath(accountId: string, chatId: number, messageId: number): string {
-  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/thumbnail?account_id=${encodeURIComponent(accountId)}`
+function thumbnailPath(chatId: number, messageId: number): string {
+  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/thumbnail`
 }
 
-function visualMediaPath(accountId: string, chatId: number, messageId: number): string {
-  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/visual-media?account_id=${encodeURIComponent(accountId)}`
+function visualMediaPath(chatId: number, messageId: number): string {
+  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/visual-media`
 }
 
 function mediaFrame(media: NonNullable<TelegramPreviewMessage['media']>) {
@@ -149,9 +149,10 @@ function Avatar({
   const colors = hashColor(String(peerId ?? title))
   return (
     <AuthenticatedImage
-      path={peerAvatarPath(accountId, peerId)}
+      path={peerAvatarPath(peerId)}
       inlineSource={inlineSource}
       alt={t('telegramPreview.avatarAlt', { title })}
+      accountId={accountId}
       className={cn('grid shrink-0 place-items-center rounded-md', className)}
       style={{ backgroundColor: colors.background, color: colors.foreground }}
       fallback={
@@ -237,9 +238,7 @@ function MediaPreview({
   const media = message.media
   if (!media) return null
   if (media.poll) return <PollPreview poll={media.poll} />
-  const path = media.is_visual_media
-    ? visualMediaPath(accountId, message.chat_id, message.id)
-    : null
+  const path = media.is_visual_media ? visualMediaPath(message.chat_id, message.id) : null
   const downloadLabel =
     media.type === 'animation'
       ? t('telegramPreview.downloadAnimation')
@@ -256,11 +255,10 @@ function MediaPreview({
         style={compact ? undefined : mediaFrame(media)}
       >
         <AuthenticatedImage
-          path={
-            media.inline_thumbnail ? null : thumbnailPath(accountId, message.chat_id, message.id)
-          }
+          path={media.inline_thumbnail ? null : thumbnailPath(message.chat_id, message.id)}
           inlineSource={media.inline_thumbnail}
           alt={media.file_name || t('telegramPreview.image')}
+          accountId={accountId}
           className="size-full"
           fallback={
             <span className="grid size-full place-items-center text-slate-300">
@@ -671,9 +669,12 @@ export function TelegramPreviewPage() {
     enabled: Boolean(accountId && active?.connected),
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams({ account_id: accountId, folder, limit: '40' })
+      const params = new URLSearchParams({ folder, limit: '40' })
       if (pageParam) params.set('cursor', pageParam)
-      return request<TelegramPreviewDialogsPage>(`/api/v1/telegram-preview/dialogs?${params}`)
+      return accountRequest<TelegramPreviewDialogsPage>(
+        accountId,
+        `/api/v1/telegram-preview/dialogs?${params}`,
+      )
     },
     getNextPageParam: (page) => page.next_cursor ?? undefined,
   })
@@ -683,10 +684,11 @@ export function TelegramPreviewPage() {
     enabled: Boolean(accountId && active?.connected && selected),
     initialPageParam: null as number | null,
     queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams({ account_id: accountId, limit: '40' })
+      const params = new URLSearchParams({ limit: '40' })
       if (pageParam) params.set('before_id', String(pageParam))
       if (messageQuery) params.set('query', messageQuery)
-      return request<TelegramPreviewMessagesPage>(
+      return accountRequest<TelegramPreviewMessagesPage>(
+        accountId,
         `/api/v1/telegram-preview/chats/${selected!.id}/messages?${params}`,
       )
     },
@@ -790,8 +792,9 @@ export function TelegramPreviewPage() {
     stickToBottom.current = false
     const requestId = ++replyRequestId.current
     try {
-      const params = new URLSearchParams({ account_id: accountId })
-      const message = await request<TelegramPreviewMessage>(
+      const params = new URLSearchParams()
+      const message = await accountRequest<TelegramPreviewMessage>(
+        accountId,
         `/api/v1/telegram-preview/chats/${selected.id}/messages/${id}?${params}`,
       )
       if (requestId !== replyRequestId.current) return

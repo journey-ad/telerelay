@@ -178,7 +178,7 @@ class AdminBotManager:
         account_id = None
         if self.context and self.context.accounts:
             try:
-                account_id = self.context.active_account_id()
+                account_id = self.context.scope_for().account_id
             except ValueError:
                 await event.reply(t("bot_cmd.account_not_authenticated"))
                 return
@@ -188,30 +188,33 @@ class AdminBotManager:
         finally:
             self._command_account_id.reset(token)
 
-    def _active_config(self) -> Config:
+    def _account_scope(self):
+        """Return the scope for the account pinned by this command."""
+        if not self.context or not self.context.accounts:
+            return None
         account_id = self._command_account_id.get()
-        if account_id and self.context and self.context.config_registry:
-            return self.context.config_registry.for_account(account_id)
-        return self.config
+        return self.context.scope_for(account_id)
+
+    def _active_config(self) -> Config:
+        scope = self._account_scope()
+        return scope.config if scope else self.config
 
     def _active_stats(self):
-        account_id = self._command_account_id.get()
-        if account_id and self.context and self.context.stats_registry:
-            return self.context.stats_registry.for_account(account_id)
+        scope = self._account_scope()
+        if scope:
+            return scope.stats
         from backend.stats_db import get_stats_db
 
         return get_stats_db()
 
     def _active_runtime(self):
-        account_id = self._command_account_id.get()
-        if account_id and self.context and self.context.accounts:
-            return self.bot_manager.get_runtime(account_id)
-        return self.bot_manager
+        scope = self._account_scope()
+        return scope.runtime if scope else self.bot_manager
 
     def _active_status(self) -> dict:
-        account_id = self._command_account_id.get()
-        if account_id and self.context and self.context.accounts:
-            return self.bot_manager.get_status(account_id)
+        scope = self._account_scope()
+        if scope:
+            return self.bot_manager.get_status(scope.account_id)
         return self.bot_manager.get_status()
 
     def _register_handlers(self) -> None:
@@ -783,11 +786,12 @@ class AdminBotManager:
                 if os.path.exists(config_path):
                     shutil.copy2(config_path, config_path + ".bak")
 
-                account_id = self._command_account_id.get()
-                if account_id and self.context and self.context.config_registry:
-                    config = self.context.config_registry.replace(account_id, new_config)
-                    if self.context.export_registry:
-                        self.context.export_registry.recreate(account_id)
+                scope = self._account_scope()
+                if scope:
+                    config = self.context.account_registry.replace_config(
+                        scope.account_id,
+                        new_config,
+                    )
                 else:
                     shutil.copy2(tmp_path, config_path)
                     config.load()

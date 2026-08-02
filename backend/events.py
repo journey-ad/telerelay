@@ -95,6 +95,7 @@ class EventLogHandler(logging.Handler):
                     "level": record.levelname.lower(),
                     "message": self.format(record),
                     "logger": record.name,
+                    "account_id": getattr(record, "account_id", None),
                 },
             )
         except Exception:

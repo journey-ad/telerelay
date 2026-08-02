@@ -1,13 +1,11 @@
 import asyncio
-import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from backend.account_paths import AccountPathRegistry
-from backend.application import ApplicationContext
+from backend.application import AccountScopeRegistry, ApplicationContext
 from backend.bot_commands import AdminBotManager
 from backend.config import AccountConfigRegistry, Config
 from backend.telegram_accounts import TelegramAccountStore
@@ -46,8 +44,10 @@ class FakeStatsRegistry:
 
 
 class FakeRuntime:
-    def __init__(self, account_id):
+    def __init__(self, account_id, bot_token=None, session_type=None):
         self.account_id = account_id
+        self.bot_token = bot_token
+        self.session_type = session_type
         self.is_running = False
         self.is_connected = False
 
@@ -71,6 +71,9 @@ class FakeRuntimeRegistry:
         self.started = []
         self.stopped = []
         self.reset = []
+
+    def account_kind(self, account_id):
+        return str(self.account_store.get_public(account_id).get("kind") or "user")
 
     def get_runtime(self, account_id):
         return self.runtimes.setdefault(account_id, FakeRuntime(account_id))
@@ -108,9 +111,6 @@ class AdminBotIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.paths.data_dir.mkdir()
         template = self.paths.config_dir / "template.yaml"
         template.write_text("forwarding_rules: []\n", encoding="utf-8")
-        self.environment = patch.dict(os.environ, {"SESSION_TYPE": "user"}, clear=True)
-        self.environment.start()
-        self.addCleanup(self.environment.stop)
         self.base_config = Config(
             env_file=str(root / "missing.env"),
             config_file=str(template),
@@ -129,6 +129,13 @@ class AdminBotIsolationTests(unittest.IsolatedAsyncioTestCase):
         self.store.set_active(self.first_id)
         self.runtimes = FakeRuntimeRegistry()
         self.runtimes.loop = asyncio.get_running_loop()
+        self.runtimes.account_store = self.store
+        self.account_registry = AccountScopeRegistry(
+            self.configs,
+            self.stats,
+            self.runtimes,
+            self.paths,
+        )
         self.context = ApplicationContext(
             config=self.base_config,
             bot=self.runtimes,
@@ -138,8 +145,7 @@ class AdminBotIsolationTests(unittest.IsolatedAsyncioTestCase):
             events=SimpleNamespace(),
             log_handler=SimpleNamespace(),
             accounts=SimpleNamespace(store=self.store),
-            config_registry=self.configs,
-            stats_registry=self.stats,
+            account_registry=self.account_registry,
         )
         self.manager = AdminBotManager(self.base_config, self.runtimes, self.context)
 

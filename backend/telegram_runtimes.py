@@ -30,6 +30,7 @@ class TelegramRuntimeRegistry:
         config_registry: Any = None,
         stats_registry: Any = None,
         paths: AccountPathRegistry | None = None,
+        chat_recorder: Callable[[str, Any], None] | None = None,
     ):
         self.config = config
         self.account_store = account_store
@@ -40,6 +41,7 @@ class TelegramRuntimeRegistry:
         self.config_registry = config_registry
         self.stats_registry = stats_registry
         self.paths = paths
+        self.chat_recorder = chat_recorder
         self.loop: asyncio.AbstractEventLoop | None = None
         self.on_user_authenticated: Callable[[str, dict[str, Any]], None] | None = None
         self._runtimes: dict[str, Any] = {}
@@ -56,7 +58,8 @@ class TelegramRuntimeRegistry:
             runtime.bind_loop(loop)
 
     def ensure_runtime(self, account_id: str) -> Any:
-        self.account_store.get_public(account_id)
+        account = self.account_store.get_public(account_id)
+        kind = str(account.get("kind") or "user")
         if not is_telegram_user_id(account_id) and any(
             value is not None
             for value in (self.config_registry, self.stats_registry, self.paths)
@@ -75,12 +78,17 @@ class TelegramRuntimeRegistry:
             if runtime is not None:
                 return runtime
 
-            auth = self.auth_factory(
-                input_timeout=self.auth_timeout,
-                on_state_change=lambda state, error="", target=account_id: self._publish_auth_state(
-                    target, state, error
-                ),
-            )
+            auth = None
+            bot_token = None
+            if kind == "user":
+                auth = self.auth_factory(
+                    input_timeout=self.auth_timeout,
+                    on_state_change=lambda state, error="", target=account_id: self._publish_auth_state(
+                        target, state, error
+                    ),
+                )
+            else:
+                bot_token = self.account_store.get_bot_token(account_id)
             runtime_config = (
                 self.config_registry.for_account(account_id)
                 if self.config_registry is not None
@@ -90,6 +98,8 @@ class TelegramRuntimeRegistry:
                 "session_name": self.account_store.session_name(account_id),
                 "queue_db_path": self.queue_db_path(account_id),
                 "account_id": account_id,
+                "bot_token": bot_token,
+                "session_type": kind,
             }
             if self.stats_registry is not None:
                 runtime_kwargs["stats_db"] = self.stats_registry.for_account(account_id)
@@ -98,11 +108,15 @@ class TelegramRuntimeRegistry:
             runtime.on_user_authenticated = (
                 lambda identity, target=account_id: self._authenticated(target, identity)
             )
+            runtime.chat_recorder = self.chat_recorder
             if self.loop is not None:
                 runtime.bind_loop(self.loop)
             self._auth_managers[account_id] = auth
             self._runtimes[account_id] = runtime
             return runtime
+
+    def account_kind(self, account_id: str) -> str:
+        return str(self.account_store.get_public(account_id).get("kind") or "user")
 
     def get_runtime(self, account_id: str | None = None) -> Any:
         target = account_id or self.account_store.active_account_id
@@ -201,7 +215,8 @@ class TelegramRuntimeRegistry:
             with self._state_lock:
                 auth_managers = list(self._auth_managers.values())
             for auth in auth_managers:
-                auth.reset()
+                if auth is not None:
+                    auth.reset()
             return any(result is True for result in results)
 
     async def stop_account(self, account_id: str) -> bool:
@@ -211,7 +226,7 @@ class TelegramRuntimeRegistry:
             stopped = bool(runtime and runtime.is_running and await runtime.stop())
             with self._state_lock:
                 auth = self._auth_managers.get(account_id)
-            if auth:
+            if auth is not None:
                 auth.reset()
             return stopped
 

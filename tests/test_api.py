@@ -11,11 +11,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.api import router
-from backend.application import ApplicationContext
+from backend.application import AccountScope, ApplicationContext
 from backend.auth_manager import AuthManager
-from backend.config import Config
+from backend.config import AccountConfigRegistry, Config
 from backend.events import EventBus
 from backend.services import RuleService
+from backend.stats_db import AccountStatsRegistry
 from backend.telegram_accounts import (
     TelegramAccountError,
     TelegramAccountService,
@@ -33,6 +34,8 @@ class FakeBot:
         session_name=None,
         queue_db_path=None,
         account_id=None,
+        bot_token=None,
+        session_type=None,
     ):
         self.is_running = False
         self.is_connected = False
@@ -40,6 +43,8 @@ class FakeBot:
         self.session_name = Path(session_name or "data/telegram_session")
         self.queue_db_path = Path(queue_db_path) if queue_db_path else None
         self.account_id = account_id
+        self.bot_token = bot_token
+        self.session_type = session_type
         self.client_manager = None
         self.forwarders = []
         self.on_user_authenticated = None
@@ -142,6 +147,34 @@ class FakeExports:
             raise KeyError("missing")
 
 
+class FakeAccountRegistry:
+    """Minimal registry backing the router's single account-scope entry point."""
+
+    def __init__(self, context):
+        self.context = context
+
+    def for_account(self, account_id):
+        return AccountScope(
+            account_id=account_id,
+            config=self.context.config,
+            stats=self.stats,
+            rules=self.context.rules,
+            exports=self.context.exports,
+            scheduler=getattr(self.context, "scheduler", SimpleNamespace()),
+            runtime=self.context.bot.get_runtime(account_id),
+        )
+
+    @property
+    def stats(self):
+        from backend.stats_db import get_stats_db
+
+        return get_stats_db()
+
+    def replace_config(self, account_id, config_data):
+        self.context.config.replace(config_data)
+        return self.context.config
+
+
 class FakeScopedRules:
     def __init__(self, name):
         self.rule = {
@@ -191,9 +224,6 @@ class ApiContractTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         root = Path(self.temp_dir.name)
-        self.env_patch = patch.dict(os.environ, {"SESSION_TYPE": "user"}, clear=True)
-        self.env_patch.start()
-        self.addCleanup(self.env_patch.stop)
         self.config = Config(
             env_file=str(root / "missing.env"),
             config_file=str(root / "config.yaml"),
@@ -209,6 +239,7 @@ class ApiContractTests(unittest.TestCase):
         self.auth = self.bot.get_auth()
         self.events = EventBus()
         self.rules = RuleService(self.config, self.bot)
+        self.stats_db = self.rules.stats_db
         self.accounts = TelegramAccountService(self.account_store, self.bot)
         self.stats_patch = patch(
             "backend.telegram_runtimes.get_stats_db",
@@ -222,6 +253,7 @@ class ApiContractTests(unittest.TestCase):
         self.telegram_preview = FakeTelegramPreview()
         self.telegram_chats = FakeTelegramChats()
         self.exports = FakeExports()
+        self.account_registry = FakeAccountRegistry(self)
         self.context = ApplicationContext(
             config=self.config,
             bot=self.bot,
@@ -231,6 +263,7 @@ class ApiContractTests(unittest.TestCase):
             events=self.events,
             log_handler=SimpleNamespace(),
             accounts=self.accounts,
+            account_registry=self.account_registry,
             telegram_chats=self.telegram_chats,
             telegram_preview=self.telegram_preview,
         )
@@ -240,7 +273,8 @@ class ApiContractTests(unittest.TestCase):
     def test_session_and_bot_status_contracts(self):
         session = self.client.get("/api/v1/session")
         self.assertEqual(session.status_code, 200)
-        self.assertEqual(session.json()["session_type"], "user")
+        self.assertNotIn("session_type", session.json())
+        self.assertIn("active_account_id", session.json())
 
         status = self.client.get("/api/v1/bot/status")
         self.assertEqual(status.status_code, 200)
@@ -410,13 +444,25 @@ class ApiContractTests(unittest.TestCase):
         )
         services = {account_id: FakeScopedRules(account_id) for account_id in account_ids}
         request_account_id = ContextVar("test_request_account_id", default=None)
+        scope_registry = SimpleNamespace(
+            for_account=lambda account_id: AccountScope(
+                account_id=account_id,
+                config=SimpleNamespace(),
+                stats=SimpleNamespace(),
+                rules=services[account_id],
+                exports=SimpleNamespace(),
+                scheduler=SimpleNamespace(),
+                runtime=SimpleNamespace(),
+            )
+        )
         context = SimpleNamespace(
             config=SimpleNamespace(web_auth_username="", web_auth_password=""),
             accounts=SimpleNamespace(store=store),
+            account_registry=scope_registry,
             request_account_id=request_account_id,
-            active_rules=lambda: services[
-                request_account_id.get() or store.active_account_id
-            ],
+            scope_for=lambda account_id=None: scope_registry.for_account(
+                account_id or request_account_id.get() or store.active_account_id
+            ),
         )
         client = TestClient(make_app(context))
         self.addCleanup(client.close)
@@ -479,6 +525,181 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(activated.status_code, 200, activated.text)
         self.assertTrue(activated.json()["active"])
+
+    def test_bot_account_can_be_created_with_token(self):
+        class FakeClientManager:
+            def __init__(
+                self,
+                config,
+                auth_manager=None,
+                session_name=None,
+                on_user_authenticated=None,
+                bot_token=None,
+            ):
+                self.session_name = Path(session_name)
+                self.on_user_authenticated = on_user_authenticated
+                self.bot_token = bot_token
+
+            async def connect(self):
+                Path(f"{self.session_name}.session").write_bytes(b"fake-session")
+                if self.on_user_authenticated:
+                    self.on_user_authenticated(
+                        {
+                            "display_name": "Relay Bot",
+                            "username": "relay_bot",
+                            "telegram_user_id": 777001,
+                        }
+                    )
+                return True
+
+            async def disconnect(self):
+                return None
+
+        with patch("backend.telegram_accounts.TelegramClientManager", FakeClientManager):
+            response = self.client.post(
+                "/api/v1/telegram-accounts",
+                json={
+                    "label": "Relay Bot",
+                    "kind": "bot",
+                    "bot_token": "123456789:AA" + "x" * 30,
+                },
+            )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["kind"], "bot")
+        self.assertEqual(body["telegram_user_id"], 777001)
+        self.assertNotIn("bot_token", body)
+        self.assertEqual(body["username"], "relay_bot")
+
+        auth_state = self.client.get(
+            "/api/v1/telegram-auth",
+            headers={"X-TeleRelay-Account-ID": body["id"]},
+        )
+        self.assertEqual(auth_state.status_code, 200)
+        self.assertEqual(auth_state.json()["state"], "success")
+
+        runtime = self.bot.get_runtime(body["id"])
+        runtime.is_running = False
+        with patch("backend.telegram_accounts.TelegramClientManager", FakeClientManager):
+            updated = self.client.put(
+                f"/api/v1/telegram-accounts/{body['id']}/bot-token",
+                json={"bot_token": "987654321:BB" + "y" * 30},
+            )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["code"], "bot_token_updated")
+        self.assertEqual(
+            self.account_store.get_bot_token(body["id"]),
+            "987654321:BB" + "y" * 30,
+        )
+        self.assertTrue(runtime.is_running)
+
+    def test_bot_account_create_surfaces_auth_failure(self):
+        class FailingClientManager:
+            def __init__(
+                self,
+                config,
+                auth_manager=None,
+                session_name=None,
+                on_user_authenticated=None,
+                bot_token=None,
+            ):
+                self.session_name = Path(session_name)
+
+            async def connect(self):
+                return False
+
+            async def disconnect(self):
+                return None
+
+        with patch("backend.telegram_accounts.TelegramClientManager", FailingClientManager):
+            response = self.client.post(
+                "/api/v1/telegram-accounts",
+                json={
+                    "label": "Broken Bot",
+                    "kind": "bot",
+                    "bot_token": "123456789:AA" + "x" * 30,
+                },
+            )
+
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "bot_auth_failed")
+        accounts = self.client.get("/api/v1/telegram-accounts").json()
+        self.assertEqual([account["id"] for account in accounts], [self.account_id])
+        self.assertTrue(accounts[0]["active"])
+        token_directory = self.account_store.data_dir / "bot_tokens"
+        self.assertEqual(list(token_directory.glob("*.token")), [])
+
+    def test_bot_token_update_keeps_current_token_when_verification_fails(self):
+        class SuccessfulClientManager:
+            def __init__(
+                self,
+                config,
+                auth_manager=None,
+                session_name=None,
+                on_user_authenticated=None,
+                bot_token=None,
+            ):
+                self.session_name = Path(session_name)
+                self.on_user_authenticated = on_user_authenticated
+
+            async def connect(self):
+                Path(f"{self.session_name}.session").write_bytes(b"fake-session")
+                if self.on_user_authenticated:
+                    self.on_user_authenticated(
+                        {
+                            "display_name": "Relay Bot",
+                            "username": "relay_bot",
+                            "telegram_user_id": 777001,
+                        }
+                    )
+                return True
+
+            async def disconnect(self):
+                return None
+
+        class FailingClientManager(SuccessfulClientManager):
+            async def connect(self):
+                return False
+
+        original_token = "123456789:AA" + "x" * 30
+        with patch(
+            "backend.telegram_accounts.TelegramClientManager",
+            SuccessfulClientManager,
+        ):
+            created = self.client.post(
+                "/api/v1/telegram-accounts",
+                json={
+                    "label": "Relay Bot",
+                    "kind": "bot",
+                    "bot_token": original_token,
+                },
+            ).json()
+
+        runtime = self.bot.get_runtime(created["id"])
+        runtime.is_running = True
+        runtime.restarts = 0
+        with patch(
+            "backend.telegram_accounts.TelegramClientManager",
+            FailingClientManager,
+        ):
+            response = self.client.put(
+                f"/api/v1/telegram-accounts/{created['id']}/bot-token",
+                json={"bot_token": "987654321:BB" + "y" * 30},
+            )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "bot_auth_failed")
+        self.assertEqual(self.account_store.get_bot_token(created["id"]), original_token)
+        self.assertEqual(runtime.bot_token, original_token)
+        self.assertEqual(runtime.restarts, 0)
+
+    def test_bot_account_requires_token(self):
+        response = self.client.post(
+            "/api/v1/telegram-accounts",
+            json={"label": "Broken Bot", "kind": "bot"},
+        )
+        self.assertEqual(response.status_code, 422)
 
     def test_telegram_account_name_can_be_updated(self):
         updated = self.client.put(
@@ -648,7 +869,6 @@ class ApiContractTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "SESSION_TYPE": "user",
                 "WEB_AUTH_USERNAME": "operator",
                 "WEB_AUTH_PASSWORD": "secret",
             },

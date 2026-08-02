@@ -6,11 +6,15 @@ import threading
 from pathlib import Path
 
 from backend.account_paths import AccountPathRegistry, is_telegram_user_id
+from backend.logger import get_logger
+from backend.telegram_accounts import TelegramAccountError
 
 from .scheduler import ExportScheduler
 from .service import ExportService
 from .source import TelegramExportSource
 from .store import ExportStore
+
+logger = get_logger()
 
 
 class AccountExportRegistry:
@@ -37,6 +41,7 @@ class AccountExportRegistry:
                 store=ExportStore(paths.exports_db),
                 source=TelegramExportSource(runtime),
                 events=self.events,
+                session_type=self.runtimes.account_kind(account_id),
             )
             scheduler = ExportScheduler(service)
             self._services[account_id] = service
@@ -54,7 +59,14 @@ class AccountExportRegistry:
             self._started = True
         for account in self.runtimes.account_store.list_public():
             if is_telegram_user_id(account["id"]):
-                self.for_account(account["id"])
+                try:
+                    self.for_account(account["id"])
+                except TelegramAccountError as exc:
+                    logger.warning(
+                        "Skipped export scope for account %s: %s",
+                        account["id"],
+                        exc,
+                    )
         with self._lock:
             schedulers = list(self._schedulers.values())
         for scheduler in schedulers:

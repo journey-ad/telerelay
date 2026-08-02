@@ -1,6 +1,7 @@
 """FastAPI entry point for the TeleRelay control plane."""
 
 import argparse
+import os
 import asyncio
 import logging
 import threading
@@ -8,6 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -24,19 +26,13 @@ PREVIEW_MEDIA_TYPES = {
 from backend.account_paths import AccountPathRegistry
 from backend.account_migration import AccountMigration
 from backend.api import router
-from backend.application import ApplicationContext
-from backend.bot_manager import BotManager
+from backend.application import AccountScopeRegistry, ApplicationContext
 from backend.config import AccountConfigRegistry, create_config
 from backend.events import EventBus, EventLogHandler
-from backend.exporter.registry import AccountExportRegistry
-from backend.exporter.scheduler import ExportScheduler
-from backend.exporter.service import ExportService
 from backend.forwarder.downloader import MediaDownloader
 from backend.i18n import set_language, t
 from backend.logger import setup_logger
 from backend.meta import current_version
-from backend.services import RuleService
-from backend.services.rules import AccountRuleRegistry
 from backend.stats_db import AccountStatsRegistry
 from backend.telegram_accounts import (
     TelegramAccountError,
@@ -59,83 +55,72 @@ async def lifespan(app: FastAPI):
     log_handler = EventLogHandler(events)
     log_handler.setLevel(logging.INFO)
     log_handler.setFormatter(
-        logging.Formatter("%(asctime)s · %(levelname)s · %(message)s", "%H:%M:%S")
+        logging.Formatter(
+            "%(asctime)s · %(levelname)s · [%(account_tag)s] %(message)s",
+            "%H:%M:%S",
+        )
     )
     logger.addHandler(log_handler)
 
     paths = AccountPathRegistry(config_dir=Path(config.config_file).parent, data_dir="data")
     migration = AccountMigration(paths)
-    account_store = None
-    if config.session_type == "user":
-        migration.run()
-        account_store = TelegramAccountStore(paths=paths)
-        config_registry = AccountConfigRegistry(config, paths=paths)
-        stats_registry = AccountStatsRegistry(paths=paths)
-        bot = TelegramRuntimeRegistry(
-            config,
-            account_store,
-            auth_timeout=300,
-            events=events,
-            config_registry=config_registry,
-            stats_registry=stats_registry,
-            paths=paths,
-        )
-    else:
-        config_registry = None
-        stats_registry = None
-        bot = BotManager(config, events=events)
+    migration.run()
+    account_store = TelegramAccountStore(paths=paths)
+    legacy_bot_token = os.getenv("BOT_TOKEN")
+    if legacy_bot_token:
+        # One-time migration for pre-account-store bot installs.
+        account_store.seed_bot(legacy_bot_token)
+    config_registry = AccountConfigRegistry(config, paths=paths, account_store=account_store)
+    stats_registry = AccountStatsRegistry(paths=paths)
+    bot = TelegramRuntimeRegistry(
+        config,
+        account_store,
+        auth_timeout=300,
+        events=events,
+        config_registry=config_registry,
+        stats_registry=stats_registry,
+        paths=paths,
+    )
     bot.bind_loop(asyncio.get_running_loop())
-    accounts = TelegramAccountService(account_store, bot) if account_store else None
-    telegram_chats = TelegramChatService(bot, account_store) if account_store else None
-    telegram_preview = TelegramPreviewService(bot, account_store) if account_store else None
-    if accounts:
-        bot.on_user_authenticated = accounts.update_identity
-    if account_store:
-        export_registry = AccountExportRegistry(config_registry, bot, paths, events=events)
-        rule_registry = AccountRuleRegistry(config_registry, bot, stats_registry)
-        exports = export_registry
-        scheduler = export_registry
-        rules = rule_registry
-        accounts.on_account_finalized = export_registry.for_account
-
-        def discard_account(account_id: str) -> None:
-            export_registry.discard(account_id)
-            rule_registry.discard(account_id)
-            config_registry.discard(account_id)
-            stats_registry.discard(account_id)
-
-        accounts.on_account_deleted = discard_account
-    else:
-        export_registry = None
-        rule_registry = None
-        exports = ExportService(config, bot, events=events)
-        scheduler = ExportScheduler(exports)
-        rules = RuleService(config, bot)
+    accounts = TelegramAccountService(account_store, bot)
+    telegram_chats = TelegramChatService(bot, account_store)
+    bot.chat_recorder = telegram_chats.record_chat
+    telegram_preview = TelegramPreviewService(bot, account_store)
+    bot.on_user_authenticated = accounts.update_identity
+    account_registry = AccountScopeRegistry(
+        config_registry,
+        stats_registry,
+        bot,
+        paths,
+        events=events,
+    )
+    accounts.on_account_finalized = account_registry.for_account
+    accounts.on_account_deleted = account_registry.discard
     context = ApplicationContext(
         config=config,
         bot=bot,
-        exports=exports,
-        scheduler=scheduler,
-        rules=rules,
+        exports=account_registry,
+        scheduler=account_registry,
+        rules=account_registry,
         events=events,
         log_handler=log_handler,
         accounts=accounts,
         telegram_chats=telegram_chats,
         telegram_preview=telegram_preview,
-        config_registry=config_registry,
-        stats_registry=stats_registry,
-        export_registry=export_registry,
-        rule_registry=rule_registry,
+        account_registry=account_registry,
     )
     app.state.context = context
 
     await asyncio.to_thread(MediaDownloader.purge_temp_dir)
-    scheduler.start()
-    if account_store:
-        await bot.start()
-        await migration.resolve_default_account(accounts)
-    elif Path(f"{bot.session_name}.session").exists():
-        await bot.start()
+    account_registry.start()
+    await bot.start()
+    await migration.resolve_default_account(accounts)
+    for account in account_store.list_public():
+        if account["kind"] == "bot" and not account["authenticated"]:
+            try:
+                await accounts.start_authentication(account["id"])
+            except TelegramAccountError as exc:
+                logger.error("Failed to start bot authentication for %s: %s", account["id"], exc)
 
     if config.admin_bot_token and config.admin_chat_id:
         from backend.bot_commands import AdminBotManager
@@ -152,13 +137,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if accounts:
-            await accounts.shutdown()
-        if export_registry:
-            export_registry.shutdown()
-        else:
-            scheduler.shutdown()
-            exports.shutdown()
+        await accounts.shutdown()
+        account_registry.shutdown()
         if bot.is_running:
             await bot.stop()
         logger.removeHandler(log_handler)
@@ -182,16 +162,14 @@ def create_app() -> FastAPI:
         token: str,
         file: str,
         request: Request,
-        account_id: str | None = None,
     ) -> Response:
         context = request.app.state.context
         try:
-            if context.accounts:
-                target_id = account_id or context.accounts.store.active_account_id
-                context.accounts.store.get_public(target_id)
-                exports = context.export_registry.for_account(target_id)
-            else:
-                exports = context.exports
+            exports = (
+                context.account_registry
+                if context.accounts
+                else context.exports
+            )
         except (ValueError, TelegramAccountError) as exc:
             return JSONResponse(
                 {"code": "account_not_authenticated", "message": str(exc)},
@@ -250,11 +228,11 @@ def main() -> None:
         help="reload the server when backend Python files change",
     )
     args = parser.parse_args()
-    config = create_config()
+    load_dotenv(".env", override=True)
     uvicorn.run(
         "backend.main:app",
-        host=config.web_host,
-        port=config.web_port,
+        host=os.getenv("WEB_HOST", "0.0.0.0"),
+        port=int(os.getenv("WEB_PORT", "8080")),
         workers=1,
         log_config=None,
         reload=args.reload,

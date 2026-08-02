@@ -42,6 +42,7 @@ export function ChatSelect({
   function handleOpenChange(next: boolean) {
     setOpen(next)
     if (!next) setSearch('')
+    if (next) void chats.refetch()
   }
 
   function selectChat(chat: TelegramChat) {

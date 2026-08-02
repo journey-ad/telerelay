@@ -1,16 +1,14 @@
 import json
 import hashlib
-import os
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from backend.account_paths import AccountPathRegistry
 from backend.account_migration import AccountMigration
+from backend.application import AccountScopeRegistry
 from backend.config import AccountConfigRegistry, Config
-from backend.exporter.registry import AccountExportRegistry
 from backend.stats_db import AccountStatsRegistry
 from backend.telegram_accounts import TelegramAccountError, TelegramAccountStore
 from backend.telegram_runtimes import TelegramRuntimeRegistry
@@ -25,6 +23,8 @@ class FakeRuntime:
         queue_db_path,
         account_id,
         stats_db=None,
+        bot_token=None,
+        session_type=None,
     ):
         self.config = config
         self.auth_manager = auth_manager
@@ -207,40 +207,73 @@ class AccountIsolationTests(unittest.TestCase):
     def test_config_stats_and_export_stores_are_isolated(self):
         template_path = self.config_dir / "template.yaml"
         template_path.write_text("forwarding_rules: []\n", encoding="utf-8")
-        with patch.dict(os.environ, {"SESSION_TYPE": "user"}, clear=True):
-            base = Config(
-                env_file=str(self.root / "missing.env"),
-                config_file=str(template_path),
-            )
-            configs = AccountConfigRegistry(base, paths=self.paths)
-            stats = AccountStatsRegistry(paths=self.paths)
-            first = configs.for_account("101")
-            second = configs.for_account("202")
-            first.update({"forwarding_rules": [{"name": "first"}]})
-            stats.for_account("101").increment_forwarded("first")
+        base = Config(
+            env_file=str(self.root / "missing.env"),
+            config_file=str(template_path),
+        )
+        configs = AccountConfigRegistry(base, paths=self.paths)
+        stats = AccountStatsRegistry(paths=self.paths)
+        first = configs.for_account("101")
+        second = configs.for_account("202")
+        first.update({"forwarding_rules": [{"name": "first"}]})
+        stats.for_account("101").increment_forwarded("first")
 
-            self.assertEqual(second.get_forwarding_rules(), [])
-            self.assertEqual(stats.for_account("202").get_all_stats(), {})
-            self.assertEqual(first.config_file, str(self.config_dir / "101.yaml"))
-            self.assertEqual(second.export_root_dir, str(self.data_dir / "202" / "exports"))
+        self.assertEqual(second.get_forwarding_rules(), [])
+        self.assertEqual(stats.for_account("202").get_all_stats(), {})
+        self.assertEqual(first.config_file, str(self.config_dir / "101.yaml"))
+        self.assertEqual(second.export_root_dir, str(self.data_dir / "202" / "exports"))
 
-            runtimes = SimpleNamespace(
-                get_runtime=lambda account_id: SimpleNamespace(
-                    account_id=account_id,
-                    is_connected=False,
-                ),
-                account_store=SimpleNamespace(list_public=list),
-            )
-            exports = AccountExportRegistry(configs, runtimes, self.paths)
-            self.addCleanup(exports.shutdown)
-            first_exports = exports.for_account("101")
-            second_exports = exports.for_account("202")
-            first_exports.store.start_run(task_id=None, run_type="groups")
+        runtimes = SimpleNamespace(
+            get_runtime=lambda account_id: SimpleNamespace(
+                account_id=account_id,
+                is_connected=False,
+            ),
+            account_store=SimpleNamespace(list_public=list),
+            account_kind=lambda account_id: "user",
+        )
+        registry = AccountScopeRegistry(configs, stats, runtimes, self.paths)
+        self.addCleanup(registry.shutdown)
+        first_exports = registry.for_account("101").exports
+        second_exports = registry.for_account("202").exports
+        first_exports.store.start_run(task_id=None, run_type="groups")
 
-            self.assertEqual(len(first_exports.list_runs()), 1)
-            self.assertEqual(second_exports.list_runs(), [])
-            self.assertEqual(first_exports.store.db_path, self.data_dir / "101" / "exports.db")
-            self.assertEqual(second_exports.store.db_path, self.data_dir / "202" / "exports.db")
+        self.assertEqual(len(first_exports.list_runs()), 1)
+        self.assertEqual(second_exports.list_runs(), [])
+        self.assertEqual(first_exports.store.db_path, self.data_dir / "101" / "exports.db")
+        self.assertEqual(second_exports.store.db_path, self.data_dir / "202" / "exports.db")
+
+    def test_account_configs_record_session_type(self):
+        template_path = self.config_dir / "template.yaml"
+        template_path.write_text("forwarding_rules: []\n", encoding="utf-8")
+        store = TelegramAccountStore(self.data_dir, paths=self.paths)
+        user = store.finalize_identity(store.active_account_id, {"telegram_user_id": 101})
+        bot = store.finalize_identity(
+            store.seed_bot("123456789:AA" + "x" * 30).id,
+            {"telegram_user_id": 123456789},
+        )
+        base = Config(
+            env_file=str(self.root / "missing.env"),
+            config_file=str(template_path),
+        )
+        configs = AccountConfigRegistry(base, paths=self.paths, account_store=store)
+
+        user_config = configs.for_account(user.id)
+        bot_config = configs.for_account(bot.id)
+
+        self.assertEqual(user_config.config_data.get("session_type"), "user")
+        self.assertEqual(bot_config.config_data.get("session_type"), "bot")
+        persisted = (self.config_dir / f"{bot.id}.yaml").read_text(encoding="utf-8")
+        self.assertIn("session_type: bot", persisted)
+
+        # A pre-existing config without session_type is patched on load.
+        legacy_user_path = self.config_dir / f"{user.id}.yaml"
+        legacy_user_path.write_text(
+            "forwarding_rules: []\nforward_queue:\n  db_path: data/101/forward_queue.db\n",
+            encoding="utf-8",
+        )
+        reloaded = AccountConfigRegistry(base, paths=self.paths, account_store=store)
+        self.assertEqual(reloaded.for_account(user.id).config_data.get("session_type"), "user")
+        self.assertIn("session_type: user", legacy_user_path.read_text(encoding="utf-8"))
 
     def test_runtime_receives_account_specific_dependencies(self):
         template = self.config_dir / "template.yaml"
@@ -249,20 +282,19 @@ class AccountIsolationTests(unittest.TestCase):
         first = store.finalize_identity(store.active_account_id, {"telegram_user_id": 101})
         second_pending = store.create("Second")
         second = store.finalize_identity(second_pending.id, {"telegram_user_id": 202})
-        with patch.dict(os.environ, {"SESSION_TYPE": "user"}, clear=True):
-            base = Config(config_file=str(template), env_file=str(self.root / "missing.env"))
-            configs = AccountConfigRegistry(base, paths=self.paths)
-            stats = AccountStatsRegistry(paths=self.paths)
-            runtimes = TelegramRuntimeRegistry(
-                base,
-                store,
-                bot_factory=FakeRuntime,
-                config_registry=configs,
-                stats_registry=stats,
-                paths=self.paths,
-            )
-            first_runtime = runtimes.ensure_runtime(first.id)
-            second_runtime = runtimes.ensure_runtime(second.id)
+        base = Config(config_file=str(template), env_file=str(self.root / "missing.env"))
+        configs = AccountConfigRegistry(base, paths=self.paths)
+        stats = AccountStatsRegistry(paths=self.paths)
+        runtimes = TelegramRuntimeRegistry(
+            base,
+            store,
+            bot_factory=FakeRuntime,
+            config_registry=configs,
+            stats_registry=stats,
+            paths=self.paths,
+        )
+        first_runtime = runtimes.ensure_runtime(first.id)
+        second_runtime = runtimes.ensure_runtime(second.id)
 
         self.assertIsNot(first_runtime.config, second_runtime.config)
         self.assertIsNot(first_runtime.stats_db, second_runtime.stats_db)

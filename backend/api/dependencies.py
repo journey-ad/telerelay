@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from backend.application import ApplicationContext
+from backend.logger import account_log_context
 from backend.telegram_accounts import TelegramAccountError
 
 basic = HTTPBasic(auto_error=False)
@@ -54,6 +55,7 @@ async def bind_account_scope(
         ) from exc
     token = context.request_account_id.set(account_id)
     try:
-        yield
+        with account_log_context(account_id):
+            yield
     finally:
         context.request_account_id.reset(token)

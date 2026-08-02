@@ -13,10 +13,8 @@ class TelegramClientManagerTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.config = SimpleNamespace(
-            session_type="user",
             api_id=12345,
             api_hash="test-hash",
-            bot_token=None,
             proxy_url=None,
         )
         self.session_name = str(Path(self.temp_dir.name) / "session")

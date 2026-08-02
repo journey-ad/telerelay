@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { ACCOUNT_ID_HEADER } from '../api/client'
 import { authorization } from '../api/credentials'
 import type { TelegramAccount } from '../types'
 import { avatarInitials } from '../utils/avatar'
@@ -33,6 +34,7 @@ export function AccountAvatar({
     const headers = new Headers()
     const auth = authorization()
     if (auth) headers.set('Authorization', auth)
+    headers.set(ACCOUNT_ID_HEADER, account.id)
 
     void fetch(`/api/v1/telegram-accounts/${account.id}/avatar?v=${account.avatar_version}`, {
       headers,

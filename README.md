@@ -46,9 +46,9 @@ REST endpoints: `/api/v1`. OpenAPI docs: `/api/docs`. SSE stream: `/api/v1/event
 cp .env.example .env
 ```
 
-Set `API_ID` and `API_HASH` in `.env`. For Bot mode, also set `BOT_TOKEN`. Enable `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` when the console is network-accessible.
+Set `API_ID` and `API_HASH` in `.env`, then add user or bot accounts from the account menu. Enable `WEB_AUTH_USERNAME` and `WEB_AUTH_PASSWORD` when the console is network-accessible.
 
-Telegram API credentials: [my.telegram.org](https://my.telegram.org). Bot tokens: [@BotFather](https://t.me/BotFather).
+Get Telegram API credentials from [my.telegram.org](https://my.telegram.org) and bot tokens from [@BotFather](https://t.me/BotFather).
 
 ### Docker Compose
 
@@ -85,7 +85,7 @@ Use `pnpm dev:backend` and `pnpm dev:frontend` to run either side separately.
 
 ## Configuration
 
-`.env` — credentials and runtime settings: API credentials, `SESSION_TYPE`, proxy, host, port, log level, runtime language, Web Basic Auth, Admin Bot and Mini App settings.
+`.env` — credentials and runtime settings: API credentials, proxy, host, port, log level, runtime language, Web Basic Auth, Admin Bot and Mini App settings.
 
 `config/<telegram_user_id>.yaml` is generated after account authentication and managed by the console. It stores forwarding rules, button automation, filters, and export settings for that account.
 
@@ -108,22 +108,18 @@ logs/telerelay.log                          # Rotating log
 
 Back up `config/`, `data/`, and `.env` together. `.env` and session files are secrets.
 
-## User Mode
+## Accounts
 
-With `SESSION_TYPE=user`, add and authenticate accounts from the account menu. Each account gets an isolated client, auth state, and forwarding queue, all running concurrently on the event loop.
-
-With `SESSION_TYPE=bot`, configure `BOT_TOKEN`. Button automation and account-wide export discovery require User mode.
+Add user or bot accounts from the account menu. Each account runs independently with its own session, forwarding rules, queue, statistics, and export settings.
 
 ## Admin Bot
 
-Set `ADMIN_BOT_TOKEN` and `ADMIN_CHAT_ID`:
+TeleRelay can be managed from Telegram through an optional admin bot:
 
 - `/status`
 - `/bot start|stop|restart`
 - `/rule list|detail|add|del|rename|toggle|set`
 - `/webapp`
-
-The Admin Bot uses a separate token.
 
 ## Development Checks
 

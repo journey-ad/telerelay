@@ -31,8 +31,6 @@ class FakeClientManager:
 
 
 class LiveConfig:
-    session_type = "user"
-
     def __init__(self):
         self.rules = [
             ForwardingRule(

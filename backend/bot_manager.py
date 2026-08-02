@@ -24,7 +24,7 @@ from backend.forward_queue import (
 )
 from backend.forwarder import MessageForwarder
 from backend.i18n import t
-from backend.logger import get_logger
+from backend.logger import account_log_context, get_logger
 from backend.rule import ForwardingRule
 from backend.stats_db import get_stats_db
 
@@ -46,6 +46,8 @@ class BotManager:
         account_id: str | None = None,
         events: Any = None,
         stats_db=None,
+        bot_token: str | None = None,
+        session_type: str = "user",
     ):
         """Initialize Bot Manager
 
@@ -55,6 +57,8 @@ class BotManager:
         """
         self.config = config
         self.auth_manager = auth_manager
+        self.bot_token = bot_token
+        self.session_type = session_type
         self.session_name = Path(session_name) if session_name else Path("data/telegram_session")
         self.queue_db_path = Path(queue_db_path) if queue_db_path else None
         self.account_id = account_id
@@ -69,6 +73,8 @@ class BotManager:
         self._target_label_cache: dict[str, str] = {}
         self._forwarding_handler = None
         self._button_handler = None
+        self._chat_recorder_handler = None
+        self.chat_recorder: Callable[[str, Any], None] | None = None
         self.button_action_engine: Optional[ButtonActionEngine] = None
         self.forward_queue_store: Optional[ForwardQueueStore] = None
         self.forward_queue: Optional[ForwardQueue] = None
@@ -109,6 +115,10 @@ class BotManager:
             self._is_connected = value
     
     async def start(self) -> bool:
+        with account_log_context(self.account_id):
+            return await self._start()
+
+    async def _start(self) -> bool:
         """Start the Telegram runtime on the current asyncio event loop."""
         with self._lock:
             if self._is_running or (self._task and not self._task.done()):
@@ -140,7 +150,7 @@ class BotManager:
             self.is_running = True
 
             # Validate config
-            is_valid, error_msg = self.config.validate_connection()
+            is_valid, error_msg = self.config.validate_connection(bot_token=self.bot_token)
             if not is_valid:
                 logger.error(t("log.bot.config_validation_failed", error=error_msg))
                 return
@@ -151,6 +161,7 @@ class BotManager:
                 self.auth_manager,
                 session_name=self.session_name,
                 on_user_authenticated=self.on_user_authenticated,
+                bot_token=self.bot_token,
             )
 
             # Connect
@@ -243,6 +254,10 @@ class BotManager:
         return message_filter, forwarder
 
     async def reload_rules(self) -> bool:
+        with account_log_context(self.account_id):
+            return await self._reload_rules()
+
+    async def _reload_rules(self) -> bool:
         """Replace live rule state and handlers without reconnecting Telegram."""
         if not self.is_connected or not self.client_manager:
             return False
@@ -269,7 +284,8 @@ class BotManager:
         button_action_engine = None
         button_source_chats = []
         button_action_rules = self.config.get_enabled_button_action_rules()
-        if button_action_rules and self.config.session_type != "user":
+        session_type = self.session_type
+        if button_action_rules and session_type != "user":
             logger.warning(t("log.button_action.user_mode_required"))
         elif button_action_rules:
             valid_button_rules = [
@@ -295,12 +311,18 @@ class BotManager:
 
         self.client_manager.remove_message_handler(self._forwarding_handler)
         self.client_manager.remove_message_handler(self._button_handler)
+        self.client_manager.remove_message_handler(self._chat_recorder_handler)
         self._forwarding_handler = None
         self._button_handler = None
+        self._chat_recorder_handler = None
         if forwarding_chats:
             self._forwarding_handler = self.client_manager.add_message_handler(
                 callback=self._central_message_handler,
                 chats=forwarding_chats,
+            )
+        if session_type == "bot":
+            self._chat_recorder_handler = self.client_manager.add_message_handler(
+                callback=self._record_chat_entity,
             )
         if button_action_engine:
             self._button_handler = self.client_manager.add_message_handler(
@@ -316,6 +338,32 @@ class BotManager:
                 )
             )
         return True
+
+    async def _record_chat_entity(self, event) -> None:
+        """Persist the chat behind an update so bot pickers can list it."""
+        recorder = self.chat_recorder
+        if recorder is None:
+            return
+        chat = getattr(event, "chat", None)
+        if chat is None:
+            chat = getattr(getattr(event, "message", None), "chat", None)
+        if chat is None:
+            logger.debug(
+                "消息事件中没有可用的 chat 实体 (account_id=%s, chat_id=%s)",
+                self.account_id,
+                getattr(event, "chat_id", None),
+            )
+            return
+        logger.debug(
+            "收到消息,记录已知会话 (account_id=%s, chat_id=%s, entity=%s)",
+            self.account_id,
+            getattr(chat, "id", None),
+            type(chat).__name__,
+        )
+        try:
+            recorder(self.account_id, chat)
+        except Exception:
+            logger.exception("记录已知会话失败 (account_id=%s)", self.account_id)
 
     async def _process_queue_item(self, item: ForwardQueueItem) -> float:
         """Load the Telegram message and execute one durable queue item."""
@@ -440,7 +488,7 @@ class BotManager:
             client_manager = self.client_manager
             connected = self._is_connected
 
-        if self.config.session_type != "user":
+        if self.session_type != "user":
             raise RuntimeError(t("message.export.user_mode_required"))
         if not connected or not loop or loop.is_closed() or not client_manager:
             raise RuntimeError(t("message.export.telegram_not_connected"))
@@ -449,7 +497,8 @@ class BotManager:
             raise RuntimeError(t("message.export.telegram_not_connected"))
 
         async def invoke():
-            return await callback(client, *args)
+            with account_log_context(self.account_id):
+                return await callback(client, *args)
 
         return asyncio.run_coroutine_threadsafe(invoke(), loop)
     
@@ -641,6 +690,10 @@ class BotManager:
             )
     
     async def stop(self) -> bool:
+        with account_log_context(self.account_id):
+            return await self._stop()
+
+    async def _stop(self) -> bool:
         """Stop the Telegram runtime and wait for cleanup."""
         task = self._task
         if not self.is_running and (not task or task.done()):
@@ -665,6 +718,10 @@ class BotManager:
         return True
 
     async def restart(self) -> bool:
+        with account_log_context(self.account_id):
+            return await self._restart()
+
+    async def _restart(self) -> bool:
         """Restart the Telegram runtime on the current event loop."""
         logger.debug(t("log.bot.restarting"))
 

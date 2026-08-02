@@ -36,10 +36,11 @@ def _ensure_valid_regex(patterns: list[str]) -> None:
 
 
 class RuleService:
-    def __init__(self, config: Config, bot_manager, stats_db=None):
+    def __init__(self, config: Config, bot_manager, stats_db=None, session_type: str = "user"):
         self.config = config
         self.bot_manager = bot_manager
         self.stats_db = stats_db or get_stats_db()
+        self.session_type = session_type
 
     def list_rules(self) -> list[dict]:
         return [rule.to_dict() for rule in self.config.get_forwarding_rules()]
@@ -71,6 +72,18 @@ class RuleService:
             self.stats_db.rename_rule(old_name, rule.name)
         await self._reload_if_running()
         return rule.to_dict()
+
+    async def set_rule_enabled(self, index: int, enabled: bool) -> dict:
+        """Toggle one rule without requiring the caller to resubmit its full definition."""
+        rules = self.config.get_forwarding_rules()
+        self._ensure_index(index, rules)
+        payload = ForwardingRulePayload.model_validate(
+            {**rules[index].to_dict(), "enabled": enabled}
+        )
+        rules[index] = self._forwarding_rule(payload)
+        self._save_rules(rules)
+        await self._reload_if_running()
+        return rules[index].to_dict()
 
     async def delete_rule(self, index: int) -> None:
         rules = self.config.get_forwarding_rules()
@@ -122,7 +135,7 @@ class RuleService:
         return ForwardingRule.from_dict(payload.model_dump())
 
     def _button_rule(self, payload: ButtonActionRulePayload) -> ButtonActionRule:
-        if payload.enabled and self.config.session_type != "user":
+        if payload.enabled and self.session_type != "user":
             raise ServiceError("user_mode_required", "Button rules require a user session")
         if payload.enabled and not payload.source_chats:
             raise ServiceError("button_source_required", "Enabled button rules need a source chat")
@@ -151,27 +164,3 @@ class RuleService:
     def _ensure_unique(name: str, existing_names: list[str]) -> None:
         if name.casefold() in {item.casefold() for item in existing_names}:
             raise ServiceError("duplicate_name", "Rule names must be unique")
-
-
-class AccountRuleRegistry:
-    """Build a rule service bound to one account's config, runtime and stats."""
-
-    def __init__(self, configs, runtimes, stats):
-        self.configs = configs
-        self.runtimes = runtimes
-        self.stats = stats
-        self._services: dict[str, RuleService] = {}
-
-    def for_account(self, account_id: str) -> RuleService:
-        service = self._services.get(account_id)
-        if service is None:
-            service = RuleService(
-                self.configs.for_account(account_id),
-                self.runtimes.get_runtime(account_id),
-                self.stats.for_account(account_id),
-            )
-            self._services[account_id] = service
-        return service
-
-    def discard(self, account_id: str) -> None:
-        self._services.pop(account_id, None)

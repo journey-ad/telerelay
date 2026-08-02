@@ -17,13 +17,14 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { accountRequest, json, request } from '../api/client'
 import type { TelegramAccount, TelegramAuth } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 import { AccountAvatar } from './AccountAvatar'
 import { clearAuthenticatedImages } from './AuthenticatedImage'
-import { Button, confirm, Dialog, fieldClass, IconButton } from './ui'
+import { Button, confirm, Dialog, fieldClass, IconButton, PasswordInput } from './ui'
 
 function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   const identity = account.username ? `@${account.username}` : ''
@@ -33,6 +34,7 @@ function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   if (account.running) return t('accounts.running')
   if (identity) return identity
   if (account.authenticated) return t('accounts.saved')
+  if (account.kind === 'bot') return t('accounts.bot')
   return t('accounts.awaitingAuth')
 }
 
@@ -65,8 +67,11 @@ export function AccountSwitcher({
 }) {
   const { t, i18n } = useTranslation()
   const client = useQueryClient()
+  const navigate = useNavigate()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [label, setLabel] = useState('')
+  const [accountKind, setAccountKind] = useState<'user' | 'bot'>('user')
+  const [botToken, setBotToken] = useState('')
   const [authValue, setAuthValue] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingLabel, setEditingLabel] = useState('')
@@ -90,6 +95,7 @@ export function AccountSwitcher({
       request<TelegramAccount>(`/api/v1/telegram-accounts/${accountId}/activate`, json('POST')),
     onSuccess: async (account) => {
       setActiveAccount(client, account)
+      navigate('/')
       if (!account.authenticated) {
         setDialogOpen(true)
         try {
@@ -109,15 +115,22 @@ export function AccountSwitcher({
     mutationFn: async () => {
       const account = await request<TelegramAccount>(
         '/api/v1/telegram-accounts',
-        json('POST', { label }),
+        json('POST', {
+          label,
+          kind: accountKind,
+          ...(accountKind === 'bot' ? { bot_token: botToken } : {}),
+        }),
       )
-      await accountRequest(account.id, '/api/v1/telegram-auth/start', json('POST'))
+      if (accountKind === 'user') {
+        await accountRequest(account.id, '/api/v1/telegram-auth/start', json('POST'))
+      }
       return account
     },
     onSuccess: async (account) => {
       setActiveAccount(client, account)
       setFlowError(null)
       setLabel('')
+      setBotToken('')
       await Promise.all([
         client.invalidateQueries({ queryKey: ['telegram-accounts'] }),
         client.invalidateQueries({ queryKey: ['telegram-auth'] }),
@@ -194,6 +207,7 @@ export function AccountSwitcher({
   function openAccountDialog() {
     setFlowError(null)
     setAuthValue('')
+    setBotToken('')
     setDialogOpen(true)
   }
 
@@ -470,6 +484,23 @@ export function AccountSwitcher({
               <UserRound size={17} className="text-blue-600" />
               <strong className="text-[13px] text-slate-700">{t('accounts.addNew')}</strong>
             </div>
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              {(['user', 'bot'] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setAccountKind(kind)}
+                  className={cn(
+                    'h-8 rounded-[5px] border text-[13px] outline-none transition',
+                    accountKind === kind
+                      ? 'border-blue-300 bg-blue-50 text-blue-700 ring-3 ring-blue-500/10'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-blue-200',
+                  )}
+                >
+                  {t(kind === 'user' ? 'accounts.user' : 'accounts.bot')}
+                </button>
+              ))}
+            </div>
             <div className="grid grid-cols-[1fr_auto] items-end gap-2 max-sm:grid-cols-1">
               <label className={fieldClass}>
                 <span>{t('accounts.name')}</span>
@@ -479,26 +510,45 @@ export function AccountSwitcher({
                   placeholder={t('accounts.namePlaceholder')}
                   maxLength={100}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter' && label.trim()) creating.mutate()
+                    if (
+                      event.key === 'Enter' &&
+                      label.trim() &&
+                      (accountKind === 'user' || botToken.trim())
+                    ) {
+                      creating.mutate()
+                    }
                   }}
                 />
               </label>
               <Button
                 icon={Plus}
                 onClick={() => creating.mutate()}
-                disabled={!label.trim() || creating.isPending}
+                disabled={
+                  !label.trim() || (accountKind === 'bot' && !botToken.trim()) || creating.isPending
+                }
               >
                 {t(creating.isPending ? 'accounts.creating' : 'accounts.add')}
               </Button>
             </div>
+            {accountKind === 'bot' ? (
+              <label className={cn(fieldClass, 'mt-2')}>
+                <span>{t('accounts.botToken')}</span>
+                <PasswordInput
+                  value={botToken}
+                  onChange={setBotToken}
+                  placeholder={t('accounts.botTokenPlaceholder')}
+                  autoComplete="off"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && label.trim() && botToken.trim()) {
+                      creating.mutate()
+                    }
+                  }}
+                />
+              </label>
+            ) : null}
           </section>
         )}
 
-        {auth.data?.state === 'success' ? (
-          <p className="mt-4 rounded-[5px] border border-emerald-100 bg-emerald-50 p-2.5 text-[13px] text-emerald-700">
-            {t('accounts.authSuccess')}
-          </p>
-        ) : null}
         {flowError || auth.data?.error || switching.error || startingAuth.error ? (
           <p className="mt-4 rounded-[5px] border border-rose-100 bg-rose-50 p-2.5 text-[13px] text-rose-700">
             {flowError || auth.data?.error || messageFrom(switching.error || startingAuth.error)}

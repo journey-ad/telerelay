@@ -17,7 +17,16 @@ from backend.telegram_runtimes import TelegramRuntimeRegistry
 
 
 class FakeRuntime:
-    def __init__(self, config, auth_manager, session_name, queue_db_path, account_id):
+    def __init__(
+        self,
+        config,
+        auth_manager,
+        session_name,
+        queue_db_path,
+        account_id,
+        bot_token=None,
+        session_type=None,
+    ):
         self.session_name = session_name
         self.queue_db_path = Path(queue_db_path)
         self.account_id = account_id
@@ -273,6 +282,62 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(account["id"], self.store.active_account_id)
         self.assertEqual(self.registry.ensure_runtime(account["id"]).actions, [])
 
+    async def test_bot_authentication_does_not_block_other_account_mutations(self):
+        authentication_started = asyncio.Event()
+        release_authentication = asyncio.Event()
+
+        class BlockingClientManager:
+            def __init__(
+                self,
+                config,
+                auth_manager=None,
+                session_name=None,
+                on_user_authenticated=None,
+                bot_token=None,
+            ):
+                self.session_name = Path(session_name)
+                self.on_user_authenticated = on_user_authenticated
+
+            async def connect(self):
+                authentication_started.set()
+                await release_authentication.wait()
+                Path(f"{self.session_name}.session").write_bytes(b"fake-session")
+                if self.on_user_authenticated:
+                    self.on_user_authenticated(
+                        {
+                            "display_name": "Parallel Bot",
+                            "telegram_user_id": 200,
+                        }
+                    )
+                return True
+
+            async def disconnect(self):
+                return None
+
+        with patch(
+            "backend.telegram_accounts.TelegramClientManager",
+            BlockingClientManager,
+        ):
+            creation = asyncio.create_task(
+                self.service.create(
+                    "并行 Bot",
+                    kind="bot",
+                    bot_token="123456789:AA" + "x" * 30,
+                )
+            )
+            await authentication_started.wait()
+            try:
+                activated = await asyncio.wait_for(
+                    self.service.activate(self.primary_id),
+                    timeout=0.2,
+                )
+            finally:
+                release_authentication.set()
+            created = await creation
+
+        self.assertEqual(activated["id"], self.primary_id)
+        self.assertEqual(created["id"], "200")
+
     async def test_activate_authenticated_account_does_not_stop_or_start_any_runtime(self):
         new_account = self.store.create("已登录账号")
         new_account = self.store.finalize_identity(new_account.id, {"telegram_user_id": 456})
@@ -496,6 +561,118 @@ class TelegramAccountServiceTests(unittest.IsolatedAsyncioTestCase):
             self.registry.ensure_runtime(account["id"])
 
         self.assertEqual(raised.exception.code, "account_unavailable")
+
+
+class BotAccountStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.root = Path(self.temp_dir.name)
+
+    def test_bot_token_is_stored_outside_public_metadata_and_removed_on_delete(self):
+        store = TelegramAccountStore(self.root)
+        account = store.create("Relay Bot", kind="bot")
+        store.set_bot_token(account.id, "123456789:AA" + "x" * 30)
+
+        self.assertEqual(store.get_bot_token(account.id), "123456789:AA" + "x" * 30)
+        self.assertNotIn("bot_token", store.get_public(account.id))
+        self.assertEqual(store.get_public(account.id)["kind"], "bot")
+
+        store.delete(account.id)
+        self.assertFalse(
+            (store.data_dir / "bot_tokens" / f"{account.id}.token").exists()
+        )
+
+    def test_bot_token_follows_account_finalization(self):
+        store = TelegramAccountStore(self.root)
+        account = store.create("Relay Bot", kind="bot")
+        token = "123456789:AA" + "x" * 30
+        store.set_bot_token(account.id, token)
+        previous_id = account.id
+
+        finalized = store.finalize_identity(
+            account.id,
+            {"display_name": "Relay Bot", "telegram_user_id": 123456789},
+        )
+
+        self.assertEqual(finalized.id, "123456789")
+        self.assertEqual(store.get_bot_token(finalized.id), token)
+        self.assertFalse(
+            (store.data_dir / "bot_tokens" / f"{previous_id}.token").exists()
+        )
+        self.assertTrue(
+            (store.data_dir / "bot_tokens" / f"{finalized.id}.token").is_file()
+        )
+
+    def test_bot_token_is_recovered_from_pre_finalization_account_id(self):
+        store = TelegramAccountStore(self.root)
+        account = store.create("Relay Bot", kind="bot")
+        token = "123456789:AA" + "x" * 30
+        store.set_bot_token(account.id, token)
+        previous_id = account.id
+        finalized = store.finalize_identity(
+            account.id,
+            {"display_name": "Relay Bot", "telegram_user_id": 123456789},
+        )
+        canonical = store.data_dir / "bot_tokens" / f"{finalized.id}.token"
+        orphan = store.data_dir / "bot_tokens" / f"{previous_id}.token"
+        canonical.rename(orphan)
+
+        self.assertEqual(store.get_bot_token(finalized.id), token)
+        self.assertTrue(canonical.is_file())
+        self.assertFalse(orphan.exists())
+
+    def test_orphaned_bot_token_recovery_ignores_other_bots(self):
+        store = TelegramAccountStore(self.root)
+        account = store.create("Relay Bot", kind="bot")
+        token = "123456789:AA" + "x" * 30
+        store.set_bot_token(account.id, token)
+        previous_id = account.id
+        finalized = store.finalize_identity(
+            account.id,
+            {"display_name": "Relay Bot", "telegram_user_id": 123456789},
+        )
+        canonical = store.data_dir / "bot_tokens" / f"{finalized.id}.token"
+        orphan = store.data_dir / "bot_tokens" / f"{previous_id}.token"
+        canonical.rename(orphan)
+        store.data_dir.joinpath("bot_tokens", "999999999.token").write_text(
+            "999999999:AA" + "z" * 30,
+            encoding="utf-8",
+        )
+
+        self.assertEqual(store.get_bot_token(finalized.id), token)
+        self.assertTrue(canonical.is_file())
+        self.assertTrue(store.data_dir.joinpath("bot_tokens", "999999999.token").is_file())
+
+    def test_seed_bot_replaces_placeholder_and_adopts_legacy_session(self):
+        legacy = self.root / "telegram_session.session"
+        legacy.write_bytes(b"legacy-session")
+        store = TelegramAccountStore(self.root)
+        self.assertEqual(len(store.list_public()), 1)
+
+        account = store.seed_bot("123456789:AA" + "y" * 30)
+
+        self.assertEqual(store.list_public()[0]["kind"], "bot")
+        self.assertEqual(store.get_bot_token(account.id), "123456789:AA" + "y" * 30)
+        migrated = Path(f"{store.session_name(account.id)}.session")
+        self.assertEqual(migrated.read_bytes(), b"legacy-session")
+
+    def test_seed_bot_restores_missing_token_for_existing_bot(self):
+        store = TelegramAccountStore(self.root)
+        account = store.create("Relay Bot", kind="bot")
+        store.set_bot_token(account.id, "123456789:AA" + "old" + "x" * 27)
+        (store.data_dir / "bot_tokens" / f"{account.id}.token").unlink()
+
+        seeded = store.seed_bot("987654321:BB" + "y" * 30)
+
+        self.assertEqual(seeded.id, account.id)
+        self.assertEqual(store.get_bot_token(account.id), "987654321:BB" + "y" * 30)
+
+    def test_invalid_bot_token_is_rejected(self):
+        store = TelegramAccountStore(self.root)
+        with self.assertRaises(TelegramAccountError) as raised:
+            store.validate_bot_token("not-a-token")
+        self.assertEqual(raised.exception.code, "invalid_bot_token")
 
 
 if __name__ == "__main__":

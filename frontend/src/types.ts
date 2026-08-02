@@ -3,7 +3,6 @@ export type ChatRef = string | number
 export interface SessionInfo {
   authenticated: boolean
   auth_required: boolean
-  session_type: 'user' | 'bot'
   language: string
   active_account_id?: string | null
 }
@@ -15,6 +14,7 @@ export interface TelegramAccount {
   username: string
   telegram_user_id?: number | null
   created_at: string
+  kind: 'user' | 'bot'
   active: boolean
   authenticated: boolean
   running: boolean
@@ -190,7 +190,7 @@ export interface HistoryPage {
 export interface TelegramChat {
   id: number
   title: string
-  kind: 'bot' | 'group' | 'supergroup' | 'channel'
+  kind: 'bot' | 'private' | 'group' | 'supergroup' | 'channel'
   username?: string | null
 }
 export interface ExportTask {
@@ -246,7 +246,7 @@ export interface TelegramAuth {
 }
 export interface AppConfig {
   config: Record<string, unknown>
-  runtime: { session_type: string }
+  runtime: Record<string, unknown>
 }
 export interface RelayEvent {
   id: number

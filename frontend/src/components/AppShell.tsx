@@ -20,7 +20,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { accountRequest, request } from '../api/client'
 import { useEvents } from '../hooks/useEvents'
-import type { BotStatus, RelayEvent, SessionInfo, TelegramAccount } from '../types'
+import type { BotStatus, RelayEvent, TelegramAccount } from '../types'
 import { cn } from '../utils/cn'
 import { AccountSwitcher } from './AccountSwitcher'
 import { Brand } from './Brand'
@@ -52,7 +52,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
       : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700 [&>svg]:text-slate-400'
   }`
 
-export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout: () => void }) {
+export function AppShell({ onLogout }: { onLogout: () => void }) {
   const { t } = useTranslation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const queryClient = useQueryClient()
@@ -60,13 +60,20 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
   const accountsQuery = useQuery({
     queryKey: ['telegram-accounts'],
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
-    enabled: session.session_type === 'user',
     refetchInterval: 30_000,
   })
-  const accountId =
-    session.session_type === 'user'
-      ? (accountsQuery.data?.find((account) => account.active)?.id ?? '')
-      : 'bot'
+  const activeAccount =
+    accountsQuery.data?.find((account) => account.active) ?? accountsQuery.data?.[0]
+  const accountId = activeAccount?.id ?? ''
+  const activeAccountKind = activeAccount?.kind ?? 'user'
+  const botUnavailableRoutes = ['/telegram', '/automations', '/exports']
+  const workspaceNavigation = navigation
+    .slice(0, 6)
+    .filter((item) => activeAccountKind !== 'bot' || !botUnavailableRoutes.includes(item.to))
+  const systemNavigation = navigation.slice(6)
+  const visibleMobileNavigation = mobileNavigation.filter(
+    (item) => activeAccountKind !== 'bot' || !botUnavailableRoutes.includes(item.to),
+  )
   const statusQuery = useQuery({
     queryKey: ['bot-status', accountId],
     queryFn: () => accountRequest<BotStatus>(accountId, '/api/v1/bot/status'),
@@ -154,7 +161,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           <span className="block px-2.5 pb-2 text-[13px] font-bold text-slate-400 uppercase">
             {t('nav.workspace')}
           </span>
-          {navigation.slice(0, 6).map(({ icon: Icon, ...item }) => (
+          {workspaceNavigation.map(({ icon: Icon, ...item }) => (
             <NavLink
               key={item.to}
               {...item}
@@ -168,7 +175,7 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
           <span className="mt-5 block px-2.5 pb-2 text-[13px] font-bold text-slate-400 uppercase">
             {t('nav.system')}
           </span>
-          {navigation.slice(6).map(({ icon: Icon, ...item }) => (
+          {systemNavigation.map(({ icon: Icon, ...item }) => (
             <NavLink
               key={item.to}
               {...item}
@@ -242,22 +249,9 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
               />
               {t(online ? 'node.online' : 'node.offline')}
             </div>
-            <LanguageToggle
-              className={session.session_type === 'user' ? 'max-md:hidden' : undefined}
-            />
-            <IconButton
-              label={t('nav.refresh')}
-              icon={RefreshCw}
-              className={session.session_type === 'user' ? 'max-md:hidden' : undefined}
-              onClick={refreshData}
-            />
-            {session.session_type === 'user' ? (
-              <AccountSwitcher onLogout={onLogout} onRefresh={refreshData} />
-            ) : (
-              <span className="ml-1 flex h-9.5 items-center rounded-md border border-slate-200 bg-white px-3 text-xs text-slate-600">
-                {t('node.botSession')}
-              </span>
-            )}
+            <LanguageToggle />
+            <IconButton label={t('nav.refresh')} icon={RefreshCw} onClick={refreshData} />
+            <AccountSwitcher onLogout={onLogout} onRefresh={refreshData} />
           </div>
         </header>
         <div
@@ -274,9 +268,10 @@ export function AppShell({ session, onLogout }: { session: SessionInfo; onLogout
         className={cn(
           'fixed inset-x-0 bottom-0 z-25 hidden h-14.5 grid-cols-5 border-t',
           'border-slate-200 bg-white/95 backdrop-blur-xl max-md:grid',
+          activeAccountKind === 'bot' && 'grid-cols-3',
         )}
       >
-        {mobileNavigation.map(({ icon: Icon, label, ...item }) => (
+        {visibleMobileNavigation.map(({ icon: Icon, label, ...item }) => (
           <NavLink
             key={item.to}
             {...item}

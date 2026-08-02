@@ -131,7 +131,7 @@ export function RulesPage() {
       return accountRequest<ForwardingRule>(
         accountId,
         `/api/v1/rules/${index}`,
-        json('PUT', { ...structuredClone(rule), enabled }),
+        json('PATCH', { enabled }),
       )
     },
     onSuccess: (updated, { index }) => {

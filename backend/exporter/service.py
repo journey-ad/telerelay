@@ -12,7 +12,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from backend.i18n import t
-from backend.logger import get_logger
+from backend.logger import get_logger, run_with_account_log_context
 
 from .formatters import create_writer_set
 from .message_store import MessageArchiveStore
@@ -66,6 +66,7 @@ class ExportService:
         store: Optional[ExportStore] = None,
         source: Optional[TelegramExportSource] = None,
         events=None,
+        session_type: str = "user",
     ):
         self.config = config
         self.bot_manager = bot_manager
@@ -73,6 +74,7 @@ class ExportService:
         self.store = store or ExportStore()
         self.source = source or TelegramExportSource(bot_manager)
         self.events = events
+        self.session_type = session_type
         self.export_root = Path(config.export_root_dir)
         self.export_root.mkdir(parents=True, exist_ok=True)
         self.message_db_root = Path(
@@ -133,7 +135,7 @@ class ExportService:
         return None
 
     def availability(self, require_connection: bool = True) -> Tuple[bool, str]:
-        if self.config.session_type != "user":
+        if self.session_type != "user":
             return False, t("message.export.user_mode_required")
         if require_connection and not self.bot_manager.is_connected:
             return False, t("message.export.telegram_not_connected")
@@ -292,6 +294,8 @@ class ExportService:
             )
         )
         self._executor.submit(
+            run_with_account_log_context,
+            self.account_id,
             self._run_group_export,
             state.id,
             normalized_formats,
@@ -460,6 +464,8 @@ class ExportService:
             )
         )
         self._executor.submit(
+            run_with_account_log_context,
+            self.account_id,
             self._run_message_export,
             state.id,
             None,
@@ -944,6 +950,8 @@ class ExportService:
                 )
             )
             self._executor.submit(
+                run_with_account_log_context,
+                self.account_id,
                 self._run_message_export,
                 state.id,
                 task.id,

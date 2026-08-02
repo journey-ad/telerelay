@@ -1,5 +1,4 @@
 import asyncio
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -228,10 +227,7 @@ class ButtonActionEngineTests(unittest.IsolatedAsyncioTestCase):
 
 class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
     async def test_rule_service_saves_multiple_patterns_and_regex_mode(self):
-        with (
-            tempfile.TemporaryDirectory() as temp_dir,
-            patch.dict(os.environ, {"SESSION_TYPE": "user"}),
-        ):
+        with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.yaml"
             config = Config(
                 env_file=str(Path(temp_dir) / "missing.env"),
@@ -273,10 +269,7 @@ class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(rule.to_dict()["click_all_matches"])
 
     async def test_rule_service_rejects_invalid_regex(self):
-        with (
-            tempfile.TemporaryDirectory() as temp_dir,
-            patch.dict(os.environ, {"SESSION_TYPE": "user"}),
-        ):
+        with tempfile.TemporaryDirectory() as temp_dir:
             config = Config(
                 env_file=str(Path(temp_dir) / "missing.env"),
                 config_file=str(Path(temp_dir) / "config.yaml"),
@@ -298,15 +291,16 @@ class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config.get_button_action_rules(), [])
 
     async def test_rule_service_rejects_bot_mode_when_enabling(self):
-        with (
-            tempfile.TemporaryDirectory() as temp_dir,
-            patch.dict(os.environ, {"SESSION_TYPE": "bot"}),
-        ):
+        with tempfile.TemporaryDirectory() as temp_dir:
             config = Config(
                 env_file=str(Path(temp_dir) / "missing.env"),
                 config_file=str(Path(temp_dir) / "config.yaml"),
             )
-            service = RuleService(config, SimpleNamespace(is_running=False))
+            service = RuleService(
+                config,
+                SimpleNamespace(is_running=False),
+                session_type="bot",
+            )
 
             with self.assertRaises(ServiceError) as raised:
                 await service.create_button_rule(
@@ -320,6 +314,28 @@ class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(raised.exception.code, "user_mode_required")
             self.assertEqual(config.get_button_action_rules(), [])
+
+    async def test_bot_config_validate_accepts_store_token(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / ".env"
+            env_path.write_text("API_ID=12345\nAPI_HASH=test-hash\n", encoding="utf-8")
+            config_path = Path(temp_dir) / "config.yaml"
+            config_path.write_text(
+                "session_type: bot\nforwarding_rules: []\n",
+                encoding="utf-8",
+            )
+            config = Config(
+                env_file=str(env_path),
+                config_file=str(config_path),
+            )
+
+            valid, message = config.validate()
+            self.assertFalse(valid)
+            self.assertIn("BOT_TOKEN", message)
+
+            valid, message = config.validate(bot_token="123456789:AA" + "x" * 30)
+            self.assertFalse(valid)
+            self.assertNotIn("BOT_TOKEN", message)
 
 
 if __name__ == "__main__":

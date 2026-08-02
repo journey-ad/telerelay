@@ -5,9 +5,39 @@ Provides unified logging configuration and management
 import logging
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from backend.constants import LOG_FILE_BACKUP_COUNT
+
+
+_account_id: ContextVar[str | None] = ContextVar(
+    "telerelay_log_account_id",
+    default=None,
+)
+
+
+class AccountTagFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        account_id = getattr(record, "account_id", None) or _account_id.get()
+        record.account_id = account_id
+        record.account_tag = f"account:{account_id}" if account_id else "system"
+        return True
+
+
+@contextmanager
+def account_log_context(account_id: str | None):
+    token = _account_id.set(str(account_id) if account_id else None)
+    try:
+        yield
+    finally:
+        _account_id.reset(token)
+
+
+def run_with_account_log_context(account_id: str | None, callback, *args, **kwargs):
+    with account_log_context(account_id):
+        return callback(*args, **kwargs)
 
 
 class DailyFileHandler(TimedRotatingFileHandler):
@@ -70,6 +100,8 @@ def setup_logger(name: str = "telerelay", level: str = "INFO") -> logging.Logger
     # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    if not any(isinstance(item, AccountTagFilter) for item in logger.filters):
+        logger.addFilter(AccountTagFilter())
 
     # Avoid adding duplicate handlers
     if logger.handlers:
@@ -77,7 +109,7 @@ def setup_logger(name: str = "telerelay", level: str = "INFO") -> logging.Logger
 
     # Log format
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        '%(asctime)s - %(name)s - %(levelname)s - [%(account_tag)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 

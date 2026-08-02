@@ -7,7 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from backend.i18n import t
-from backend.logger import get_logger
+from backend.logger import account_log_context, get_logger
 
 logger = get_logger()
 
@@ -37,6 +37,10 @@ class ExportScheduler:
         return CronTrigger(day_of_week=task.weekday, hour=task.hour, **common)
 
     def start(self) -> None:
+        with account_log_context(self.service.account_id):
+            self._start()
+
+    def _start(self) -> None:
         with self._lock:
             if self._started:
                 return
@@ -48,6 +52,10 @@ class ExportScheduler:
                 self.sync_task(task.id)
 
     def sync_task(self, task_id: int) -> None:
+        with account_log_context(self.service.account_id):
+            self._sync_task(task_id)
+
+    def _sync_task(self, task_id: int) -> None:
         with self._lock:
             if not self._started:
                 return
@@ -93,6 +101,10 @@ class ExportScheduler:
             )
 
     def _execute_task(self, task_id: int) -> None:
+        with account_log_context(self.service.account_id):
+            self._execute_task_scoped(task_id)
+
+    def _execute_task_scoped(self, task_id: int) -> None:
         logger.debug(t("log.export.task_triggered", task_id=task_id))
         try:
             job_id = self.service.start_task_export(task_id)
@@ -167,6 +179,10 @@ class ExportScheduler:
             self._scheduler.remove_job(job_id)
 
     def shutdown(self) -> None:
+        with account_log_context(self.service.account_id):
+            self._shutdown()
+
+    def _shutdown(self) -> None:
         with self._lock:
             if self._started:
                 self._scheduler.shutdown(wait=False)

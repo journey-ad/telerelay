@@ -21,7 +21,9 @@ import {
   Badge,
   Button,
   confirm,
+  Dialog,
   fieldClass,
+  PasswordInput,
   PageHeader,
   Panel,
   Tabs,
@@ -40,6 +42,8 @@ export function SettingsPage() {
   const accountId = useAccountScope()
   const [rawConfig, setRawConfig] = useState('')
   const [authValue, setAuthValue] = useState('')
+  const [botTokenInput, setBotTokenInput] = useState('')
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
   const config = useQuery({
     queryKey: ['config', accountId],
@@ -94,6 +98,23 @@ export function SettingsPage() {
     mutationFn: () =>
       accountRequest(accountId, '/api/v1/config', json('PUT', { config: JSON.parse(rawConfig) })),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['config', accountId] }),
+  })
+  const updatingBotToken = useMutation({
+    mutationFn: () =>
+      accountRequest<{ code: string }>(
+        accountId,
+        `/api/v1/telegram-accounts/${accountId}/bot-token`,
+        json('PUT', { bot_token: botTokenInput }),
+      ),
+    onSuccess: async () => {
+      setBotTokenInput('')
+      setTokenDialogOpen(false)
+      await Promise.all([
+        accounts.refetch(),
+        client.invalidateQueries({ queryKey: ['telegram-auth'] }),
+        client.invalidateQueries({ queryKey: ['bot-status'] }),
+      ])
+    },
   })
   const waitingLabels = {
     waiting_phone: 'settings.phone',
@@ -160,11 +181,39 @@ export function SettingsPage() {
   const authSuccess = Boolean(
     activeAccount?.authenticated || auth.data?.authenticated || auth.data?.state === 'success',
   )
+  const botConnected = activeAccount?.kind === 'bot' && Boolean(activeAccount.connected)
+  const botSessionLabel =
+    activeAccount?.kind === 'bot'
+      ? botConnected
+        ? 'settings.botConnected'
+        : 'settings.botDisconnected'
+      : authSuccess
+        ? 'settings.authSuccess'
+        : 'settings.authRequired'
+  const botSessionMeta =
+    activeAccount?.kind === 'bot'
+      ? [
+          activeAccount.label,
+          activeAccount.display_name && activeAccount.display_name !== activeAccount.label
+            ? activeAccount.display_name
+            : null,
+          activeAccount.username ? `@${activeAccount.username}` : null,
+          activeAccount.telegram_user_id ? `[ID: ${activeAccount.telegram_user_id}]` : null,
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : null
   const authStateLabel =
-    authSuccess && (!auth.data?.state || ['idle', 'success'].includes(auth.data.state))
-      ? 'settings.authState.success'
-      : (authStateLabels[auth.data?.state as keyof typeof authStateLabels] ??
-        'settings.authState.unknown')
+    activeAccount?.kind === 'bot'
+      ? botConnected
+        ? 'settings.authState.success'
+        : auth.data?.state === 'error'
+          ? 'settings.authState.error'
+          : 'settings.authState.notRequired'
+      : authSuccess && (!auth.data?.state || ['idle', 'success'].includes(auth.data.state))
+        ? 'settings.authState.success'
+        : (authStateLabels[auth.data?.state as keyof typeof authStateLabels] ??
+          'settings.authState.unknown')
 
   return (
     <>
@@ -198,7 +247,15 @@ export function SettingsPage() {
             <Panel
               title={t('settings.telegramSession')}
               meta={
-                <Badge tone={authSuccess ? 'green' : auth.data?.state === 'error' ? 'red' : 'gray'}>
+                <Badge
+                  tone={
+                    (activeAccount?.kind === 'bot' ? botConnected : authSuccess)
+                      ? 'green'
+                      : auth.data?.state === 'error'
+                        ? 'red'
+                        : 'gray'
+                  }
+                >
                   {t(authStateLabel)}
                 </Badge>
               }
@@ -220,13 +277,14 @@ export function SettingsPage() {
                   <ShieldCheck size={24} />
                 </span>
                 <div className="min-w-0">
-                  <strong className="text-[13px] text-slate-700">
-                    {t(authSuccess ? 'settings.authSuccess' : 'settings.authRequired')}
-                  </strong>
+                  <strong className="text-[13px] text-slate-700">{t(botSessionLabel)}</strong>
                   <p className="mt-1 text-[13px] leading-4 text-slate-500">
                     {auth.data?.user_info ||
                       auth.data?.error ||
-                      t('settings.currentMode', { mode: config.data?.runtime.session_type ?? '-' })}
+                      botSessionMeta ||
+                      t('settings.currentMode', {
+                        mode: activeAccount?.kind ?? '-',
+                      })}
                   </p>
                 </div>
               </div>
@@ -245,12 +303,24 @@ export function SettingsPage() {
                 </div>
               ) : null}
               <div className="mt-4 flex flex-wrap gap-2">
-                <Button icon={KeyRound} onClick={() => void startAuth()}>
-                  {t('settings.startAuth')}
-                </Button>
-                <Button variant="danger" icon={Trash2} onClick={() => void handleClearSession()}>
-                  {t('settings.clearSession')}
-                </Button>
+                {activeAccount?.kind === 'bot' ? (
+                  <Button icon={KeyRound} onClick={() => setTokenDialogOpen(true)}>
+                    {t('settings.updateBotToken')}
+                  </Button>
+                ) : (
+                  <>
+                    <Button icon={KeyRound} onClick={() => void startAuth()}>
+                      {t('settings.startAuth')}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      icon={Trash2}
+                      onClick={() => void handleClearSession()}
+                    >
+                      {t('settings.clearSession')}
+                    </Button>
+                  </>
+                )}
                 {activeAccount ? (
                   <Button variant="danger" icon={Trash2} onClick={() => void handleDeleteAccount()}>
                     {t('accounts.delete')}
@@ -463,6 +533,49 @@ export function SettingsPage() {
           </Panel>
         </TabsContent>
       </Tabs>
+      <Dialog
+        open={tokenDialogOpen}
+        onOpenChange={setTokenDialogOpen}
+        title={t('settings.updateBotToken')}
+        description={t('settings.updateBotTokenDetail')}
+      >
+        <div className="space-y-4">
+          <label className={fieldClass}>
+            <span>{t('accounts.botToken')}</span>
+            <PasswordInput
+              value={botTokenInput}
+              onChange={setBotTokenInput}
+              placeholder={t('accounts.botTokenPlaceholder')}
+              autoComplete="off"
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && botTokenInput.trim()) updatingBotToken.mutate()
+              }}
+            />
+          </label>
+          {updatingBotToken.error ? (
+            <p
+              className={cn(
+                'rounded-[5px] border border-rose-100 bg-rose-50 p-2',
+                'text-[13px] text-rose-700',
+              )}
+            >
+              {messageFrom(updatingBotToken.error)}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <Button variant="secondary" onClick={() => setTokenDialogOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={() => updatingBotToken.mutate()}
+              disabled={!botTokenInput.trim() || updatingBotToken.isPending}
+            >
+              {t(updatingBotToken.isPending ? 'settings.saving' : 'common.ok')}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </>
   )
 }

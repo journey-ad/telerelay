@@ -44,10 +44,14 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
   const customChat = search.trim() ? parseChatRef(search.trim()) : null
   const customChatSelected = customChat !== null && value.some((item) => sameChat(item, customChat))
 
-  const handleOpenChange = useCallback((next: boolean) => {
-    setOpen(next)
-    if (!next) setSearch('')
-  }, [])
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      setOpen(next)
+      if (!next) setSearch('')
+      if (next) void chats.refetch()
+    },
+    [chats.refetch],
+  )
 
   function toggleChat(chatId: ChatRef) {
     const selected = value.some((item) => sameChat(item, chatId))

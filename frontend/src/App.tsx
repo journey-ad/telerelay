@@ -41,7 +41,7 @@ const queryClient = new QueryClient({
   },
 })
 
-function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => void }) {
+function Console({ onLogout }: { onLogout: () => void }) {
   const { t } = useTranslation()
   const page = (children: ReactNode) => (
     <Suspense
@@ -67,7 +67,7 @@ function Console({ session, onLogout }: { session: SessionInfo; onLogout: () => 
   )
   const router = createBrowserRouter([
     {
-      element: <AppShell session={session} onLogout={onLogout} />,
+      element: <AppShell onLogout={onLogout} />,
       children: [
         { path: '/', element: page(<DashboardPage />) },
         { path: '/telegram', element: page(<TelegramPreviewPage />) },
@@ -123,11 +123,7 @@ export default function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {session ? (
-        <Console session={session} onLogout={logout} />
-      ) : (
-        <Login onAuthenticated={setSession} />
-      )}
+      {session ? <Console onLogout={logout} /> : <Login onAuthenticated={setSession} />}
     </QueryClientProvider>
   )
 }

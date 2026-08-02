@@ -33,6 +33,7 @@ class TelegramClientManager:
         auth_manager: Optional['AuthManager'] = None,
         session_name: str | Path | None = None,
         on_user_authenticated: Callable[[dict[str, Any]], None] | None = None,
+        bot_token: str | None = None,
     ):
         """
         Initialize client manager
@@ -44,6 +45,7 @@ class TelegramClientManager:
         self.config = config
         self.auth_manager = auth_manager
         self.on_user_authenticated = on_user_authenticated
+        self.bot_token = bot_token
         self.client: Optional[TelegramClient] = None
         self.is_connected = False
 
@@ -98,6 +100,32 @@ class TelegramClientManager:
         except Exception as e:
             logger.error(t("log.client.proxy_parse_failed", error=str(e)))
             return None
+
+    async def _publish_identity(self, me: User) -> None:
+        """Capture the authenticated identity once a client is connected."""
+        full_name = " ".join(filter(None, [me.first_name, me.last_name]))
+        user_info = full_name
+        if me.username:
+            user_info += f" (@{me.username})"
+        if me.id:
+            user_info += f" [ID: {me.id}]"
+        if self.auth_manager:
+            self.auth_manager.set_user_info(user_info)
+        if self.on_user_authenticated:
+            identity = {
+                "display_name": full_name,
+                "username": me.username or "",
+                "telegram_user_id": me.id,
+            }
+            try:
+                identity["avatar_bytes"] = await self.client.download_profile_photo(
+                    me,
+                    file=bytes,
+                    download_big=False,
+                )
+            except Exception as exc:
+                logger.warning(t("log.client.photo_refresh_failed", error=str(exc)))
+            self.on_user_authenticated(identity)
     
     async def connect(self) -> bool:
         """
@@ -110,8 +138,9 @@ class TelegramClientManager:
             # Init client
             proxy = self._parse_proxy()
 
-            if self.config.session_type == "bot":
-                if not self.config.bot_token:
+            if self.bot_token:
+                token = self.bot_token
+                if not token:
                     logger.error(t("log.client.bot_token_required"))
                     return False
 
@@ -122,8 +151,10 @@ class TelegramClientManager:
                     proxy=proxy
                 )
                 
-                await self.client.start(bot_token=self.config.bot_token)
+                await self.client.start(bot_token=token)
                 logger.info(t("log.client.bot_connected"))
+                me: User = await self.client.get_me()
+                await self._publish_identity(me)
             else:
                 # User mode
                 self.client = TelegramClient(
@@ -150,35 +181,11 @@ class TelegramClientManager:
                         password=self.auth_manager.password_callback
                     )
 
-                    # Get user info
                     me: User = await self.client.get_me()
-                    logger.info(t("log.client.user_logged_in", name=me.first_name, username=me.username))
-
-                    full_name = ' '.join(filter(None, [me.first_name, me.last_name]))
-                    user_info = full_name
-                    if me.username:
-                        user_info += f" (@{me.username})"
-                    if me.id:
-                        user_info += f" [ID: {me.id}]"
-
-                    self.auth_manager.set_user_info(user_info)
-
-                    if self.on_user_authenticated:
-                        identity = {
-                            "display_name": full_name,
-                            "username": me.username or "",
-                            "telegram_user_id": me.id,
-                        }
-                        try:
-                            identity["avatar_bytes"] = await self.client.download_profile_photo(
-                                me,
-                                file=bytes,
-                                download_big=False,
-                            )
-                        except Exception as exc:
-                            logger.warning(t("log.client.photo_refresh_failed", error=str(exc)))
-                        self.on_user_authenticated(identity)
-
+                    logger.info(
+                        t("log.client.user_logged_in", name=me.first_name, username=me.username)
+                    )
+                    await self._publish_identity(me)
                     self.auth_manager.set_state("success")
 
                 except PhoneNumberInvalidError:
