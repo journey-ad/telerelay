@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTelegramChats } from '../hooks/useTelegramChats'
 import type { TelegramChat } from '../types'
+import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 
 interface ChatSelectProps {
@@ -11,12 +12,6 @@ interface ChatSelectProps {
   onValueChange: (value: string) => void
   placeholder?: string
   disabled?: boolean
-}
-
-function chatMatches(chat: TelegramChat, term: string) {
-  return [chat.id, chat.title, chat.username]
-    .filter((value) => value !== null && value !== undefined)
-    .some((value) => String(value).toLowerCase().includes(term))
 }
 
 function chatLabel(chat: TelegramChat) {

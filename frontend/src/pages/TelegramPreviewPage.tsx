@@ -46,6 +46,7 @@ import type {
   TelegramPreviewMessagesPage,
 } from '../types'
 import { avatarInitials } from '../utils/avatar'
+import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 import { hashColor } from '../utils/color'
 import { formatNumber, messageFrom } from '../utils/format'
@@ -702,7 +703,7 @@ export function TelegramPreviewPage() {
     return (dialogs.data?.pages.flatMap((page) => page.items) ?? []).filter((item) => {
       if (seen.has(item.id)) return false
       seen.add(item.id)
-      return !dialogFilter || item.title.toLowerCase().includes(dialogFilter.toLowerCase())
+      return chatMatches(item, dialogFilter)
     })
   }, [dialogFilter, dialogs.data?.pages])
 

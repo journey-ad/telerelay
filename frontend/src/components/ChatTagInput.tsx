@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTelegramChats } from '../hooks/useTelegramChats'
 import type { ChatRef, TelegramChat } from '../types'
+import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 
 interface ChatTagInputProps {
@@ -33,12 +34,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
 
   const filtered = useMemo(() => {
     if (!chats.data) return []
-    const term = search.trim().toLowerCase()
-    return chats.data.filter((chat) =>
-      [chat.id, chat.title, chat.username]
-        .filter((value) => value !== null && value !== undefined)
-        .some((value) => String(value).toLowerCase().includes(term)),
-    )
+    return chats.data.filter((chat) => chatMatches(chat, search))
   }, [chats.data, search])
 
   const customChat = search.trim() ? parseChatRef(search.trim()) : null
