@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Download, FileClock, Pause, Play, RefreshCw, Search } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import { Badge, Button, EmptyState, IconButton, PageHeader, Select } from '../components/ui'
@@ -28,9 +28,11 @@ export function LogsPage() {
   const [levelFilter, setLevelFilter] = useState('all')
   const [paused, setPaused] = useState(false)
   const [live, setLive] = useState<string[]>([])
+  const containerRef = useRef<HTMLDivElement>(null)
+  const stickToBottom = useRef(true)
   const logs = useQuery({
     queryKey: ['logs'],
-    queryFn: () => request<{ lines: string[] }>('/api/v1/logs?lines=800'),
+    queryFn: () => request<{ lines: string[] }>('/api/v1/logs?lines=500'),
     refetchInterval: paused ? false : 10_000,
   })
   const receiveEvent = useCallback(
@@ -49,9 +51,21 @@ export function LogsPage() {
             (!filter || line.toLowerCase().includes(filter.toLowerCase())) &&
             (levelFilter === 'all' || level(line) === levelFilter),
         )
-        .slice(-1000),
+        .slice(-500),
     [filter, levelFilter, live, logs.data?.lines],
   )
+  useEffect(() => {
+    const container = containerRef.current
+    if (container && stickToBottom.current) {
+      container.scrollTop = container.scrollHeight
+    }
+  }, [lines])
+  function handleScroll() {
+    const container = containerRef.current
+    if (!container) return
+    stickToBottom.current =
+      container.scrollHeight - container.scrollTop - container.clientHeight < 40
+  }
   function downloadLogs() {
     const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -147,7 +161,11 @@ export function LogsPage() {
             </Badge>
           </span>
         </header>
-        <div className="min-h-120 max-h-[calc(100vh-250px)] overflow-auto py-3">
+        <div
+          ref={containerRef}
+          onScroll={handleScroll}
+          className="min-h-120 max-h-[calc(100vh-250px)] overflow-auto py-3"
+        >
           {lines.map((line, index) => (
             <p
               className={cn(

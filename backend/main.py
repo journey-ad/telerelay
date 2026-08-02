@@ -149,8 +149,9 @@ def create_app() -> FastAPI:
         title="TeleRelay API",
         version=current_version(),
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url=None,
+        openapi_url=None,
+        redoc_url=None,
     )
 
     @app.get("/api/v1/health", tags=["system"])
@@ -237,6 +238,7 @@ def main() -> None:
         log_config=None,
         reload=args.reload,
         reload_dirs=[str(Path(__file__).resolve().parent)] if args.reload else None,
+        timeout_graceful_shutdown=5,
     )
 
 

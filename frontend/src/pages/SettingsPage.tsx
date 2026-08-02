@@ -309,16 +309,20 @@ export function SettingsPage() {
                   </Button>
                 ) : (
                   <>
-                    <Button icon={KeyRound} onClick={() => void startAuth()}>
-                      {t('settings.startAuth')}
-                    </Button>
-                    <Button
-                      variant="danger"
-                      icon={Trash2}
-                      onClick={() => void handleClearSession()}
-                    >
-                      {t('settings.clearSession')}
-                    </Button>
+                    {!authSuccess ? (
+                      <Button icon={KeyRound} onClick={() => void startAuth()}>
+                        {t('settings.startAuth')}
+                      </Button>
+                    ) : null}
+                    {authSuccess ? (
+                      <Button
+                        variant="danger"
+                        icon={Trash2}
+                        onClick={() => void handleClearSession()}
+                      >
+                        {t('settings.clearSession')}
+                      </Button>
+                    ) : null}
                   </>
                 )}
                 {activeAccount ? (
