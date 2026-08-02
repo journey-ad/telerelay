@@ -22,9 +22,9 @@ import {
   tableClass,
   tableWrapClass,
 } from '../components/ui'
-import type { ChatRef, ForwardingRule } from '../types'
+import type { ChatRef, ForwardingRule, Stats } from '../types'
 import { cn } from '../utils/cn'
-import { messageFrom } from '../utils/format'
+import { formatNumber, messageFrom } from '../utils/format'
 import { lines } from '../utils/parse'
 
 const blankRule = (): ForwardingRule => ({
@@ -57,6 +57,7 @@ export function RulesPage() {
   const client = useQueryClient()
   const accountId = useAccountScope()
   const rulesKey = ['rules', accountId] as const
+  const statsKey = ['stats', accountId, 'all'] as const
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
@@ -67,10 +68,21 @@ export function RulesPage() {
     queryKey: rulesKey,
     queryFn: () => accountRequest<ForwardingRule[]>(accountId, '/api/v1/rules'),
   })
+  const statsQuery = useQuery({
+    queryKey: statsKey,
+    queryFn: () => accountRequest<Stats>(accountId, '/api/v1/stats?date_limit=all'),
+  })
   const chatsQuery = useTelegramChats()
   const chatLabels = useMemo(
     () => new Map((chatsQuery.data ?? []).map((chat) => [String(chat.id), chat.title] as const)),
     [chatsQuery.data],
+  )
+  const ruleStats = useMemo(
+    () =>
+      new Map(
+        (statsQuery.data?.rules ?? []).map((item) => [item.rule_name, item] as const),
+      ),
+    [statsQuery.data],
   )
   const rules = useMemo(
     () =>
@@ -122,6 +134,7 @@ export function RulesPage() {
         if (index === null) return [...current, updated]
         return current.map((rule, position) => (position === index ? updated : rule))
       })
+      void client.invalidateQueries({ queryKey: statsKey })
     },
   })
   const toggle = useMutation({
@@ -161,6 +174,7 @@ export function RulesPage() {
       client.setQueryData<ForwardingRule[]>(rulesKey, (current) =>
         current?.filter((_, position) => position !== index),
       )
+      void client.invalidateQueries({ queryKey: statsKey })
     },
   })
   function submit(event: FormEvent) {
@@ -237,6 +251,7 @@ export function RulesPage() {
                 <th>{t('rules.columns.source')}</th>
                 <th>{t('rules.columns.destination')}</th>
                 <th>{t('rules.columns.filterMode')}</th>
+                <th>{t('rules.columns.triggerCount')}</th>
                 <th aria-label={t('common.actions')} />
               </tr>
             </thead>
@@ -294,6 +309,16 @@ export function RulesPage() {
                     <small className="mt-1 block text-xs text-slate-400">
                       {t('common.conditionCount', {
                         count: rule.filters.keywords.length + rule.filters.regex_patterns.length,
+                      })}
+                    </small>
+                  </td>
+                  <td>
+                    <strong className="font-mono text-xs font-semibold text-slate-700">
+                      {formatNumber(ruleStats.get(rule.name)?.forwarded ?? 0)}
+                    </strong>
+                    <small className="mt-1 block text-xs text-slate-400">
+                      {t('rules.filteredDetail', {
+                        count: formatNumber(ruleStats.get(rule.name)?.filtered ?? 0),
                       })}
                     </small>
                   </td>

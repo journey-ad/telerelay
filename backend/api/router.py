@@ -752,14 +752,15 @@ async def stats(
 ) -> dict:
     database = _active_stats(context)
     report_days = STATS_DATE_LIMIT_DAYS[date_limit]
-    details, daily = await asyncio.gather(
+    details, button_details, daily = await asyncio.gather(
         asyncio.to_thread(database.get_rule_stats_detail),
+        asyncio.to_thread(database.get_button_action_stats),
         asyncio.to_thread(
             database.get_daily_stats,
             None if report_days is None else report_days * 2,
         ),
     )
-    return {"rules": details, "daily": daily}
+    return {"rules": details, "button_rules": button_details, "daily": daily}
 
 
 @router.get("/history")

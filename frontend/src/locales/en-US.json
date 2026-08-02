@@ -147,8 +147,10 @@
       "status": "Status",
       "source": "Source",
       "destination": "Destination",
-      "filterMode": "Filter mode"
+      "filterMode": "Filter mode",
+      "triggerCount": "Trigger count"
     },
+    "filteredDetail": "Filtered {{count}}",
     "allowlist": "Allowlist",
     "blocklist": "Blocklist",
     "edit": "Edit rule",
@@ -201,8 +203,10 @@
       "status": "Status",
       "source": "Source",
       "matchMode": "Match mode",
-      "buttonText": "Button text"
+      "buttonText": "Button text",
+      "triggerCount": "Trigger count"
     },
+    "triggeredDetail": "Successful runs",
     "exact": "Exact match",
     "contains": "Contains text",
     "regexMatch": "Regex match",

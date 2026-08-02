@@ -166,6 +166,7 @@ export interface BotStatus {
 export interface Stats {
   daily: Array<{ date: string; forwarded: number; filtered: number; total?: number }>
   rules: Array<{ rule_name: string; total: number; forwarded: number; filtered?: number }>
+  button_rules?: Array<{ rule_name: string; triggered: number }>
 }
 
 export interface HistoryItem {

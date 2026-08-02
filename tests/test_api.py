@@ -491,6 +491,7 @@ class ApiContractTests(unittest.TestCase):
         database = SimpleNamespace(
             get_rule_stats_detail=list,
             get_daily_stats=lambda days: calls.append(days) or [{"days": days}],
+            get_button_action_stats=lambda: [{"rule_name": "button", "triggered": 3}],
         )
 
         with patch("backend.stats_db.get_stats_db", return_value=database):
@@ -504,6 +505,7 @@ class ApiContractTests(unittest.TestCase):
             invalid = self.client.get("/api/v1/stats", params={"date_limit": "90day"})
 
         self.assertEqual(default.status_code, 200, default.text)
+        self.assertEqual(default.json()["button_rules"], [{"rule_name": "button", "triggered": 3}])
         self.assertEqual(calls, [60, 14, 28, 60, None])
         self.assertTrue(all(response.status_code == 200 for response in responses.values()))
         self.assertEqual(invalid.status_code, 422)

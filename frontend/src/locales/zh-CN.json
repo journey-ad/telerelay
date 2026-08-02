@@ -147,8 +147,10 @@
       "status": "状态",
       "source": "来源",
       "destination": "目标",
-      "filterMode": "过滤方式"
+      "filterMode": "过滤方式",
+      "triggerCount": "触发次数"
     },
+    "filteredDetail": "已过滤 {{count}}",
     "allowlist": "白名单",
     "blocklist": "黑名单",
     "edit": "编辑规则",
@@ -201,8 +203,10 @@
       "status": "状态",
       "source": "来源",
       "matchMode": "匹配方式",
-      "buttonText": "按钮文本"
+      "buttonText": "按钮文本",
+      "triggerCount": "触发次数"
     },
+    "triggeredDetail": "成功处理",
     "exact": "精确匹配",
     "contains": "包含文本",
     "regexMatch": "正则匹配",

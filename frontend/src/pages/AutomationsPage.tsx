@@ -20,9 +20,9 @@ import {
   tableClass,
   tableWrapClass,
 } from '../components/ui'
-import type { ButtonRule } from '../types'
+import type { ButtonRule, Stats } from '../types'
 import { cn } from '../utils/cn'
-import { messageFrom } from '../utils/format'
+import { formatNumber, messageFrom } from '../utils/format'
 import { lines } from '../utils/parse'
 
 const blankRule = (): ButtonRule => ({
@@ -40,6 +40,7 @@ export function AutomationsPage() {
   const client = useQueryClient()
   const accountId = useAccountScope()
   const rulesKey = ['button-rules', accountId] as const
+  const statsKey = ['stats', accountId, 'all'] as const
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<number | null>(null)
   const [search, setSearch] = useState('')
@@ -50,12 +51,25 @@ export function AutomationsPage() {
     queryKey: rulesKey,
     queryFn: () => accountRequest<ButtonRule[]>(accountId, '/api/v1/button-rules'),
   })
+  const statsQuery = useQuery({
+    queryKey: statsKey,
+    queryFn: () => accountRequest<Stats>(accountId, '/api/v1/stats?date_limit=all'),
+  })
   const rules = useMemo(
     () =>
       (query.data ?? [])
         .map((rule, index) => ({ rule, index }))
         .filter(({ rule }) => rule.name.toLowerCase().includes(search.toLowerCase())),
     [query.data, search],
+  )
+  const buttonStats = useMemo(
+    () =>
+      new Map(
+        (statsQuery.data?.button_rules ?? []).map(
+          (item) => [item.rule_name, item.triggered] as const,
+        ),
+      ),
+    [statsQuery.data],
   )
 
   function create() {
@@ -98,6 +112,7 @@ export function AutomationsPage() {
         if (index === null) return [...current, updated]
         return current.map((rule, position) => (position === index ? updated : rule))
       })
+      void client.invalidateQueries({ queryKey: statsKey })
     },
   })
   const toggle = useMutation({
@@ -123,6 +138,7 @@ export function AutomationsPage() {
       client.setQueryData<ButtonRule[]>(rulesKey, (current) =>
         current?.filter((_, position) => position !== index),
       )
+      void client.invalidateQueries({ queryKey: statsKey })
     },
   })
   function submit(event: FormEvent) {
@@ -197,6 +213,7 @@ export function AutomationsPage() {
                 <th>{t('automations.columns.source')}</th>
                 <th>{t('automations.columns.matchMode')}</th>
                 <th>{t('automations.columns.buttonText')}</th>
+                <th>{t('automations.columns.triggerCount')}</th>
                 <th aria-label={t('common.actions')} />
               </tr>
             </thead>
@@ -261,6 +278,14 @@ export function AutomationsPage() {
                     </span>
                     <small className="mt-1 block text-xs text-slate-400">
                       {t('common.patternCount', { count: rule.button_texts.length })}
+                    </small>
+                  </td>
+                  <td>
+                    <strong className="font-mono text-xs font-semibold text-slate-700">
+                      {formatNumber(buttonStats.get(rule.name) ?? 0)}
+                    </strong>
+                    <small className="mt-1 block text-xs text-slate-400">
+                      {t('automations.triggeredDetail')}
                     </small>
                   </td>
                   <td>

@@ -109,6 +109,7 @@ class RuleService:
     ) -> dict:
         rules = self.config.get_button_action_rules()
         self._ensure_index(index, rules)
+        old_name = rules[index].name
         self._ensure_unique(
             payload.name,
             [rule.name for position, rule in enumerate(rules) if position != index],
@@ -116,14 +117,17 @@ class RuleService:
         rule = self._button_rule(payload)
         rules[index] = rule
         self._save_button_rules(rules)
+        if old_name != rule.name:
+            self.stats_db.rename_button_rule(old_name, rule.name)
         await self._reload_if_running()
         return rule.to_dict()
 
     async def delete_button_rule(self, index: int) -> None:
         rules = self.config.get_button_action_rules()
         self._ensure_index(index, rules)
-        rules.pop(index)
+        deleted = rules.pop(index)
         self._save_button_rules(rules)
+        self.stats_db.delete_button_rule(deleted.name)
         await self._reload_if_running()
 
     def _forwarding_rule(self, payload: ForwardingRulePayload) -> ForwardingRule:

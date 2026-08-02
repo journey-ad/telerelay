@@ -30,6 +30,28 @@ class StatsDBTests(unittest.TestCase):
         self.assertEqual([item["date"] for item in all_time], ["2020-01-01", "2026-07-30"])
         self.assertEqual([item["date"] for item in recent], ["2026-07-30"])
 
+    def test_button_action_stats_increment_rename_reset_and_delete(self):
+        self.database.increment_button_action("签到")
+        self.database.increment_button_action("签到")
+        self.database.increment_button_action("其他")
+
+        self.assertEqual(
+            {
+                item["rule_name"]: item["triggered"]
+                for item in self.database.get_button_action_stats()
+            },
+            {"签到": 2, "其他": 1},
+        )
+
+        self.database.rename_button_rule("签到", "每日签到")
+        self.database.reset_button_action_stats("其他")
+        self.database.delete_button_rule("每日签到")
+
+        self.assertEqual(
+            self.database.get_button_action_stats(),
+            [{"rule_name": "其他", "triggered": 0}],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -83,6 +83,14 @@ class StatsDB:
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_ds_date ON daily_stats(date)")
 
+                # Button action stats table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS button_action_stats (
+                        rule_name TEXT PRIMARY KEY,
+                        trigger_count INTEGER NOT NULL DEFAULT 0
+                    )
+                """)
+
                 conn.commit()
             finally:
                 conn.close()
@@ -117,6 +125,82 @@ class StatsDB:
                 for row in cursor.fetchall():
                     result[row[0]] = {"forwarded": row[1], "filtered": row[2]}
                 return result
+            finally:
+                conn.close()
+
+    # -- Button action stats --
+
+    def increment_button_action(self, rule_name: str) -> None:
+        """Increment the successful trigger count for a button automation."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("""
+                    INSERT INTO button_action_stats (rule_name, trigger_count)
+                    VALUES (?, 1)
+                    ON CONFLICT(rule_name) DO UPDATE SET
+                        trigger_count = trigger_count + 1
+                """, (rule_name,))
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_button_action_stats(self) -> List[dict]:
+        """Return cumulative trigger counts for all button automations."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                cursor = conn.execute(
+                    "SELECT rule_name, trigger_count FROM button_action_stats ORDER BY rule_name"
+                )
+                return [
+                    {"rule_name": row[0], "triggered": row[1]}
+                    for row in cursor.fetchall()
+                ]
+            finally:
+                conn.close()
+
+    def reset_button_action_stats(self, rule_name: str = None) -> None:
+        """Reset trigger counts for one button automation or all of them."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                if rule_name:
+                    conn.execute(
+                        "UPDATE button_action_stats SET trigger_count = 0 WHERE rule_name = ?",
+                        (rule_name,)
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE button_action_stats SET trigger_count = 0"
+                    )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def rename_button_rule(self, old_name: str, new_name: str) -> None:
+        """Keep button trigger history when a button automation is renamed."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "UPDATE button_action_stats SET rule_name = ? WHERE rule_name = ?",
+                    (new_name, old_name)
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def delete_button_rule(self, rule_name: str) -> None:
+        """Remove trigger history when a button automation is deleted."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    "DELETE FROM button_action_stats WHERE rule_name = ?",
+                    (rule_name,)
+                )
+                conn.commit()
             finally:
                 conn.close()
 
@@ -160,9 +244,16 @@ class StatsDB:
                         "UPDATE rule_stats SET forwarded_count = 0, filtered_count = 0 WHERE rule_name = ?",
                         (rule_name,)
                     )
+                    conn.execute(
+                        "UPDATE button_action_stats SET trigger_count = 0 WHERE rule_name = ?",
+                        (rule_name,)
+                    )
                 else:
                     conn.execute(
                         "UPDATE rule_stats SET forwarded_count = 0, filtered_count = 0"
+                    )
+                    conn.execute(
+                        "UPDATE button_action_stats SET trigger_count = 0"
                     )
                 conn.commit()
             finally:

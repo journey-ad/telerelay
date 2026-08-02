@@ -650,6 +650,7 @@ class BotManager:
             result = await self.button_action_engine.handle(event)
             if result:
                 rule_name, button_texts = result
+                self.stats_db.increment_button_action(rule_name)
                 message = event.message
                 raw_content = message.text or get_media_description(message)
                 raw_content = raw_content.replace('\n', ' ')

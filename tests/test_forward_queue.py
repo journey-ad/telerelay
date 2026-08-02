@@ -499,6 +499,8 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         manager = BotManager(SimpleNamespace())
         manager.button_action_engine = FakeEngine()
+        trigger_calls = []
+        manager.stats_db = SimpleNamespace(increment_button_action=trigger_calls.append)
         event = SimpleNamespace(
             chat_id=-1001,
             message=SimpleNamespace(
@@ -516,6 +518,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Confirm", success_log)
         self.assertIn("-1001/42", success_log)
         self.assertIn("first line second line", success_log)
+        self.assertEqual(trigger_calls, ["button-rule"])
 
     async def test_button_action_success_log_contains_media_description(self):
         class FakeEngine:
@@ -524,6 +527,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         manager = BotManager(SimpleNamespace())
         manager.button_action_engine = FakeEngine()
+        manager.stats_db = SimpleNamespace(increment_button_action=lambda name: None)
         event = SimpleNamespace(
             chat_id=-1001,
             message=SimpleNamespace(id=43, text=None, media=SimpleNamespace()),
