@@ -27,6 +27,7 @@ from backend.i18n import t
 from backend.logger import account_log_context, get_logger
 from backend.rule import ForwardingRule
 from backend.stats_db import get_stats_db
+from backend.subscriptions import SubscriberStore
 
 if TYPE_CHECKING:
     from backend.auth_manager import AuthManager
@@ -48,6 +49,7 @@ class BotManager:
         stats_db=None,
         bot_token: str | None = None,
         session_type: str = "user",
+        subscriber_store: Any = None,
     ):
         """Initialize Bot Manager
 
@@ -64,6 +66,7 @@ class BotManager:
         self.account_id = account_id
         self.events = events
         self.stats_db = stats_db or get_stats_db()
+        self.subscriber_store = subscriber_store
         self.on_user_authenticated: Callable[[dict[str, Any]], None] | None = None
         self.client_manager: Optional[TelegramClientManager] = None
         self.forwarder: Optional[MessageForwarder] = None
@@ -74,6 +77,7 @@ class BotManager:
         self._forwarding_handler = None
         self._button_handler = None
         self._chat_recorder_handler = None
+        self._command_handler = None
         self.chat_recorder: Callable[[str, Any], None] | None = None
         self.button_action_engine: Optional[ButtonActionEngine] = None
         self.forward_queue_store: Optional[ForwardQueueStore] = None
@@ -215,6 +219,9 @@ class BotManager:
 
             await self.reload_rules()
 
+            if self.session_type == "bot":
+                await self._set_bot_commands()
+
             logger.info(t("log.bot.started", count=len(self.forwarders)))
 
             # Run until stop signal received
@@ -260,6 +267,12 @@ class BotManager:
             bot_manager=self,
             target_label_cache=self._target_label_cache,
             stats_db=self.stats_db,
+            suppressed_check=(
+                self._is_target_suppressed if self.session_type == "bot" else None
+            ),
+            delivered_callback=(
+                self._record_target_delivery if self.session_type == "bot" else None
+            ),
         )
         return message_filter, forwarder
 
@@ -322,9 +335,11 @@ class BotManager:
         self.client_manager.remove_message_handler(self._forwarding_handler)
         self.client_manager.remove_message_handler(self._button_handler)
         self.client_manager.remove_message_handler(self._chat_recorder_handler)
+        self.client_manager.remove_message_handler(self._command_handler)
         self._forwarding_handler = None
         self._button_handler = None
         self._chat_recorder_handler = None
+        self._command_handler = None
         if forwarding_chats:
             self._forwarding_handler = self.client_manager.add_message_handler(
                 callback=self._central_message_handler,
@@ -333,6 +348,10 @@ class BotManager:
         if session_type == "bot":
             self._chat_recorder_handler = self.client_manager.add_message_handler(
                 callback=self._record_chat_entity,
+            )
+            self._command_handler = self.client_manager.add_message_handler(
+                callback=self._bot_command_handler,
+                incoming=True,
             )
         if button_action_engine:
             self._button_handler = self.client_manager.add_message_handler(
@@ -364,16 +383,207 @@ class BotManager:
                 getattr(event, "chat_id", None),
             )
             return
-        logger.debug(
-            "收到消息,记录已知会话 (account_id=%s, chat_id=%s, entity=%s)",
-            self.account_id,
-            getattr(chat, "id", None),
-            type(chat).__name__,
-        )
         try:
             recorder(self.account_id, chat)
         except Exception:
             logger.exception("记录已知会话失败 (account_id=%s)", self.account_id)
+
+    def get_subscriber_store(self) -> Any:
+        """Resolve the persistent push-subscription store for this account."""
+        with self._lock:
+            if self.subscriber_store is None:
+                base_dir = (
+                    Path(self.queue_db_path).parent
+                    if self.queue_db_path
+                    else Path("data")
+                )
+                self.subscriber_store = SubscriberStore(base_dir / "subscribers.db")
+            return self.subscriber_store
+
+    async def _set_bot_commands(self) -> None:
+        """Expose the push subscription commands in the bot's command menu."""
+        if not self.client_manager:
+            return
+        client = self.client_manager.get_client()
+        if client is None:
+            return
+        from telethon.tl.functions.bots import SetBotCommandsRequest
+        from telethon.tl.types import BotCommand, BotCommandScopeDefault
+
+        commands = [
+            BotCommand("start", t("message.bot_command.menu_start")),
+            BotCommand("stop", t("message.bot_command.menu_stop")),
+            BotCommand("resume", t("message.bot_command.menu_resume")),
+            BotCommand("status", t("message.bot_command.menu_status")),
+        ]
+        try:
+            await client(
+                SetBotCommandsRequest(
+                    scope=BotCommandScopeDefault(),
+                    lang_code="",
+                    commands=commands,
+                )
+            )
+            logger.info(t("log.bot.commands_menu_set"))
+        except Exception as exc:
+            logger.warning(
+                t("log.bot.commands_menu_failed", error=str(exc)),
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _command_name(raw_text: str | None) -> str | None:
+        """Extract a bare command word, ignoring any @botname suffix."""
+        text = (raw_text or "").strip()
+        if not text.startswith("/"):
+            return None
+        word = text.split()[0].lower()
+        if "@" in word:
+            word = word.split("@", 1)[0]
+        return word[1:] if len(word) > 1 else None
+
+    @staticmethod
+    def _sender_identity(event) -> dict[str, Any]:
+        """Capture user identity from a private chat update without API calls."""
+        sender = getattr(event, "sender", None)
+        return {
+            "user_id": (
+                event.sender_id
+                if event.sender_id is not None
+                else getattr(event, "chat_id", None)
+            ),
+            "username": getattr(sender, "username", None),
+            "first_name": getattr(sender, "first_name", None),
+            "last_name": getattr(sender, "last_name", None),
+        }
+
+    @staticmethod
+    async def _safe_reply(event, text: str) -> None:
+        reply = getattr(event, "reply", None)
+        if reply is not None:
+            await reply(text)
+
+    async def _bot_command_handler(self, event) -> None:
+        """Handle private bot-account commands: /start /stop /resume /status."""
+        if self.session_type != "bot" or not getattr(event, "is_private", False):
+            return
+        command = self._command_name(
+            getattr(getattr(event, "message", None), "raw_text", None)
+        )
+        if command not in ("start", "stop", "resume", "status"):
+            return
+        identity = self._sender_identity(event)
+        user_id = identity.get("user_id")
+        if user_id is None:
+            return
+        try:
+            if command == "start":
+                await self._cmd_start(event, identity)
+            elif command == "stop":
+                await self._cmd_stop(event, int(user_id))
+            elif command == "resume":
+                await self._cmd_resume(event, int(user_id))
+            else:
+                await self._cmd_status(event, int(user_id))
+        except Exception as exc:
+            logger.error(
+                t(
+                    "log.bot.command_failed",
+                    command=command,
+                    user_id=user_id,
+                    error=str(exc),
+                ),
+                exc_info=True,
+            )
+
+    async def _cmd_start(self, event, identity: dict[str, Any]) -> None:
+        """Register the user identity and reply with the command reference."""
+        store = self.get_subscriber_store()
+        store.record(
+            int(identity["user_id"]),
+            username=identity.get("username"),
+            first_name=identity.get("first_name"),
+            last_name=identity.get("last_name"),
+        )
+        logger.info(
+            t(
+                "log.bot.command_start",
+                user_id=identity["user_id"],
+                username=identity.get("username") or "-",
+            )
+        )
+        await self._safe_reply(event, t("message.bot_command.start_help"))
+
+    async def _cmd_stop(self, event, user_id: int) -> None:
+        """Opt the user out of push delivery."""
+        self.get_subscriber_store().set_status(user_id, "paused")
+        logger.info(t("log.bot.command_stop", user_id=user_id))
+        await self._safe_reply(event, t("message.bot_command.stopped"))
+
+    async def _cmd_resume(self, event, user_id: int) -> None:
+        """Re-enable push delivery for the user."""
+        self.get_subscriber_store().set_status(user_id, "active")
+        logger.info(t("log.bot.command_resume", user_id=user_id))
+        await self._safe_reply(event, t("message.bot_command.resumed"))
+
+    async def _cmd_status(self, event, user_id: int) -> None:
+        """Reply with the user's current subscription state."""
+        import datetime
+
+        record = self.get_subscriber_store().get(user_id)
+        if record is None:
+            text = t("message.bot_command.status_unregistered")
+        else:
+            when = datetime.datetime.fromtimestamp(record["updated_at"]).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+            if record["status"] == "paused":
+                text = t("message.bot_command.status_paused", date=when)
+            else:
+                text = t("message.bot_command.status_active", date=when)
+        await self._safe_reply(event, text)
+
+    def _is_target_suppressed(self, target: Any) -> bool:
+        """True when a forwarding target has opted out of bot push delivery."""
+        store = self.get_subscriber_store()
+        if isinstance(target, str) and target.strip().startswith("@"):
+            return store.is_suppressed_username(target)
+        user_id = self._target_user_id(target)
+        if user_id is None:
+            return False
+        return store.is_suppressed(user_id)
+
+    def _record_target_delivery(self, target: Any) -> None:
+        """Record one successful push when the target is a known subscriber."""
+        try:
+            store = self.get_subscriber_store()
+            if isinstance(target, str) and target.strip().startswith("@"):
+                store.increment_delivered_username(target)
+                return
+            user_id = self._target_user_id(target)
+            if user_id is not None:
+                store.increment_delivered(user_id)
+        except Exception:
+            logger.exception(
+                "记录订阅用户推送数量失败 (account_id=%s, target=%s)",
+                self.account_id,
+                target,
+            )
+
+    @staticmethod
+    def _target_user_id(target: Any) -> int | None:
+        """Normalize a target chat reference to a positive user id, if possible."""
+        if isinstance(target, bool):
+            return None
+        if isinstance(target, int):
+            return target if target > 0 else None
+        if isinstance(target, str):
+            try:
+                value = int(target.strip())
+            except (TypeError, ValueError):
+                return None
+            return value if value > 0 else None
+        return None
 
     async def _process_queue_item(self, item: ForwardQueueItem) -> float:
         """Load the Telegram message and execute one durable queue item."""

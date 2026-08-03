@@ -52,8 +52,10 @@
       "dashboard": "总览",
       "telegram": "会话",
       "rules": "规则",
-      "automations": "自动化"
-    }
+      "automations": "自动化",
+      "subscribers": "订阅"
+    },
+    "subscribers": "订阅用户"
   },
   "node": {
     "title": "Telegram 节点",
@@ -650,5 +652,28 @@
     "chatEmpty": "这个会话还没有消息",
     "latest": "回到最新消息",
     "selectChat": "选择一个会话开始浏览"
+  },
+  "subscribers": {
+    "eyebrow": "推送订阅",
+    "title": "订阅用户",
+    "description": "管理bot订阅用户，",
+    "total": "总订阅",
+    "active": "订阅中",
+    "paused": "已退订",
+    "columns": {
+      "user": "用户",
+      "status": "状态",
+      "delivered": "已推送数量",
+      "firstSeen": "首次订阅",
+      "updated": "最近更新",
+      "actions": "操作"
+    },
+    "statusActive": "订阅中",
+    "statusPaused": "已退订",
+    "pause": "暂停推送",
+    "resume": "恢复推送",
+    "empty": "暂无订阅用户",
+    "emptyDetail": "用户订阅bot后会显示在这里",
+    "unknownUser": "未知用户"
   }
 }

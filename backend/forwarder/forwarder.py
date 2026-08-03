@@ -4,7 +4,7 @@ Message forwarding core module
 import asyncio
 import copy
 import json
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
 from telethon import TelegramClient, utils
 from telethon.errors import ChatForwardsRestrictedError
@@ -45,11 +45,15 @@ class MessageForwarder:
         bot_manager=None,
         target_label_cache: Optional[dict[str, str]] = None,
         stats_db=None,
+        suppressed_check: Optional[Callable[[Any], bool]] = None,
+        delivered_callback: Optional[Callable[[Any], None]] = None,
     ):
         self.client = client
         self.rule = rule
         self.filter = message_filter
         self.bot_manager = bot_manager
+        self.suppressed_check = suppressed_check
+        self.delivered_callback = delivered_callback
         self._target_label_cache = (
             target_label_cache if target_label_cache is not None else {}
         )
@@ -152,6 +156,8 @@ class MessageForwarder:
         targets = self.rule.target_chats
         downloaded_files = []
         session_dir = None
+        sent_count = 0
+        skipped_count = 0
         try:
             if start_target_index >= len(targets):
                 self._log_result(
@@ -173,6 +179,13 @@ class MessageForwarder:
             source_text = self._build_source_text(message) if not self.rule.hide_sender else ""
             for i in range(max(0, start_target_index), len(targets)):
                 target = targets[i]
+                if getattr(self, "suppressed_check", None) and self.suppressed_check(target):
+                    # Opted-out subscribers are skipped silently; the durable
+                    # checkpoint still advances so retries never resend them.
+                    skipped_count += 1
+                    if on_target_success:
+                        on_target_success(i + 1)
+                    continue
                 try:
                     if downloaded_files:
                         await self._send_files(downloaded_files, messages, target, source_data, source_text)
@@ -188,24 +201,36 @@ class MessageForwarder:
                         raise RuntimeError(t("log.forward.download_failed"))
                     await self._send_files(downloaded_files, messages, target, source_data, source_text)
 
+                sent_count += 1
+                if self.delivered_callback:
+                    self.delivered_callback(target)
                 if on_target_success:
                     on_target_success(i + 1)
 
-        # Delay between targets; per-rule delay is applied after commit.
+                # Delay between targets; per-rule delay is applied after commit.
                 if self.rule.delay > 0 and i < len(targets) - 1:
                     await asyncio.sleep(self.rule.delay)
         finally:
             if session_dir:
                 MediaDownloader.cleanup(session_dir)
 
-        # Log result
-        self._log_result(
-            message,
-            messages,
-            len(targets),
-            len(targets),
-            target_labels,
-        )
+        if skipped_count:
+            logger.info(
+                t(
+                    "log.forward.suppressed_skipped",
+                    count=skipped_count,
+                    total=len(targets),
+                )
+            )
+        if sent_count or not skipped_count:
+            # Report success/failure only when delivery was actually attempted.
+            self._log_result(
+                message,
+                messages,
+                sent_count,
+                len(targets),
+                target_labels,
+            )
 
     # -- Forwarding --
 

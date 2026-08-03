@@ -97,27 +97,18 @@ class TelegramChatService:
         """Persist one chat seen by a bot runtime so pickers can list it."""
         chat = _chat_record(entity, include_private=True)
         if chat is None:
-            logger.debug(
-                "跳过不可记录的会话实体 (account_id=%s, entity=%s)",
-                account_id,
-                type(entity).__name__,
-            )
+            # skip unrecordable entities
             return
         path = self._known_chats_path(account_id)
         known = self._load_known_chats(path)
+        if str(chat.id) in known:
+            # already known, no need to update
+            return
         known[str(chat.id)] = chat.to_dict()
         if len(known) > self.MAX_KNOWN_CHATS:
             for stale in list(known)[: len(known) - self.MAX_KNOWN_CHATS]:
                 known.pop(stale, None)
         self._save_known_chats(path, known)
-        logger.debug(
-            "已记录已知会话 (account_id=%s, chat_id=%s, title=%s, total=%d, path=%s)",
-            account_id,
-            chat.id,
-            chat.title,
-            len(known),
-            path,
-        )
 
     def _known_chats_path(self, account_id: str) -> Path:
         return Path(f"{self.account_store.session_name(account_id)}.session").parent / "known_chats.json"

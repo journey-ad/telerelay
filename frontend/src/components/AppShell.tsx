@@ -13,6 +13,7 @@ import {
   Route,
   Settings,
   Sparkles,
+  Users,
   X,
 } from 'lucide-react'
 import { useCallback, useState } from 'react'
@@ -32,6 +33,7 @@ const navigation = [
   { to: '/telegram', label: 'nav.telegram', icon: MessageSquareText },
   { to: '/rules', label: 'nav.rules', icon: Route },
   { to: '/automations', label: 'nav.automations', icon: Sparkles },
+  { to: '/subscribers', label: 'nav.subscribers', icon: Users },
   { to: '/history', label: 'nav.history', icon: History },
   { to: '/exports', label: 'nav.exports', icon: Archive },
   { to: '/logs', label: 'nav.logs', icon: FileClock },
@@ -43,6 +45,7 @@ const mobileNavigation = [
   { ...navigation[1], label: 'nav.mobile.telegram' },
   { ...navigation[2], label: 'nav.mobile.rules' },
   { ...navigation[3], label: 'nav.mobile.automations' },
+  { ...navigation[4], label: 'nav.mobile.subscribers' },
 ] as const
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -67,13 +70,16 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
   const accountId = activeAccount?.id ?? ''
   const activeAccountKind = activeAccount?.kind ?? 'user'
   const botUnavailableRoutes = ['/telegram', '/automations', '/exports']
-  const workspaceNavigation = navigation
-    .slice(0, 6)
-    .filter((item) => activeAccountKind !== 'bot' || !botUnavailableRoutes.includes(item.to))
-  const systemNavigation = navigation.slice(6)
-  const visibleMobileNavigation = mobileNavigation.filter(
-    (item) => activeAccountKind !== 'bot' || !botUnavailableRoutes.includes(item.to),
-  )
+  const userUnavailableRoutes = ['/subscribers']
+  const workspaceNavigation = navigation.slice(0, 7).filter((item) => {
+    if (activeAccountKind === 'bot') return !botUnavailableRoutes.includes(item.to)
+    return !userUnavailableRoutes.includes(item.to)
+  })
+  const systemNavigation = navigation.slice(7)
+  const visibleMobileNavigation = mobileNavigation.filter((item) => {
+    if (activeAccountKind === 'bot') return !botUnavailableRoutes.includes(item.to)
+    return !userUnavailableRoutes.includes(item.to)
+  })
   const statusQuery = useQuery({
     queryKey: ['bot-status', accountId],
     queryFn: () => accountRequest<BotStatus>(accountId, '/api/v1/bot/status'),
@@ -285,7 +291,7 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
         className={cn(
           'fixed inset-x-0 bottom-0 z-25 hidden h-14.5 grid-cols-5 border-t',
           'border-slate-200 bg-white/95 backdrop-blur-xl max-md:grid',
-          activeAccountKind === 'bot' && 'grid-cols-3',
+          activeAccountKind === 'bot' && 'grid-cols-4',
         )}
       >
         {visibleMobileNavigation.map(({ icon: Icon, label, ...item }) => (

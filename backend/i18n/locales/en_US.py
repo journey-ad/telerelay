@@ -35,6 +35,12 @@ TRANSLATIONS = {
             "stopped": "Bot stopped",
             "main_error": "Bot main logic error: {error}",
             "message_received": "Message received - source={chat} ({chat_id}), sender={sender} ({sender_id}), content={preview}",
+            "command_start": "/start received, subscriber registered (user_id={user_id}, username={username})",
+            "command_stop": "Subscriber {user_id} stopped receiving push messages",
+            "command_resume": "Subscriber {user_id} resumed receiving push messages",
+            "command_failed": "Failed to handle /{command} (user_id={user_id}): {error}",
+            "commands_menu_set": "Bot command menu configured",
+            "commands_menu_failed": "Failed to set bot command menu: {error}",
             "not_running": "Bot is not running",
             "stopping": "Stopping Bot...",
             "stop_success": "✓ Bot stopped",
@@ -107,6 +113,7 @@ TRANSLATIONS = {
             "history_failed": "Forward history write failed - error={error}",
             "success": "✅ Forward succeeded - rule={rule}, source={source}, {group_info}targets=[{targets}], result={success}/{total}, content={preview}",
             "all_failed": "❌ Forward failed: \"{preview}\" → All targets failed",
+            "suppressed_skipped": "Skipped {count} opted-out targets (out of {total})",
             "source_label": "📢 Source: https://t.me/{username}/{msg_id}",
             "source_private": "📢 Source: https://t.me/c/{channel_id}/{msg_id}",
             "source_unknown": "📢 Source: {chat_title}",
@@ -506,6 +513,20 @@ TRANSLATIONS = {
             "stop_failed": "Bot failed to stop",
             "restart_success": "Bot restarted successfully",
             "restart_failed": "Bot failed to restart",
+        },
+
+        # message.bot_command.* - bot account push subscription commands
+        "bot_command": {
+            "start_help": "Available commands:\n/start - Subscribe and start receiving pushes\n/stop - Stop receiving pushes\n/resume - Resume receiving pushes\n/status - Show current status",
+            "stopped": "Push delivery stopped. Send /resume to restore it.",
+            "resumed": "Push delivery resumed.",
+            "status_active": "Status: subscribed ({date})",
+            "status_paused": "Status: stopped ({date})",
+            "status_unregistered": "Status: not subscribed. Send /start to subscribe.",
+            "menu_start": "Subscribe and start receiving pushes",
+            "menu_stop": "Stop receiving pushes",
+            "menu_resume": "Resume receiving pushes",
+            "menu_status": "Show current status",
         },
 
         # message.auth.* - authentication messages

@@ -48,6 +48,15 @@ class FakeBot:
         self.client_manager = None
         self.forwarders = []
         self.on_user_authenticated = None
+        self.subscriber_store = None
+
+    def get_subscriber_store(self):
+        from backend.subscriptions import SubscriberStore
+
+        if self.subscriber_store is None:
+            base = Path(self.queue_db_path).parent if self.queue_db_path else Path("data")
+            self.subscriber_store = SubscriberStore(base / "subscribers.db")
+        return self.subscriber_store
 
     async def start(self):
         if self.is_running:
@@ -279,6 +288,43 @@ class ApiContractTests(unittest.TestCase):
         status = self.client.get("/api/v1/bot/status")
         self.assertEqual(status.status_code, 200)
         self.assertFalse(status.json()["is_running"])
+
+    def test_subscribers_contract(self):
+        from backend.subscriptions import SubscriberStore
+
+        runtime = self.bot.get_runtime(self.account_id)
+        runtime.subscriber_store = SubscriberStore(
+            Path(self.temp_dir.name) / "subscribers.db"
+        )
+        store = runtime.subscriber_store
+
+        empty = self.client.get("/api/v1/subscribers")
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["items"], [])
+        self.assertEqual(empty.json()["counts"], {"total": 0, "active": 0, "paused": 0})
+
+        store.record(111, username="alice")
+        store.set_status(222, "paused")
+
+        listed = self.client.get("/api/v1/subscribers")
+        self.assertEqual(listed.status_code, 200)
+        body = listed.json()
+        self.assertEqual(len(body["items"]), 2)
+        self.assertEqual(body["counts"], {"total": 2, "active": 1, "paused": 1})
+
+        paused = self.client.post("/api/v1/subscribers/111/pause")
+        self.assertEqual(paused.status_code, 200)
+        self.assertEqual(paused.json()["code"], "subscriber_paused")
+        self.assertTrue(store.is_suppressed(111))
+
+        resumed = self.client.post("/api/v1/subscribers/111/resume")
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.json()["code"], "subscriber_resumed")
+        self.assertFalse(store.is_suppressed(111))
+
+        missing = self.client.post("/api/v1/subscribers/999/pause")
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["detail"]["code"], "subscriber_not_found")
 
     def test_auth_state_reports_persisted_session_when_runtime_state_is_idle(self):
         original_get_public = self.account_store.get_public

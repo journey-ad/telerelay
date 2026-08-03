@@ -180,6 +180,22 @@ export interface BotStatus {
   queue?: { counts?: Record<string, number>; pause_reason?: string }
 }
 
+export interface Subscriber {
+  user_id: number
+  username: string | null
+  first_name: string | null
+  last_name: string | null
+  status: 'active' | 'paused'
+  delivered_count: number
+  first_seen_at: number
+  updated_at: number
+}
+
+export interface SubscriberList {
+  items: Subscriber[]
+  counts: { total: number; active: number; paused: number }
+}
+
 export interface Stats {
   daily: Array<{ date: string; forwarded: number; filtered: number; total?: number }>
   rules: Array<{ rule_name: string; total: number; forwarded: number; filtered?: number }>

@@ -22,6 +22,9 @@ const AutomationsPage = lazy(() =>
 const HistoryPage = lazy(() =>
   import('./pages/HistoryPage').then((module) => ({ default: module.HistoryPage })),
 )
+const SubscribersPage = lazy(() =>
+  import('./pages/SubscribersPage').then((module) => ({ default: module.SubscribersPage })),
+)
 const TelegramPreviewPage = lazy(() =>
   import('./pages/TelegramPreviewPage').then((module) => ({ default: module.TelegramPreviewPage })),
 )
@@ -73,6 +76,7 @@ function Console({ onLogout }: { onLogout: () => void }) {
         { path: '/telegram', element: page(<TelegramPreviewPage />) },
         { path: '/rules', element: page(<RulesPage />) },
         { path: '/automations', element: page(<AutomationsPage />) },
+        { path: '/subscribers', element: page(<SubscribersPage />) },
         { path: '/history', element: page(<HistoryPage />) },
         { path: '/exports', element: page(<ExportsPage />) },
         { path: '/logs', element: page(<LogsPage />) },

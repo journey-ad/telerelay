@@ -705,6 +705,47 @@ async def delete_rule(
     return ApiMessage(code="rule_deleted")
 
 
+def _subscriber_store(context: ApplicationContext):
+    """Resolve the request-bound account's push subscription store."""
+    scope = _account_scope(context)
+    return scope.runtime.get_subscriber_store()
+
+
+@router.get("/subscribers")
+async def list_subscribers(
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    store = _subscriber_store(context)
+    return {
+        "items": store.list(),
+        "counts": store.counts(),
+    }
+
+
+@router.post("/subscribers/{user_id}/pause", response_model=ApiMessage)
+async def pause_subscriber(
+    user_id: int,
+    context: ApplicationContext = Depends(get_context),
+) -> ApiMessage:
+    store = _subscriber_store(context)
+    if store.get(user_id) is None:
+        raise _error("subscriber_not_found", "Subscriber does not exist", 404)
+    store.set_status(user_id, "paused")
+    return ApiMessage(code="subscriber_paused")
+
+
+@router.post("/subscribers/{user_id}/resume", response_model=ApiMessage)
+async def resume_subscriber(
+    user_id: int,
+    context: ApplicationContext = Depends(get_context),
+) -> ApiMessage:
+    store = _subscriber_store(context)
+    if store.get(user_id) is None:
+        raise _error("subscriber_not_found", "Subscriber does not exist", 404)
+    store.set_status(user_id, "active")
+    return ApiMessage(code="subscriber_resumed")
+
+
 @router.get("/button-rules")
 async def list_button_rules(context: ApplicationContext = Depends(get_context)) -> list[dict]:
     return _active_rules(context).list_button_rules()

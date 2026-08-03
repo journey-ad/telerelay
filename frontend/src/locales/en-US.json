@@ -52,8 +52,10 @@
       "dashboard": "Overview",
       "telegram": "Chats",
       "rules": "Rules",
-      "automations": "Automation"
-    }
+      "automations": "Automation",
+      "subscribers": "Subs"
+    },
+    "subscribers": "Subscribers"
   },
   "node": {
     "title": "Telegram node",
@@ -650,5 +652,28 @@
     "chatEmpty": "This chat has no messages yet",
     "latest": "Jump to latest message",
     "selectChat": "Select a chat to start browsing"
+  },
+  "subscribers": {
+    "eyebrow": "Push Subscriptions",
+    "title": "Subscribers",
+    "description": "Manage bot subscribers.",
+    "total": "Total",
+    "active": "Active",
+    "paused": "Paused",
+    "columns": {
+      "user": "User",
+      "status": "Status",
+      "delivered": "Delivered",
+      "firstSeen": "First seen",
+      "updated": "Last updated",
+      "actions": "Actions"
+    },
+    "statusActive": "Active",
+    "statusPaused": "Paused",
+    "pause": "Pause",
+    "resume": "Resume",
+    "empty": "No subscribers yet",
+    "emptyDetail": "Users will appear here after they subscribe to the bot.",
+    "unknownUser": "Unknown user"
   }
 }

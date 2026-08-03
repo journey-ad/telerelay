@@ -35,6 +35,12 @@ TRANSLATIONS = {
             "stopped": "Bot 已停止",
             "main_error": "Bot 主逻辑出错: {error}",
             "message_received": "收到消息 - 来源={chat} ({chat_id}), 发送者={sender} ({sender_id}), 内容={preview}",
+            "command_start": "收到 /start，注册订阅者 (user_id={user_id}, username={username})",
+            "command_stop": "订阅者 {user_id} 已停止接收推送",
+            "command_resume": "订阅者 {user_id} 已恢复接收推送",
+            "command_failed": "处理 /{command} 失败 (user_id={user_id}): {error}",
+            "commands_menu_set": "✓ 已设置 Bot 命令菜单",
+            "commands_menu_failed": "设置 Bot 命令菜单失败: {error}",
             "not_running": "Bot 未在运行",
             "stopping": "正在停止 Bot...",
             "stop_success": "✓ Bot 已停止",
@@ -107,6 +113,7 @@ TRANSLATIONS = {
             "history_failed": "转发历史写入失败 - 错误={error}",
             "success": "✅ 转发成功 - 规则={rule}, 来源={source}, {group_info}目标=[{targets}], 结果={success}/{total}, 内容={preview}",
             "all_failed": "❌ 转发失败: \"{preview}\" → 所有目标均失败",
+            "suppressed_skipped": "跳过 {count} 个已退订目标（共 {total}）",
             "source_label": "📢 来源: https://t.me/{username}/{msg_id}",
             "source_private": "📢 来源: https://t.me/c/{channel_id}/{msg_id}",
             "source_unknown": "📢 来源: {chat_title}",
@@ -506,6 +513,20 @@ TRANSLATIONS = {
             "stop_failed": "Bot 停止失败",
             "restart_success": "Bot 已成功重启",
             "restart_failed": "Bot 重启失败",
+        },
+
+        # message.bot_command.* - bot 账号推送订阅指令
+        "bot_command": {
+            "start_help": "可用指令：\n/start - 订阅并开始接收推送\n/stop - 停止接收推送\n/resume - 恢复接收推送\n/status - 查看当前状态",
+            "stopped": "已停止接收推送。发送 /resume 可恢复",
+            "resumed": "已恢复接收推送",
+            "status_active": "状态：订阅中（{date}）",
+            "status_paused": "状态：已停止（{date}）",
+            "status_unregistered": "状态：未订阅。发送 /start 订阅",
+            "menu_start": "订阅并开始接收推送",
+            "menu_stop": "停止接收推送",
+            "menu_resume": "恢复接收推送",
+            "menu_status": "查看当前状态",
         },
 
         # message.auth.* - 认证消息
