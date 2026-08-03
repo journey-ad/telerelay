@@ -600,6 +600,16 @@
       "resultsHidden": "投票结果暂不可见"
     },
     "serviceUpdated": "会话状态已更新",
+    "service": {
+      "chatAddUser": "{{names}} 加入了群组",
+      "chatDeleteUser": "{{names}} 退出了群组",
+      "chatCreate": "{{sender}} 创建了群组「{{title}}」",
+      "chatEditTitle": "群名称已改为「{{title}}」",
+      "chatEditPhoto": "群头像已更新",
+      "chatJoinedByLink": "{{sender}} 通过链接加入群组",
+      "chatJoinedByRequest": "{{sender}} 通过申请加入群组",
+      "chatPinMessage": "{{sender}} 置顶了一条消息"
+    },
     "forwardedFrom": "转发自 {{name}}",
     "unavailable": "无法加载",
     "edited": "已编辑",

@@ -93,6 +93,10 @@ class FakeClient:
                 return candidate
         raise ValueError("missing")
 
+    async def get_entities(self, peer_ids):
+        self.calls.append(("get_entities", peer_ids))
+        return [sender(peer_id, f"用户{peer_id}") for peer_id in peer_ids]
+
     async def iter_dialogs(self, **options):
         self.calls.append(("iter_dialogs", options))
         archived = options.get("archived", False)
@@ -252,6 +256,37 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(data["media"]["inline_thumbnail"].startswith("data:image/jpeg;base64,"))
 
+    async def test_service_message_serializes_action_details(self):
+        service_message = self.client.messages[101][-1]
+
+        service_message.action = SimpleNamespace(
+            users=[sender(11, "Alice"), sender(12, "Bob")],
+            title=None,
+        )
+        data = await self.service._message_data(service_message, 101)
+        self.assertEqual(data["service_action"], "SimpleNamespace")
+        self.assertEqual(data["service_details"]["user_names"], ["Alice", "Bob"])
+
+        service_message.action = SimpleNamespace(users=None, user_ids=[11], title="新群名")
+        service_message.client = self.client
+        data = await self.service._message_data(service_message, 101)
+        self.assertEqual(data["service_details"]["user_names"], ["用户11"])
+        self.assertEqual(data["service_details"]["title"], "新群名")
+
+        service_message.action = SimpleNamespace(users=None, user_ids=[13])
+        service_message.client = None
+        data = await self.service._message_data(service_message, 101)
+        self.assertEqual(data["service_details"]["user_names"], ["13"])
+
+        service_message.action = SimpleNamespace(users=None, user_ids=None, user_id=None)
+        data = await self.service._message_data(service_message, 101)
+        self.assertEqual(data["service_details"]["user_names"], ["Alice"])
+
+        service_message.action = None
+        data = await self.service._message_data(service_message, 101)
+        self.assertIsNone(data["service_action"])
+        self.assertIsNone(data["service_details"])
+
     async def test_poll_serializes_question_options_and_results(self):
         media_message = self.client.messages[101][-1]
         media_message.media = types.MessageMediaPoll(
@@ -291,7 +326,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(poll["closed"])
         self.assertEqual(poll["solution"], "晚间活跃度更高")
         self.assertEqual(
-            self.service._message_summary(media_message, 101)["preview"],
+            (await self.service._message_summary(media_message, 101))["preview"],
             "选择发布窗口",
         )
 

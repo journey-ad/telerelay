@@ -46,6 +46,12 @@ export interface TelegramPreviewDialog extends TelegramPreviewChat {
     media_type: string
     preview: string
     outgoing: boolean
+    sender_name?: string | null
+    service_action?: string | null
+    service_details?: {
+      user_names?: string[]
+      title?: string
+    } | null
   } | null
 }
 
@@ -99,6 +105,10 @@ export interface TelegramPreviewMessage {
   views?: number | null
   reactions: Array<{ label: string; count: number; chosen: boolean }>
   service_action?: string | null
+  service_details?: {
+    user_names?: string[]
+    title?: string
+  } | null
 }
 
 export interface TelegramPreviewDialogsPage {

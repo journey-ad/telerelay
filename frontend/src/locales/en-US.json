@@ -600,6 +600,16 @@
       "resultsHidden": "Poll results are hidden"
     },
     "serviceUpdated": "Chat status updated",
+    "service": {
+      "chatAddUser": "{{names}} joined the group",
+      "chatDeleteUser": "{{names}} left the group",
+      "chatCreate": "{{sender}} created the group “{{title}}”",
+      "chatEditTitle": "Group name changed to “{{title}}”",
+      "chatEditPhoto": "Group photo updated",
+      "chatJoinedByLink": "{{sender}} joined the group via link",
+      "chatJoinedByRequest": "{{sender}} joined the group via request",
+      "chatPinMessage": "{{sender}} pinned a message"
+    },
     "forwardedFrom": "Forwarded from {{name}}",
     "unavailable": "Unavailable",
     "edited": "Edited",

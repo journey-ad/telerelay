@@ -32,6 +32,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import Linkify from 'linkify-react'
 import { accountRequest, request } from '../api/client'
 import { downloadFile } from '../api/downloads'
@@ -111,6 +112,39 @@ function thumbnailPath(chatId: number, messageId: number): string {
 
 function visualMediaPath(chatId: number, messageId: number): string {
   return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/visual-media`
+}
+
+function serviceText(
+  action: string | null | undefined,
+  details: TelegramPreviewMessage['service_details'],
+  senderName: string,
+  t: TFunction,
+  locale: string,
+): string {
+  const joiner = locale.startsWith('zh') ? '、' : ', '
+  const names = (details?.user_names ?? []).join(joiner)
+  const title = details?.title ?? ''
+  const sender = senderName || names
+  switch (action) {
+    case 'MessageActionChatAddUser':
+      return t('telegramPreview.service.chatAddUser', { names })
+    case 'MessageActionChatDeleteUser':
+      return t('telegramPreview.service.chatDeleteUser', { names })
+    case 'MessageActionChatCreate':
+      return t('telegramPreview.service.chatCreate', { sender, title })
+    case 'MessageActionChatEditTitle':
+      return t('telegramPreview.service.chatEditTitle', { title })
+    case 'MessageActionChatEditPhoto':
+      return t('telegramPreview.service.chatEditPhoto')
+    case 'MessageActionChatJoinedByLink':
+      return t('telegramPreview.service.chatJoinedByLink', { sender })
+    case 'MessageActionChatJoinedByRequest':
+      return t('telegramPreview.service.chatJoinedByRequest', { sender })
+    case 'MessageActionPinMessage':
+      return t('telegramPreview.service.chatPinMessage', { sender })
+    default:
+      return t('telegramPreview.serviceUpdated')
+  }
 }
 
 function mediaFrame(media: NonNullable<TelegramPreviewMessage['media']>) {
@@ -217,7 +251,17 @@ function DialogRow({
             <span className="text-blue-500">{t('telegramPreview.you')}</span>
           ) : null}
           <span className="truncate">
-            {dialog.last_message?.preview || t('telegramPreview.noMessages')}
+            {dialog.last_message
+              ? dialog.last_message.service_action
+                ? serviceText(
+                    dialog.last_message.service_action,
+                    dialog.last_message.service_details,
+                    dialog.last_message.sender_name ?? '',
+                    t,
+                    locale,
+                  )
+                : dialog.last_message.preview || t('telegramPreview.noMessages')
+              : t('telegramPreview.noMessages')}
           </span>
         </span>
       </span>
@@ -475,7 +519,14 @@ function MessageBubble({
         {showDay ? <DayDivider value={message.date} /> : null}
         <div id={`message-${message.id}`} className="my-2 flex justify-center">
           <span className="rounded bg-slate-200/80 px-2.5 py-1 text-xs text-slate-500">
-            {message.text || t('telegramPreview.serviceUpdated')}
+            {message.text ||
+              serviceText(
+                message.service_action,
+                message.service_details,
+                message.sender?.name ?? '',
+                t,
+                locale,
+              )}
           </span>
         </div>
       </>

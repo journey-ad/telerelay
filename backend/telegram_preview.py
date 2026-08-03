@@ -232,10 +232,11 @@ class TelegramPreviewService:
         dialogs = [dialog async for dialog in client.iter_dialogs(**options)]
         has_more = len(dialogs) > limit
         visible = dialogs[:limit]
+        items = [await self._dialog_data(dialog) for dialog in visible]
         return {
             "account_id": active_id,
             "folder": folder,
-            "items": [self._dialog_data(dialog) for dialog in visible],
+            "items": items,
             "next_cursor": (
                 self._encode_cursor(active_id, folder, visible[-1])
                 if has_more and visible
@@ -642,7 +643,7 @@ class TelegramPreviewService:
             if total <= self.CACHE_MAX_BYTES:
                 break
 
-    def _dialog_data(self, dialog: Any) -> dict[str, Any]:
+    async def _dialog_data(self, dialog: Any) -> dict[str, Any]:
         entity = dialog.entity
         chat_id = _peer_id(entity)
         if chat_id is None:
@@ -657,7 +658,9 @@ class TelegramPreviewService:
             "unread_mentions_count": int(
                 getattr(dialog, "unread_mentions_count", 0) or 0
             ),
-            "last_message": self._message_summary(message, chat_id) if message else None,
+            "last_message": (
+                await self._message_summary(message, chat_id) if message else None
+            ),
         }
 
     def _chat_data(self, entity: Any) -> dict[str, Any]:
@@ -676,7 +679,46 @@ class TelegramPreviewService:
             ),
         }
 
-    def _message_summary(self, message: Any, chat_id: int) -> dict[str, Any]:
+    async def _service_details(self, message: Any) -> dict[str, Any] | None:
+        action = getattr(message, "action", None)
+        if action is None:
+            return None
+        details: dict[str, Any] = {}
+        names = [
+            name
+            for user in (getattr(action, "users", None) or [])
+            if (name := _display_name(user))
+        ]
+        if not names:
+            user_ids = getattr(action, "user_ids", None) or []
+            if user_ids:
+                client = getattr(message, "client", None)
+                resolved: dict[int, str] = {}
+                if client is not None:
+                    try:
+                        for entity in await client.get_entities(user_ids):
+                            peer_id = _peer_id(entity)
+                            if peer_id is not None:
+                                resolved[peer_id] = _display_name(entity)
+                    except Exception:
+                        resolved = {}
+                names = [resolved.get(int(uid)) or str(uid) for uid in user_ids]
+        if not names:
+            user_id = getattr(action, "user_id", None)
+            if user_id is not None:
+                names = [str(user_id)]
+        if not names:
+            sender_name = _display_name(getattr(message, "sender", None))
+            if sender_name:
+                names = [sender_name]
+        if names:
+            details["user_names"] = names
+        title = getattr(action, "title", None)
+        if title:
+            details["title"] = str(title)
+        return details or None
+
+    async def _message_summary(self, message: Any, chat_id: int) -> dict[str, Any]:
         kind = _media_type(message)
         text = getattr(message, "raw_text", None) or getattr(message, "text", None) or ""
         preview = _poll_question(message) or text or f"[{_media_label(kind)}]"
@@ -688,6 +730,11 @@ class TelegramPreviewService:
             "media_type": kind,
             "preview": preview,
             "outgoing": bool(getattr(message, "out", False)),
+            "sender_name": _display_name(getattr(message, "sender", None)) or None,
+            "service_action": (
+                type(message.action).__name__ if getattr(message, "action", None) else None
+            ),
+            "service_details": await self._service_details(message),
         }
 
     async def _message_data(
@@ -760,6 +807,7 @@ class TelegramPreviewService:
             "service_action": (
                 type(message.action).__name__ if getattr(message, "action", None) else None
             ),
+            "service_details": await self._service_details(message),
         }
 
     def _reply_data(self, reply: Any, message_id: int) -> dict[str, Any]:
