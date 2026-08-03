@@ -40,6 +40,7 @@ TRANSLATIONS = {
             "command_resume": "订阅者 {user_id} 已恢复接收推送",
             "command_failed": "处理 /{command} 失败 (user_id={user_id}): {error}",
             "commands_menu_set": "✓ 已设置 Bot 命令菜单",
+            "commands_menu_cleared": "✓ 已清除 Bot 命令菜单",
             "commands_menu_failed": "设置 Bot 命令菜单失败: {error}",
             "not_running": "Bot 未在运行",
             "stopping": "正在停止 Bot...",

@@ -349,6 +349,7 @@ class BotManager:
             self._chat_recorder_handler = self.client_manager.add_message_handler(
                 callback=self._record_chat_entity,
             )
+        if session_type == "bot" and getattr(self.config, "bot_commands_enabled", True):
             self._command_handler = self.client_manager.add_message_handler(
                 callback=self._bot_command_handler,
                 incoming=True,
@@ -407,24 +408,33 @@ class BotManager:
         client = self.client_manager.get_client()
         if client is None:
             return
-        from telethon.tl.functions.bots import SetBotCommandsRequest
+        from telethon.tl.functions.bots import ResetBotCommandsRequest, SetBotCommandsRequest
         from telethon.tl.types import BotCommand, BotCommandScopeDefault
 
-        commands = [
-            BotCommand("start", t("message.bot_command.menu_start")),
-            BotCommand("stop", t("message.bot_command.menu_stop")),
-            BotCommand("resume", t("message.bot_command.menu_resume")),
-            BotCommand("status", t("message.bot_command.menu_status")),
-        ]
         try:
-            await client(
-                SetBotCommandsRequest(
-                    scope=BotCommandScopeDefault(),
-                    lang_code="",
-                    commands=commands,
+            if getattr(self.config, "bot_commands_enabled", True):
+                commands = [
+                    BotCommand("start", t("message.bot_command.menu_start")),
+                    BotCommand("stop", t("message.bot_command.menu_stop")),
+                    BotCommand("resume", t("message.bot_command.menu_resume")),
+                    BotCommand("status", t("message.bot_command.menu_status")),
+                ]
+                await client(
+                    SetBotCommandsRequest(
+                        scope=BotCommandScopeDefault(),
+                        lang_code="",
+                        commands=commands,
+                    )
                 )
-            )
-            logger.info(t("log.bot.commands_menu_set"))
+                logger.info(t("log.bot.commands_menu_set"))
+            else:
+                await client(
+                    ResetBotCommandsRequest(
+                        scope=BotCommandScopeDefault(),
+                        lang_code="",
+                    )
+                )
+                logger.info(t("log.bot.commands_menu_cleared"))
         except Exception as exc:
             logger.warning(
                 t("log.bot.commands_menu_failed", error=str(exc)),
@@ -465,7 +475,11 @@ class BotManager:
 
     async def _bot_command_handler(self, event) -> None:
         """Handle private bot-account commands: /start /stop /resume /status."""
-        if self.session_type != "bot" or not getattr(event, "is_private", False):
+        if (
+            self.session_type != "bot"
+            or not getattr(self.config, "bot_commands_enabled", True)
+            or not getattr(event, "is_private", False)
+        ):
             return
         command = self._command_name(
             getattr(getattr(event, "message", None), "raw_text", None)

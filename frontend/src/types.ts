@@ -308,6 +308,7 @@ export interface JsonSchema {
   maxLength?: number
   readOnly?: boolean
   'x-enum-labels'?: string[]
+  'x-visible-if'?: Record<string, unknown>
   'x-item-control'?: string
   'x-control'?: string
 }

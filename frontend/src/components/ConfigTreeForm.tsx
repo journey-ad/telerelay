@@ -115,7 +115,14 @@ function FieldHeading({
 function fieldEntries(value: ConfigObject, schema: JsonSchema, exclude: string[]) {
   const known = Object.keys(schema.properties ?? {})
   const unknown = Object.keys(value).filter((key) => !known.includes(key))
-  return [...known, ...unknown].filter((key) => !exclude.includes(key))
+  return [...known, ...unknown].filter((key) => {
+    if (exclude.includes(key)) return false
+    const condition = schema.properties?.[key]?.['x-visible-if']
+    return (
+      !condition ||
+      Object.entries(condition).every(([field, expected]) => value[field] === expected)
+    )
+  })
 }
 
 function ObjectFields({

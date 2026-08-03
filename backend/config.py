@@ -112,6 +112,11 @@ class Config:
         """Account session kind, stored in the account YAML by AccountConfigRegistry."""
         value = self.config_data.get("session_type")
         return str(value) if value in ("user", "bot") else "user"
+
+    @property
+    def bot_commands_enabled(self) -> bool:
+        """Whether bot accounts expose and process Telegram commands."""
+        return self.config_data.get("bot_commands_enabled", True) is not False
     
     @property
     def proxy_url(self) -> Optional[str]:

@@ -189,6 +189,10 @@ class ConfigDocument(ConfigModel):
     session_type: Literal["user", "bot"] = Field(
         default="user", json_schema_extra={"readOnly": True}
     )
+    bot_commands_enabled: bool = Field(
+        default=True,
+        json_schema_extra={"x-visible-if": {"session_type": "bot"}},
+    )
     filters: ConfigFilter = Field(default_factory=ConfigFilter)
     forwarding: ConfigForwarding = Field(default_factory=ConfigForwarding)
     forwarding_rules: list[ConfigForwardingRule] = Field(default_factory=list)

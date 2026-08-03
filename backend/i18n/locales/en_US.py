@@ -40,6 +40,7 @@ TRANSLATIONS = {
             "command_resume": "Subscriber {user_id} resumed receiving push messages",
             "command_failed": "Failed to handle /{command} (user_id={user_id}): {error}",
             "commands_menu_set": "Bot command menu configured",
+            "commands_menu_cleared": "Bot command menu cleared",
             "commands_menu_failed": "Failed to set bot command menu: {error}",
             "not_running": "Bot is not running",
             "stopping": "Stopping Bot...",
