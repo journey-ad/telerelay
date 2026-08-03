@@ -419,6 +419,7 @@
     "refresh": "刷新日志",
     "filter": "筛选日志内容",
     "allLevels": "全部级别",
+    "allAccounts": "全部账号",
     "level": {
       "info": "信息",
       "warning": "警告",

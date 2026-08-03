@@ -4,6 +4,7 @@ import type { RelayEvent } from '../types'
 
 interface UseEventsOptions {
   accountId?: string
+  allAccounts?: boolean
   maxRecent?: number
   initialRecent?: RelayEvent[]
   shouldStore?: (event: RelayEvent) => boolean
@@ -16,7 +17,7 @@ function mergeRecent(current: RelayEvent[], incoming: RelayEvent[], limit: numbe
 }
 
 export function useEvents(onEvent?: (event: RelayEvent) => void, options: UseEventsOptions = {}) {
-  const { accountId, maxRecent = 0, initialRecent = [], shouldStore } = options
+  const { accountId, allAccounts = false, maxRecent = 0, initialRecent = [], shouldStore } = options
   const [connected, setConnected] = useState(false)
   const [recent, setRecent] = useState<RelayEvent[]>([])
 
@@ -52,11 +53,11 @@ export function useEvents(onEvent?: (event: RelayEvent) => void, options: UseEve
       }
       onEvent?.(event)
     }
-    connectEvents(handle, controller.signal, accountId).catch(() => {
+    connectEvents(handle, controller.signal, accountId, allAccounts).catch(() => {
       if (!controller.signal.aborted) setConnected(false)
     })
     return () => controller.abort()
-  }, [accountId, maxRecent, onEvent, shouldStore])
+  }, [accountId, allAccounts, maxRecent, onEvent, shouldStore])
 
   return { connected, recent }
 }

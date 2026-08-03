@@ -419,6 +419,7 @@
     "refresh": "Refresh logs",
     "filter": "Filter log content",
     "allLevels": "All levels",
+    "allAccounts": "All accounts",
     "level": {
       "info": "Info",
       "warning": "Warning",

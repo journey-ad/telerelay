@@ -827,17 +827,27 @@ async def history(
 
 
 @router.get("/logs")
-async def logs(lines: int = Query(200, ge=1, le=2000)) -> dict:
+async def logs(
+    lines: int = Query(200, ge=1, le=2000),
+    account_id: str | None = Query(None, min_length=1, max_length=64),
+) -> dict:
     path = Path("logs/telerelay.log")
     if not path.exists():
         return {"lines": []}
     content = await asyncio.to_thread(path.read_text, encoding="utf-8", errors="replace")
-    return {"lines": content.splitlines()[-lines:]}
+    log_lines = content.splitlines()
+    if account_id:
+        account_tag = f"[account:{account_id}]"
+        log_lines = [line for line in log_lines if account_tag in line]
+    return {"lines": log_lines[-lines:]}
 
 
 @router.get("/events")
-async def events(context: ApplicationContext = Depends(get_context)) -> StreamingResponse:
-    account_id = _selected_account_id(context) if context.accounts else None
+async def events(
+    all_accounts: bool = False,
+    context: ApplicationContext = Depends(get_context),
+) -> StreamingResponse:
+    account_id = None if all_accounts or not context.accounts else _selected_account_id(context)
     return StreamingResponse(
         context.events.stream(lambda event: _event_visible_to_account(event, account_id)),
         media_type="text/event-stream",

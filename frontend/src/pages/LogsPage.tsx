@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { request } from '../api/client'
 import { Badge, Button, EmptyState, IconButton, PageHeader, Select } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
+import type { TelegramAccount } from '../types'
 import { cn } from '../utils/cn'
 
 function level(line: string) {
@@ -26,23 +27,41 @@ export function LogsPage() {
   const { t } = useTranslation()
   const [filter, setFilter] = useState('')
   const [levelFilter, setLevelFilter] = useState('all')
+  const [accountFilter, setAccountFilter] = useState('all')
   const [paused, setPaused] = useState(false)
   const [live, setLive] = useState<string[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+  const accounts = useQuery({
+    queryKey: ['telegram-accounts'],
+    queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
+  })
   const logs = useQuery({
-    queryKey: ['logs'],
-    queryFn: () => request<{ lines: string[] }>('/api/v1/logs?lines=500'),
+    queryKey: ['logs', accountFilter],
+    queryFn: () => {
+      const params = new URLSearchParams({ lines: '500' })
+      if (accountFilter !== 'all') params.set('account_id', accountFilter)
+      return request<{ lines: string[] }>(`/api/v1/logs?${params}`)
+    },
     refetchInterval: paused ? false : 10_000,
   })
   const receiveEvent = useCallback(
     (event: { type: string; payload: Record<string, unknown> }) => {
-      if (!paused && event.type === 'log' && event.payload.message)
+      if (!paused && event.type === 'log' && event.payload.message) {
+        const accountId =
+          event.payload.account_id === undefined || event.payload.account_id === null
+            ? undefined
+            : String(event.payload.account_id)
+        if (accountFilter !== 'all' && accountId !== accountFilter) return
         setLive((current) => [...current, String(event.payload.message)].slice(-500))
+      }
     },
-    [paused],
+    [accountFilter, paused],
   )
-  useEvents(receiveEvent)
+  useEvents(receiveEvent, {
+    accountId: accountFilter === 'all' ? undefined : accountFilter,
+    allAccounts: accountFilter === 'all',
+  })
   const lines = useMemo(
     () =>
       [...(logs.data?.lines ?? []), ...live]
@@ -97,13 +116,13 @@ export function LogsPage() {
       />
       <div
         className={cn(
-          'mb-3 flex min-h-14 items-center gap-3 rounded-md border',
+          'mb-3 flex min-h-14 flex-wrap items-center gap-3 rounded-md border',
           'border-slate-200 bg-white p-3 max-md:flex-col max-md:items-stretch',
         )}
       >
         <div
           className={cn(
-            'flex h-9 w-full max-w-85 items-center gap-2 rounded-[5px] border',
+            'flex h-9 min-w-60 flex-1 items-center gap-2 rounded-[5px] border',
             'border-slate-200 bg-slate-50 px-2.5 text-slate-400 max-md:max-w-none',
           )}
         >
@@ -125,6 +144,22 @@ export function LogsPage() {
               { value: 'warning', label: t('logs.level.warning') },
               { value: 'error', label: t('logs.level.error') },
               { value: 'debug', label: t('logs.level.debug') },
+            ]}
+          />
+        </div>
+        <div className="w-55 max-md:w-full">
+          <Select
+            value={accountFilter}
+            onValueChange={(value) => {
+              setLive([])
+              setAccountFilter(value)
+            }}
+            options={[
+              { value: 'all', label: t('logs.allAccounts') },
+              ...(accounts.data ?? []).map((account) => ({
+                value: account.id,
+                label: account.label,
+              })),
             ]}
           />
         </div>

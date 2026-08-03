@@ -5,12 +5,14 @@ export async function connectEvents(
   onEvent: (type: string, payload: Record<string, unknown>) => void,
   signal: AbortSignal,
   accountId?: string,
+  allAccounts = false,
 ): Promise<void> {
   const headers = new Headers({ Accept: 'text/event-stream' })
   const auth = authorization()
   if (auth) headers.set('Authorization', auth)
   if (accountId) headers.set(ACCOUNT_ID_HEADER, accountId)
-  const response = await fetch('/api/v1/events', { headers, signal })
+  const path = allAccounts ? '/api/v1/events?all_accounts=true' : '/api/v1/events'
+  const response = await fetch(path, { headers, signal })
   if (!response.ok || !response.body) {
     throw new ApiError(response.status, 'events_unavailable', 'Event stream unavailable')
   }
