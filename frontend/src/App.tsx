@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createHashRouter, RouterProvider } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { request } from './api/client'
 import { clearCredentials } from './api/credentials'
@@ -68,7 +68,7 @@ function Console({ onLogout }: { onLogout: () => void }) {
       {children}
     </Suspense>
   )
-  const router = createBrowserRouter([
+  const router = createHashRouter([
     {
       element: <AppShell onLogout={onLogout} />,
       children: [
