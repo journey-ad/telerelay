@@ -2,14 +2,38 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from backend.timezones import (
+    TIMEZONE_NAMES,
+    TIMEZONE_NAME_SET,
+    TIMEZONE_OPTIONS,
+    system_timezone,
+    timezone_label,
+)
 
 
 ChatRef = int | str
 
 
+def timezone_schema(schema: dict[str, Any]) -> None:
+    schema.update(
+        {
+            "default": system_timezone(),
+            "enum": list(TIMEZONE_NAMES),
+            "x-enum-labels": [timezone_label(*option) for option in TIMEZONE_OPTIONS],
+        }
+    )
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class ConfigModel(BaseModel):
+    """Known configuration fields with compatibility for legacy extensions."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
 
 
 class ApiMessage(StrictModel):
@@ -69,6 +93,133 @@ class ButtonActionRulePayload(StrictModel):
     match_mode: Literal["exact", "contains", "regex"] = "exact"
     delay: float = Field(default=0, ge=0, le=30)
     click_all_matches: bool = False
+
+
+class ConfigFilter(ConfigModel):
+    mode: Literal["whitelist", "blacklist"] = "whitelist"
+    keywords: list[str] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "tags"}
+    )
+    regex_patterns: list[str] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "regex"}
+    )
+    media_types: list[Literal[
+        "text", "photo", "video", "document", "audio", "voice", "sticker", "animation", "webpage"
+    ]] = Field(default_factory=list)
+    max_file_size: int = Field(default=0, ge=0)
+    min_file_size: int = Field(default=0, ge=0)
+
+
+class ConfigIgnore(ConfigModel):
+    user_ids: list[int] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "integer-tags"}
+    )
+    keywords: list[str] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "tags"}
+    )
+
+
+class ConfigForwarding(ConfigModel):
+    preserve_format: bool = True
+    add_source_info: bool = True
+    delay: float = Field(default=0.5, ge=0, le=3600)
+    force_forward: bool = False
+    hide_sender: bool = False
+    hide_media_caption: bool = False
+    deduplicate: bool = False
+    deduplicate_window: int = Field(default=3600, ge=0, le=604800)
+
+
+class ConfigForwardingRule(ConfigModel):
+    name: str = Field(default="", min_length=1, max_length=100)
+    enabled: bool = True
+    source_chats: list[ChatRef] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
+    )
+    target_chats: list[ChatRef] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
+    )
+    filters: ConfigFilter = Field(default_factory=ConfigFilter)
+    ignore: ConfigIgnore = Field(default_factory=ConfigIgnore)
+    forwarding: ConfigForwarding = Field(default_factory=ConfigForwarding)
+
+
+class ConfigButtonActionRule(ConfigModel):
+    name: str = Field(default="", min_length=1, max_length=100)
+    enabled: bool = False
+    source_chats: list[ChatRef] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
+    )
+    button_texts: list[str] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "tags"}
+    )
+    match_mode: Literal["exact", "contains", "regex"] = "exact"
+    delay: float = Field(default=0, ge=0, le=30)
+    click_all_matches: bool = False
+
+
+class ConfigExport(ConfigModel):
+    root_dir: str = Field(default="data/exports", json_schema_extra={"readOnly": True})
+    message_db_dir: str = Field(default="data/db", json_schema_extra={"readOnly": True})
+    timezone: str = Field(
+        default_factory=system_timezone,
+        json_schema_extra=timezone_schema,
+    )
+    concurrency: int = Field(default=2, ge=1, le=4)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        if value not in TIMEZONE_NAME_SET:
+            raise ValueError("Unsupported timezone")
+        return value
+
+
+class ConfigForwardQueue(ConfigModel):
+    db_path: str = Field(default="data/forward_queue.db", json_schema_extra={"readOnly": True})
+    max_retries: int = Field(default=5, ge=1, le=100)
+    retry_base_seconds: float = Field(default=5, ge=0.1, le=3600)
+    flood_wait_buffer: float = Field(default=1, ge=0, le=60)
+    poll_interval: float = Field(default=1, ge=0.05, le=60)
+    media_group_settle_seconds: float = Field(default=1, ge=0.1, le=10)
+    completed_retention_days: int = Field(default=7, ge=1, le=3650)
+
+
+class ConfigDocument(ConfigModel):
+    session_type: Literal["user", "bot"] = Field(
+        default="user", json_schema_extra={"readOnly": True}
+    )
+    filters: ConfigFilter = Field(default_factory=ConfigFilter)
+    forwarding: ConfigForwarding = Field(default_factory=ConfigForwarding)
+    forwarding_rules: list[ConfigForwardingRule] = Field(default_factory=list)
+    button_action_rules: list[ConfigButtonActionRule] = Field(default_factory=list)
+    ignore: ConfigIgnore = Field(default_factory=ConfigIgnore)
+    language: Literal["zh_CN", "en_US"] = "zh_CN"
+    source_chats: list[ChatRef] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
+    )
+    target_chats: list[ChatRef] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
+    )
+    export: ConfigExport = Field(default_factory=ConfigExport)
+    forward_queue: ConfigForwardQueue = Field(default_factory=ConfigForwardQueue)
+
+
+def config_json_schema() -> dict[str, Any]:
+    """Return the schema consumed by the schema-driven configuration editor."""
+    return ConfigDocument.model_json_schema()
+
+
+def validate_config(config: dict[str, Any]) -> None:
+    """Validate known fields while preserving unknown legacy fields."""
+    ConfigDocument.model_validate(config)
+
+
+def config_validation_message(error: ValidationError) -> str:
+    """Format the first validation error for the API error contract."""
+    detail = error.errors()[0]
+    path = ".".join(str(part) for part in detail.get("loc", ())) or "config"
+    return f"{path}: {detail.get('msg', 'Invalid value')}"
 
 
 class AuthValue(StrictModel):

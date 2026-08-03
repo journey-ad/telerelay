@@ -885,6 +885,67 @@ class ApiContractTests(unittest.TestCase):
             ],
         )
 
+    def test_config_schema_drives_known_fields_and_preserves_extensions(self):
+        response = self.client.get("/api/v1/config")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        schema = response.json()["schema"]
+        definitions = schema["$defs"]
+        self.assertTrue(schema["additionalProperties"])
+        self.assertEqual(next(iter(schema["properties"])), "session_type")
+        self.assertEqual(
+            definitions["ConfigFilter"]["properties"]["mode"]["enum"],
+            ["whitelist", "blacklist"],
+        )
+        self.assertEqual(
+            definitions["ConfigForwardQueue"]["properties"]["max_retries"]["maximum"],
+            100,
+        )
+        self.assertEqual(
+            definitions["ConfigIgnore"]["properties"]["user_ids"]["x-item-control"],
+            "integer-tags",
+        )
+        self.assertTrue(
+            definitions["ConfigExport"]["properties"]["root_dir"]["readOnly"]
+        )
+
+        saved = self.client.put(
+            "/api/v1/config",
+            json={
+                "config": {
+                    "forwarding": {"delay": 1.5},
+                    "legacy_extension": {"strategy": "custom"},
+                }
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(
+            self.config.config_data["legacy_extension"], {"strategy": "custom"}
+        )
+
+    def test_config_put_and_import_share_schema_validation(self):
+        replaced = self.client.put(
+            "/api/v1/config",
+            json={"config": {"forward_queue": {"max_retries": 101}}},
+        )
+        imported = self.client.post(
+            "/api/v1/config/import",
+            files={
+                "file": (
+                    "invalid.yaml",
+                    "filters:\n  mode: unsupported\n",
+                    "application/yaml",
+                )
+            },
+        )
+
+        self.assertEqual(replaced.status_code, 422, replaced.text)
+        self.assertEqual(replaced.json()["detail"]["code"], "invalid_config")
+        self.assertIn("forward_queue.max_retries", replaced.json()["detail"]["message"])
+        self.assertEqual(imported.status_code, 422, imported.text)
+        self.assertEqual(imported.json()["detail"]["code"], "invalid_config")
+        self.assertIn("filters.mode", imported.json()["detail"]["message"])
+
     def test_rule_crud_persists_yaml(self):
         payload = {
             "name": "news relay",

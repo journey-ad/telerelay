@@ -1,4 +1,5 @@
 import * as SwitchPrimitive from '@radix-ui/react-switch'
+import type { MouseEventHandler } from 'react'
 import { cn } from '../../utils/cn'
 
 export function Switch({
@@ -9,6 +10,7 @@ export function Switch({
   className,
   disabled = false,
   showLabel = true,
+  onClick,
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
@@ -17,6 +19,7 @@ export function Switch({
   className?: string
   disabled?: boolean
   showLabel?: boolean
+  onClick?: MouseEventHandler<HTMLLabelElement>
 }) {
   return (
     <label
@@ -26,6 +29,7 @@ export function Switch({
         disabled && 'cursor-not-allowed opacity-60',
         className,
       )}
+      onClick={onClick}
     >
       {showLabel ? (
         <span className="flex flex-col">

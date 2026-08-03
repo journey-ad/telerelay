@@ -17,6 +17,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import ValidationError
 from starlette.background import BackgroundTask
 
 from backend.api.dependencies import bind_account_scope, get_context, require_auth
@@ -39,6 +40,9 @@ from backend.schemas import (
     TelegramAccountUpdate,
     TelegramChatResponse,
     TogglePayload,
+    config_json_schema,
+    config_validation_message,
+    validate_config,
 )
 from backend.services import ServiceError, validate_regex_patterns
 from backend.telegram_accounts import TelegramAccountError
@@ -1073,6 +1077,7 @@ async def get_config(context: ApplicationContext = Depends(get_context)) -> dict
     return {
         "runtime": config.to_dict(),
         "config": config.config_data,
+        "schema": config_json_schema(),
     }
 
 
@@ -1081,6 +1086,10 @@ async def replace_config(
     payload: ConfigPayload,
     context: ApplicationContext = Depends(get_context),
 ) -> ApiMessage:
+    try:
+        validate_config(payload.config)
+    except ValidationError as exc:
+        raise _error("invalid_config", config_validation_message(exc), 422) from exc
     scope = _account_scope(context)
     if scope:
         context.account_registry.replace_config(scope.account_id, payload.config)
@@ -1119,6 +1128,10 @@ async def import_config(
         raise _error("invalid_yaml", "Configuration file is not valid YAML", 422) from exc
     if not isinstance(loaded, dict):
         raise _error("invalid_config", "Configuration root must be an object", 422)
+    try:
+        validate_config(loaded)
+    except ValidationError as exc:
+        raise _error("invalid_config", config_validation_message(exc), 422) from exc
     scope = _account_scope(context)
     if scope:
         context.account_registry.replace_config(scope.account_id, loaded)

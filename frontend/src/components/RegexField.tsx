@@ -76,7 +76,7 @@ export function RegexField({
   placeholder,
   className,
 }: {
-  label: string
+  label?: string
   value: string
   onChange: (value: string) => void
   validation: RegexValidation
@@ -90,12 +90,13 @@ export function RegexField({
   return (
     <div className={cn(fieldClass, className)}>
       <span>
-        <label htmlFor={inputId}>{label}</label>
+        {label ? <label htmlFor={inputId}>{label}</label> : null}
         <button
           type="button"
           disabled={validation.validating}
           className={cn(
-            'ml-2 text-[13px]',
+            'text-[13px]',
+            label && 'ml-2',
             validation.validating
               ? 'text-slate-400'
               : validation.valid === true
@@ -113,6 +114,7 @@ export function RegexField({
       </span>
       <textarea
         id={inputId}
+        aria-label={label ?? placeholder}
         value={value}
         onChange={(event) => {
           onChange(event.target.value)

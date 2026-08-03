@@ -16,6 +16,7 @@ from backend.button_actions import ButtonActionRule, load_button_action_rules
 from backend.i18n import t
 from backend.logger import get_logger
 from backend.rule import ForwardingRule, load_rules_from_config
+from backend.timezones import system_timezone
 
 logger = get_logger()
 
@@ -167,7 +168,7 @@ class Config:
     def export_timezone(self) -> str:
         """Timezone used for export ranges and scheduled jobs."""
         export = self.config_data.get("export", {})
-        return str(export.get("timezone") or os.getenv("TZ") or "Asia/Shanghai")
+        return str(export.get("timezone") or system_timezone())
 
     @property
     def export_concurrency(self) -> int:

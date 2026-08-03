@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Braces,
   Download,
   ExternalLink,
   Github,
@@ -9,6 +10,7 @@ import {
   Save,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -32,6 +34,7 @@ import {
   TabsTrigger,
   tabsListClass,
 } from '../components/ui'
+import { ConfigJsonEditor, ConfigTreeForm } from '../components/ConfigTreeForm'
 import type { AppConfig, MetaInfo, TelegramAccount, TelegramAuth, UpdateInfo } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
@@ -40,11 +43,13 @@ export function SettingsPage() {
   const { t } = useTranslation()
   const client = useQueryClient()
   const accountId = useAccountScope()
-  const [rawConfig, setRawConfig] = useState('')
+  const [configTree, setConfigTree] = useState<Record<string, unknown> | null>(null)
+  const [configMode, setConfigMode] = useState<'form' | 'json'>('form')
   const [authValue, setAuthValue] = useState('')
   const [botTokenInput, setBotTokenInput] = useState('')
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
+  const loadedConfigRef = useRef<string | null>(null)
   const config = useQuery({
     queryKey: ['config', accountId],
     queryFn: () => accountRequest<AppConfig>(accountId, '/api/v1/config'),
@@ -92,11 +97,18 @@ export function SettingsPage() {
     mutationFn: () => request<UpdateInfo>('/api/v1/update-check'),
   })
   useEffect(() => {
-    if (config.data) setRawConfig(JSON.stringify(config.data.config, null, 2))
-  }, [config.data])
-  const save = useMutation({
-    mutationFn: () =>
-      accountRequest(accountId, '/api/v1/config', json('PUT', { config: JSON.parse(rawConfig) })),
+    if (config.data && typeof config.data.config === 'object' && config.data.config !== null) {
+      const serialized = `${accountId}:${JSON.stringify(config.data.config)}`
+      if (loadedConfigRef.current === serialized) return
+      loadedConfigRef.current = serialized
+      setConfigTree(config.data.config)
+    }
+  }, [accountId, config.data])
+  const saveConfig = useMutation({
+    mutationFn: () => {
+      if (!configTree) throw new Error('config-not-loaded')
+      return accountRequest(accountId, '/api/v1/config', json('PUT', { config: configTree }))
+    },
     onSuccess: () => void client.invalidateQueries({ queryKey: ['config', accountId] }),
   })
   const updatingBotToken = useMutation({
@@ -214,6 +226,9 @@ export function SettingsPage() {
         ? 'settings.authState.success'
         : (authStateLabels[auth.data?.state as keyof typeof authStateLabels] ??
           'settings.authState.unknown')
+  const configDirty = Boolean(
+    configTree && config.data && JSON.stringify(configTree) !== JSON.stringify(config.data.config),
+  )
 
   return (
     <>
@@ -342,7 +357,7 @@ export function SettingsPage() {
                 </p>
               ) : null}
             </Panel>
-            <Panel title={t('settings.backup')} meta={<span>{t('settings.backupMeta')}</span>}>
+            <Panel title={t('settings.backup')}>
               <div
                 className={cn(
                   'flex items-center gap-3 rounded-[5px] border border-slate-100',
@@ -395,32 +410,60 @@ export function SettingsPage() {
           </div>
         </TabsContent>
         <TabsContent value="config" className="outline-none">
-          <Panel title={t('settings.advanced')} meta={<span>{t('settings.advancedMeta')}</span>}>
-            <p className="text-xs leading-4 text-slate-500">{t('settings.advancedDetail')}</p>
-            <textarea
-              className={cn(
-                'min-h-127.5 w-full resize-y rounded-[5px] border border-slate-700',
-                'bg-slate-900 p-3 font-mono text-xs leading-4 text-blue-100 outline-none',
-                'focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10',
-              )}
-              value={rawConfig}
-              onChange={(event) => setRawConfig(event.target.value)}
-              spellCheck={false}
-              rows={25}
-            />
-            {save.error ? (
+          <Panel title={t('settings.advanced')}>
+            <Tabs
+              value={configMode}
+              onValueChange={(value) => setConfigMode(value as 'form' | 'json')}
+            >
+              <TabsList className={tabsListClass}>
+                <TabsTrigger value="form">
+                  <SlidersHorizontal size={15} />
+                  {t('settings.configModeForm')}
+                </TabsTrigger>
+                <TabsTrigger value="json">
+                  <Braces size={15} />
+                  {t('settings.configModeJson')}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="form" className="mt-4 outline-none">
+                {configTree && config.data?.schema ? (
+                  <ConfigTreeForm
+                    value={configTree}
+                    schema={config.data.schema}
+                    onChange={setConfigTree}
+                  />
+                ) : (
+                  <p className="text-xs leading-4 text-slate-500">{t('common.loading')}</p>
+                )}
+              </TabsContent>
+              <TabsContent value="json" className="mt-4 outline-none">
+                {configTree ? (
+                  <ConfigJsonEditor value={configTree} onChange={setConfigTree} />
+                ) : (
+                  <p className="text-xs leading-4 text-slate-500">{t('common.loading')}</p>
+                )}
+              </TabsContent>
+            </Tabs>
+            {saveConfig.error ? (
               <p
                 className={cn(
-                  'mt-3 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
+                  'mt-4 rounded-[5px] border border-rose-100 bg-rose-50 p-2',
                   'text-[13px] text-rose-700',
                 )}
               >
-                {messageFrom(save.error)}
+                {messageFrom(saveConfig.error)}
               </p>
             ) : null}
-            <div className="mt-5 flex justify-end border-t border-slate-100 pt-4">
-              <Button icon={Save} onClick={() => save.mutate()} disabled={save.isPending}>
-                {t(save.isPending ? 'settings.saving' : 'settings.save')}
+            <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+              <span className="text-xs text-slate-400">
+                {t(configDirty ? 'settings.configUnsaved' : 'settings.configSynced')}
+              </span>
+              <Button
+                icon={Save}
+                onClick={() => saveConfig.mutate()}
+                disabled={saveConfig.isPending || !configTree || !configDirty}
+              >
+                {t(saveConfig.isPending ? 'settings.saving' : 'settings.save')}
               </Button>
             </div>
           </Panel>

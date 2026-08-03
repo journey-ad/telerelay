@@ -8,20 +8,26 @@ export function Select({
   onValueChange,
   options,
   placeholder,
+  disabled = false,
+  className,
 }: {
   value: string
   onValueChange: (value: string) => void
   options: Array<{ value: string; label: string }>
   placeholder?: string
+  disabled?: boolean
+  className?: string
 }) {
   const { t } = useTranslation()
   return (
-    <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
+    <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
       <SelectPrimitive.Trigger
         className={cn(
           'flex h-9.5 w-full items-center justify-between rounded-[5px] border',
-          'border-slate-200 bg-white px-2.5 text-left text-[13px] text-slate-700 outline-none',
+          'cursor-pointer border-slate-200 bg-white px-2.5 text-left text-[13px] text-slate-700 outline-none',
           'focus:border-blue-300 focus:ring-3 focus:ring-blue-500/10',
+          'disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400',
+          className,
         )}
       >
         <SelectPrimitive.Value placeholder={placeholder ?? t('common.pleaseSelect')} />
@@ -42,7 +48,7 @@ export function Select({
             {options.map((option) => (
               <SelectPrimitive.Item
                 className={cn(
-                  'flex h-8.5 items-center justify-between rounded px-2',
+                  'flex h-8.5 cursor-pointer items-center justify-between rounded px-2',
                   'text-[13px] text-slate-600 outline-none',
                   'data-[highlighted]:bg-blue-50 data-[highlighted]:text-blue-700',
                 )}

@@ -12,6 +12,7 @@ interface MultiValueInputProps<T extends Scalar> {
   invalidMessage?: string
   parse?: (value: string) => T | null
   format?: (value: T) => string
+  className?: string
 }
 
 export function MultiValueInput<T extends Scalar>({
@@ -22,6 +23,7 @@ export function MultiValueInput<T extends Scalar>({
   invalidMessage,
   parse,
   format = String,
+  className,
 }: MultiValueInputProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState('')
@@ -91,6 +93,7 @@ export function MultiValueInput<T extends Scalar>({
           error
             ? 'border-rose-300 focus-within:border-rose-400 focus-within:ring-rose-500/10'
             : 'border-slate-200 focus-within:border-blue-300 focus-within:ring-blue-500/10',
+          className,
         )}
         onClick={() => inputRef.current?.focus()}
       >
@@ -123,7 +126,7 @@ export function MultiValueInput<T extends Scalar>({
           ref={inputRef}
           className="h-7 min-w-28 flex-1 border-0 bg-transparent px-1 text-[13px] text-slate-700 outline-none"
           value={draft}
-          aria-label={ariaLabel}
+          aria-label={placeholder ?? ariaLabel}
           aria-invalid={Boolean(error)}
           placeholder={value.length === 0 ? placeholder : undefined}
           onChange={(event) => {

@@ -287,6 +287,29 @@ export interface TelegramAuth {
 export interface AppConfig {
   config: Record<string, unknown>
   runtime: Record<string, unknown>
+  schema: JsonSchema
+}
+export interface JsonSchema {
+  $ref?: string
+  $defs?: Record<string, JsonSchema>
+  type?: string | string[]
+  title?: string
+  description?: string
+  default?: unknown
+  enum?: unknown[]
+  anyOf?: JsonSchema[]
+  properties?: Record<string, JsonSchema>
+  items?: JsonSchema
+  additionalProperties?: boolean | JsonSchema
+  minimum?: number
+  maximum?: number
+  multipleOf?: number
+  minLength?: number
+  maxLength?: number
+  readOnly?: boolean
+  'x-enum-labels'?: string[]
+  'x-item-control'?: string
+  'x-control'?: string
 }
 export interface RelayEvent {
   id: number

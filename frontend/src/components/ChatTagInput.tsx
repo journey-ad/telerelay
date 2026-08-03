@@ -10,6 +10,7 @@ import { cn } from '../utils/cn'
 interface ChatTagInputProps {
   value: ChatRef[]
   onChange: (value: ChatRef[]) => void
+  className?: string
 }
 
 function findChat(chats: TelegramChat[] | undefined, chatId: ChatRef) {
@@ -24,7 +25,7 @@ function parseChatRef(value: string): ChatRef {
   return /^-?\d+$/.test(value) ? Number(value) : value
 }
 
-export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
+export function ChatTagInput({ value, onChange, className }: ChatTagInputProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -72,6 +73,7 @@ export function ChatTagInput({ value, onChange }: ChatTagInputProps) {
           'rounded-[5px] border border-slate-200 bg-white px-2.5 py-1.5',
           'hover:border-blue-300 focus-within:border-blue-300',
           'focus-within:ring-3 focus-within:ring-blue-500/10',
+          className,
         )}
       >
         {value.map((chatId, index) => {
