@@ -11,6 +11,35 @@ class StatsDBTests(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         self.database = StatsDB(Path(self.temp_dir.name) / "stats.db")
 
+    def test_history_round_trips_entities_json(self):
+        self.database.insert_history(
+            rule_name="规则A",
+            content="看 https://example.com 和 alice@example.com",
+            media_type="text",
+            entities=(
+                '[{"type": "url", "offset": 2, "length": 18, "url": null}, '
+                '{"type": "email", "offset": 22, "length": 17, "url": null}]'
+            ),
+        )
+        self.database.insert_history(
+            rule_name="规则A",
+            content="无实体消息",
+            media_type="text",
+            entities=None,
+        )
+
+        rows, total = self.database.query_history(rule_name="规则A")
+
+        self.assertEqual(total, 2)
+        self.assertEqual(
+            rows[0]["entities"],
+            [
+                {"type": "url", "offset": 2, "length": 18, "url": None},
+                {"type": "email", "offset": 22, "length": 17, "url": None},
+            ],
+        )
+        self.assertIsNone(rows[1]["entities"])
+
     def test_all_time_daily_stats_are_not_limited_by_date(self):
         with self.database._get_conn() as connection:
             connection.executemany(

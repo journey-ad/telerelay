@@ -109,6 +109,12 @@ export interface TelegramPreviewMessage {
     user_names?: string[]
     title?: string
   } | null
+  entities?: Array<{
+    type?: string
+    offset: number
+    length: number
+    url?: string | null
+  }> | null
 }
 
 export interface TelegramPreviewDialogsPage {
@@ -190,6 +196,12 @@ export interface HistoryItem {
   sender_username?: string
   content?: string
   media_type?: string
+  entities?: Array<{
+    type?: string
+    offset: number
+    length: number
+    url?: string | null
+  }> | null
 }
 
 export interface HistoryPage {

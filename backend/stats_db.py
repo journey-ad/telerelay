@@ -64,9 +64,18 @@ class StatsDB:
                         sender_username TEXT,
                         content TEXT,
                         media_type TEXT,
+                        entities_json TEXT,
                         forwarded_at TEXT DEFAULT (datetime('now', 'localtime'))
                     )
                 """)
+                # Migrate pre-entities databases
+                columns = {
+                    row[1] for row in conn.execute("PRAGMA table_info(forwarded_messages)")
+                }
+                if "entities_json" not in columns:
+                    conn.execute(
+                        "ALTER TABLE forwarded_messages ADD COLUMN entities_json TEXT"
+                    )
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_fm_forwarded_at ON forwarded_messages(forwarded_at)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_fm_rule ON forwarded_messages(rule_name)")
 
@@ -316,6 +325,7 @@ class StatsDB:
         sender_username: str = None,
         content: str = None,
         media_type: str = None,
+        entities: str = None,
     ) -> None:
         """Insert a forwarded message history record"""
         now = datetime.now()
@@ -327,11 +337,11 @@ class StatsDB:
                     INSERT INTO forwarded_messages
                     (rule_name, message_id, source_chat_id, source_chat_name,
                      sender_id, sender_name, sender_first_name, sender_last_name, sender_username,
-                     content, media_type, forwarded_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     content, media_type, entities_json, forwarded_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (rule_name, message_id, source_chat_id, source_chat_name,
                       sender_id, sender_name, sender_first_name, sender_last_name, sender_username,
-                      content, media_type, forwarded_at))
+                      content, media_type, entities, forwarded_at))
                 conn.commit()
             finally:
                 conn.close()
@@ -375,7 +385,7 @@ class StatsDB:
                 cursor = conn.execute(
                     f"SELECT id, rule_name, message_id, source_chat_id, source_chat_name, "
                     f"sender_id, sender_name, sender_first_name, sender_last_name, sender_username, "
-                    f"content, media_type, forwarded_at "
+                    f"content, media_type, entities_json, forwarded_at "
                     f"FROM forwarded_messages{where_sql} "
                     f"ORDER BY forwarded_at DESC LIMIT ? OFFSET ?",
                     params + [limit, offset]
@@ -396,7 +406,8 @@ class StatsDB:
                         "sender_username": row[9],
                         "content": row[10],
                         "media_type": row[11],
-                        "forwarded_at": row[12],
+                        "entities": json.loads(row[12]) if row[12] else None,
+                        "forwarded_at": row[13],
                     })
 
                 return rows, total

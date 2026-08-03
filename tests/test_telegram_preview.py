@@ -256,6 +256,27 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(data["media"]["inline_thumbnail"].startswith("data:image/jpeg;base64,"))
 
+    async def test_url_entities_are_serialized(self):
+        media_message = self.client.messages[101][-1]
+        media_message.entities = [
+            types.MessageEntityUrl(offset=0, length=13),
+            types.MessageEntityTextUrl(offset=14, length=6, url="https://example.com"),
+        ]
+
+        data = await self.service._message_data(media_message, 101)
+
+        self.assertEqual(
+            data["entities"],
+            [
+                {"type": "url", "offset": 0, "length": 13, "url": None},
+                {"type": "url", "offset": 14, "length": 6, "url": "https://example.com"},
+            ],
+        )
+
+        media_message.entities = None
+        data = await self.service._message_data(media_message, 101)
+        self.assertIsNone(data["entities"])
+
     async def test_service_message_serializes_action_details(self):
         service_message = self.client.messages[101][-1]
 

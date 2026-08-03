@@ -2,9 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, History, Search, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import Linkify from 'linkify-react'
 import { accountRequest } from '../api/client'
 import { useAccountScope } from '../hooks/useAccountScope'
+import { RichText } from '../components/RichText'
 import {
   Badge,
   Button,
@@ -149,17 +149,11 @@ export function HistoryPage() {
                     ) : null}
                   </td>
                   <td>
-                    <Linkify
-                      as="p"
-                      options={{
-                        target: '_blank',
-                        rel: 'noopener noreferrer',
-                        className: 'linkified',
-                      }}
+                    <RichText
+                      text={item.content || t('history.noText')}
+                      entities={item.entities}
                       className="m-0 line-clamp-2 max-w-108 leading-4"
-                    >
-                      {item.content || t('history.noText')}
-                    </Linkify>
+                    />
                   </td>
                   <td>
                     <Badge tone="gray">{item.media_type || 'text'}</Badge>

@@ -3,6 +3,7 @@ Message forwarding core module
 """
 import asyncio
 import copy
+import json
 from typing import Callable, List, Optional
 
 from telethon import TelegramClient, utils
@@ -21,6 +22,7 @@ from backend.i18n import t
 from backend.logger import get_logger
 from backend.rule import ForwardingRule
 from backend.stats_db import get_stats_db
+from backend.telegram_entities import serialize_entities
 from backend.utils import get_media_description
 
 from .downloader import MediaDownloader
@@ -555,6 +557,11 @@ class MessageForwarder:
                     sender_username=getattr(sender, 'username', None) if sender else None,
                     content=message.text or get_media_description(message),
                     media_type=get_media_type(message) if message.media else "text",
+                    entities=(
+                        json.dumps(serialize_entities(message.entities))
+                        if getattr(message, "entities", None)
+                        else None
+                    ),
                 )
             except Exception as e:
                 logger.debug(t("log.forward.history_failed", error=e))

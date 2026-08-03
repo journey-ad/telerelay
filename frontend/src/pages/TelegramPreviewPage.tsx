@@ -33,10 +33,10 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import Linkify from 'linkify-react'
 import { accountRequest, request } from '../api/client'
 import { downloadFile } from '../api/downloads'
 import { AuthenticatedImage } from '../components/AuthenticatedImage'
+import { RichText } from '../components/RichText'
 import { EmptyState, IconButton, PageHeader } from '../components/ui'
 import { useAccountScope } from '../hooks/useAccountScope'
 import type {
@@ -609,13 +609,11 @@ function MessageBubble({
             </div>
           ) : null}
           {textMessage ? (
-            <Linkify
-              as="p"
-              options={{ target: '_blank', rel: 'noopener noreferrer', className: 'linkified' }}
+            <RichText
+              text={textMessage}
+              entities={message.entities}
               className="m-0 whitespace-pre-wrap wrap-break-word text-[13px] leading-4.5"
-            >
-              {textMessage}
-            </Linkify>
+            />
           ) : null}
           {message.reactions.length ? (
             <div className="mt-1.5 flex flex-wrap gap-1">

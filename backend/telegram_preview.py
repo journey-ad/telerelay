@@ -22,6 +22,7 @@ from telethon import utils
 from telethon.tl import types
 
 from backend.telegram_accounts import TelegramAccountError
+from backend.telegram_entities import serialize_entities
 
 
 class TelegramPreviewError(RuntimeError):
@@ -679,6 +680,10 @@ class TelegramPreviewService:
             ),
         }
 
+    @staticmethod
+    def _entities(message: Any) -> list[dict[str, Any]] | None:
+        return serialize_entities(getattr(message, "entities", None))
+
     async def _service_details(self, message: Any) -> dict[str, Any] | None:
         action = getattr(message, "action", None)
         if action is None:
@@ -808,6 +813,7 @@ class TelegramPreviewService:
                 type(message.action).__name__ if getattr(message, "action", None) else None
             ),
             "service_details": await self._service_details(message),
+            "entities": self._entities(message),
         }
 
     def _reply_data(self, reply: Any, message_id: int) -> dict[str, Any]:
