@@ -79,10 +79,7 @@ export function RulesPage() {
     [chatsQuery.data],
   )
   const ruleStats = useMemo(
-    () =>
-      new Map(
-        (statsQuery.data?.rules ?? []).map((item) => [item.rule_name, item] as const),
-      ),
+    () => new Map((statsQuery.data?.rules ?? []).map((item) => [item.rule_name, item] as const)),
     [statsQuery.data],
   )
   const rules = useMemo(
