@@ -116,6 +116,235 @@ class ForwardQueueStoreTests(unittest.TestCase):
             self.assertGreater(merged.available_at, first.available_at)
             self.assertEqual(store.counts(), {"pending": 1})
 
+    def test_media_group_member_ids_accumulate_deduplicate_and_survive_reopen(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "forward_queue.db"
+            store = ForwardQueueStore(db_path)
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0.05,
+            )
+            merged, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=10,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0.05,
+            )
+            merged, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0.05,
+            )
+            merged, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0.05,
+            )
+
+            self.assertEqual(merged.group_member_ids, (10, 11, 12))
+            self.assertEqual(merged.source_message_id, 10)
+            self.assertIsNotNone(merged.group_settle_until)
+
+            reopened = ForwardQueueStore(db_path)
+            restored = reopened.get_item(merged.id)
+            self.assertEqual(restored.group_member_ids, (10, 11, 12))
+            self.assertEqual(restored.group_settle_until, merged.group_settle_until)
+
+    def test_media_group_not_claimed_until_settle_window_elapses(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0.15,
+            )
+            # Settle window still open: not claimable, and next_available_at
+            # reflects the settle deadline rather than available_at.
+            self.assertIsNone(store.claim_next())
+            self.assertGreater(store.next_available_at(), time.time())
+
+            time.sleep(0.2)
+            claimed = store.claim_next()
+            self.assertIsNotNone(claimed)
+            self.assertEqual(claimed.group_member_ids, (12,))
+
+    def test_media_group_members_still_merge_while_processing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            claimed = store.claim_next()
+            self.assertIsNotNone(claimed)
+
+            # A late member arrives after the job left the pending state.
+            merged, inserted = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=13,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            self.assertFalse(inserted)
+            self.assertEqual(merged.id, claimed.id)
+            self.assertEqual(merged.group_member_ids, (12, 13))
+
+    def test_late_member_after_completion_is_rescheduled(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            first, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            claimed = store.claim_next()
+            store.update_target_index(claimed.id, 2)
+            store.mark_completed(claimed.id)
+
+            resend, inserted = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            self.assertTrue(inserted)
+            self.assertNotEqual(resend.id, first.id)
+            self.assertEqual(resend.grouped_id, "999")
+            self.assertEqual(resend.group_member_ids, (12,))
+            self.assertEqual(resend.status, "pending")
+            self.assertEqual(store.counts(), {"pending": 1, "completed": 1})
+
+    def test_late_members_merge_into_the_same_resend_task(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            claimed = store.claim_next()
+            store.update_target_index(claimed.id, 2)
+            store.mark_completed(claimed.id)
+
+            resend, inserted = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0.2,
+            )
+            self.assertTrue(inserted)
+            merged, inserted = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=13,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0.2,
+            )
+            self.assertFalse(inserted)
+            self.assertEqual(merged.id, resend.id)
+            self.assertEqual(merged.group_member_ids, (12, 13))
+            self.assertEqual(store.counts(), {"pending": 1, "completed": 1})
+
+    def test_late_member_after_resend_completion_creates_another_task(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            claimed = store.claim_next()
+            store.update_target_index(claimed.id, 2)
+            store.mark_completed(claimed.id)
+
+            resend, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            claimed_resend = store.claim_next()
+            self.assertEqual(claimed_resend.id, resend.id)
+            store.update_target_index(claimed_resend.id, 2)
+            store.mark_completed(claimed_resend.id)
+
+            again, inserted = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=13,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            self.assertTrue(inserted)
+            self.assertEqual(again.group_member_ids, (13,))
+            self.assertEqual(store.counts(), {"pending": 1, "completed": 2})
+
+    def test_duplicate_member_after_completion_is_ignored(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            claimed = store.claim_next()
+            store.update_target_index(claimed.id, 2)
+            store.mark_completed(claimed.id)
+
+            duplicate, inserted = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            self.assertFalse(inserted)
+            self.assertEqual(duplicate.group_member_ids, (11,))
+            self.assertEqual(duplicate.status, "completed")
+            self.assertEqual(store.counts(), {"completed": 1})
+
     def test_completed_item_is_a_dedup_tombstone(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
@@ -432,6 +661,73 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("item", entry_log.lower())
         self.assertNotIn("队列项", entry_log)
 
+    async def test_queue_consumer_fetches_album_members_by_id_for_bot_sessions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_chat_name="Source Room",
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=10,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=999,
+                settle_seconds=0,
+            )
+            item = store.claim_next()
+            self.assertEqual(item.group_member_ids, (10, 11, 12))
+
+            class FakeClient:
+                def __init__(self):
+                    self.calls = []
+
+                async def get_messages(self, chat_id, ids=None):
+                    self.calls.append((chat_id, ids))
+                    if isinstance(ids, list):
+                        return [
+                            SimpleNamespace(id=12, chat_id=chat_id),
+                            SimpleNamespace(id=10, chat_id=chat_id),
+                            SimpleNamespace(id=11, chat_id=chat_id),
+                        ]
+                    return SimpleNamespace(id=ids, chat_id=chat_id)
+
+            fake_client = FakeClient()
+            manager = BotManager(SimpleNamespace())
+            manager.client_manager = SimpleNamespace(get_client=lambda: fake_client)
+            manager.forward_queue_store = store
+            fake_forwarder = SimpleNamespace(
+                rule=SimpleNamespace(delay=0),
+                forward_message=AsyncMock(return_value=True),
+            )
+            manager._queue_forwarders = {item.rule_fingerprint: fake_forwarder}
+
+            post_delay = await manager._process_queue_item(item)
+
+            self.assertEqual(post_delay, 0)
+            self.assertEqual(fake_client.calls, [(-1001, [10, 11, 12])])
+            forwarded = fake_forwarder.forward_message.call_args
+            self.assertEqual(forwarded.args[0].id, 10)
+            self.assertEqual(forwarded.args[1], 7)
+            self.assertEqual(forwarded.kwargs["start_target_index"], 0)
+            overrides = forwarded.kwargs["messages_override"]
+            self.assertEqual([m.id for m in overrides], [10, 11, 12])
+            self.assertEqual(store.get_item(item.id).status, "processing")
+
     async def test_media_group_members_log_one_info_and_debug_merges(self):
         class FakeConfig:
             forward_queue_media_group_settle_seconds = 1
@@ -660,6 +956,7 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             delay=0,
         )
         forwarder.downloader = SimpleNamespace()
+        forwarder.delivered_callback = None
         forwarder._build_source_text = lambda message: ""
         forwarder._log_result = lambda *args: None
         calls = []

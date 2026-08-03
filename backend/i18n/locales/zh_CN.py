@@ -54,6 +54,7 @@ TRANSLATIONS = {
             "duplicate": "↩ 忽略重复转发任务 - 规则={rule}, 来源={source}",
             "media_group_enqueued": "媒体组加入转发队列 - 规则={rule}, 来源={source}, 待处理={queue_depth}",
             "media_group_merged": "合并媒体组成员 - 规则={rule}, 来源={source}, 待处理={queue_depth}",
+            "media_group_late_resent": "媒体组迟到成员已补发 - 规则={rule}, 来源={chat}/{message_id}, 组={group}",
             "restored": "持久转发队列已恢复：重新排队 {recovered} 项，清理完成记录 {purged} 项",
             "paused": "触发 FloodWait，整个转发队列暂停 {seconds:.1f} 秒 - 规则: {rule}, 来源: {chat_id}/{message_id}, 目标: {target}",
             "retry": "转发任务处理失败，{seconds:.1f} 秒后重试 - 规则: {rule}, 来源: {chat_id}/{message_id}, 目标: {target}, 错误: {error}",

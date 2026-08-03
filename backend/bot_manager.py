@@ -599,7 +599,25 @@ class BotManager:
             _, forwarder = self._create_forwarder(rule)
             self._queue_forwarders[item.rule_fingerprint] = forwarder
 
-        message = await client.get_messages(item.source_chat_id, ids=item.source_message_id)
+        messages_override = None
+        message = None
+        if item.group_member_ids:
+            # Bot sessions cannot page history (GetHistoryRequest is forbidden),
+            # so fetch the aggregated album members by ID in one call.  Fall
+            # back to the single anchor message if the bulk fetch fails.
+            try:
+                fetched = await client.get_messages(
+                    item.source_chat_id, ids=list(item.group_member_ids)
+                )
+            except Exception:
+                fetched = None
+            if fetched is not None:
+                messages_override = [m for m in fetched if m is not None]
+                if messages_override:
+                    messages_override.sort(key=lambda m: m.id)
+                    message = messages_override[0]
+        if message is None:
+            message = await client.get_messages(item.source_chat_id, ids=item.source_message_id)
         if message is None:
             raise RuntimeError(
                 f"Source message {item.source_chat_id}/{item.source_message_id} is no longer available"
@@ -618,6 +636,7 @@ class BotManager:
             item.sender_id,
             skip_dedup=item.attempt_count > 1 or item.next_target_index > 0,
             start_target_index=item.next_target_index,
+            messages_override=messages_override,
             on_target_success=lambda index: self.forward_queue_store.update_target_index(
                 item.id, index
             ),

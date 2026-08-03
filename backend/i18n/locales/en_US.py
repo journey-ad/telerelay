@@ -54,6 +54,7 @@ TRANSLATIONS = {
             "duplicate": "↩ Duplicate forward task ignored - rule={rule}, source={source}",
             "media_group_enqueued": "Media group added to forwarding queue - rule={rule}, source={source}, pending={queue_depth}",
             "media_group_merged": "Media group member merged - rule={rule}, source={source}, pending={queue_depth}",
+            "media_group_late_resent": "Late media group member rescheduled - rule={rule}, source={chat}/{message_id}, group={group}",
             "restored": "Persistent forward queue restored: requeued {recovered}, purged {purged} completed items",
             "paused": "FloodWait triggered; entire forward queue paused for {seconds:.1f}s - Rule: {rule}, Source: {chat_id}/{message_id}, Target: {target}",
             "retry": "Forward task failed; retrying in {seconds:.1f}s - Rule: {rule}, Source: {chat_id}/{message_id}, Target: {target}, Error: {error}",

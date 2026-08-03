@@ -33,6 +33,19 @@ def rule_fingerprint(rule_data: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
 
+def parse_member_ids(raw: Optional[str]) -> list[int]:
+    """Parse a stored ``group_member_ids`` JSON column into a sorted id list."""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return sorted({int(m) for m in parsed if m is not None})
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return []
+
+
 @dataclass(frozen=True)
 class ForwardQueueItem:
     id: int
@@ -45,6 +58,8 @@ class ForwardQueueItem:
     source_message_id: int
     sender_id: Optional[int]
     grouped_id: Optional[str]
+    group_member_ids: Optional[tuple[int, ...]]
+    group_settle_until: Optional[float]
     status: str
     attempt_count: int
     failure_count: int
@@ -94,6 +109,8 @@ class ForwardQueueStore:
                     source_message_id INTEGER NOT NULL,
                     sender_id INTEGER,
                     grouped_id TEXT,
+                    group_member_ids TEXT,
+                    group_settle_until REAL,
                     status TEXT NOT NULL DEFAULT 'pending'
                         CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
                     attempt_count INTEGER NOT NULL DEFAULT 0,
@@ -126,6 +143,14 @@ class ForwardQueueStore:
                 conn.execute(
                     "ALTER TABLE forward_queue ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
                 )
+            if "group_member_ids" not in columns:
+                conn.execute(
+                    "ALTER TABLE forward_queue ADD COLUMN group_member_ids TEXT"
+                )
+            if "group_settle_until" not in columns:
+                conn.execute(
+                    "ALTER TABLE forward_queue ADD COLUMN group_settle_until REAL"
+                )
             if "source_chat_name" not in columns:
                 conn.execute(
                     "ALTER TABLE forward_queue ADD COLUMN source_chat_name TEXT"
@@ -137,6 +162,7 @@ class ForwardQueueStore:
 
     @staticmethod
     def _row_to_item(row: sqlite3.Row) -> ForwardQueueItem:
+        member_ids = parse_member_ids(row["group_member_ids"])
         return ForwardQueueItem(
             id=row["id"],
             dedup_key=row["dedup_key"],
@@ -148,6 +174,8 @@ class ForwardQueueStore:
             source_message_id=row["source_message_id"],
             sender_id=row["sender_id"],
             grouped_id=row["grouped_id"],
+            group_member_ids=tuple(member_ids) if member_ids else None,
+            group_settle_until=row["group_settle_until"],
             status=row["status"],
             attempt_count=row["attempt_count"],
             failure_count=row["failure_count"],
@@ -194,23 +222,35 @@ class ForwardQueueStore:
         source_chat_name: Optional[str] = None,
         settle_seconds: float = 1.0,
     ) -> tuple[ForwardQueueItem, bool]:
-        """Insert a message, merging subsequent updates from the same album."""
+        """Insert a message, merging subsequent updates from the same album.
+
+        Album members arrive as separate updates.  The first insert seeds a
+        durable job; later members of the same album are folded into its
+        ``group_member_ids`` list so the consumer can fetch every member by ID
+        (works for bot sessions, which cannot page history).  ``group_settle_until``
+        extends with every member arrival so ``claim_next`` never consumes an
+        album that is still being delivered.
+        """
         now = time.time()
         fingerprint = rule_fingerprint(rule_data)
         group_text = str(grouped_id) if grouped_id is not None else None
         suffix = f"group:{group_text}" if group_text is not None else f"message:{source_message_id}"
         dedup_key = f"{fingerprint}:{source_chat_id}:{suffix}"
-        available_at = now + (max(0.0, float(settle_seconds)) if group_text is not None else 0.0)
+        settle = max(0.0, float(settle_seconds)) if group_text is not None else 0.0
+        available_at = now + settle
+        settle_until = now + settle if group_text is not None else None
         encoded_rule = json.dumps(rule_data, ensure_ascii=False, sort_keys=True)
+        members_json = json.dumps([int(source_message_id)]) if group_text is not None else None
 
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 """
                 INSERT OR IGNORE INTO forward_queue
                 (dedup_key, rule_name, rule_data, rule_fingerprint, source_chat_id,
-                 source_chat_name, source_message_id, sender_id, grouped_id, status,
+                 source_chat_name, source_message_id, sender_id, grouped_id,
+                 group_member_ids, group_settle_until, status,
                  available_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
                 """,
                 (
                     dedup_key,
@@ -222,36 +262,135 @@ class ForwardQueueStore:
                     int(source_message_id),
                     sender_id,
                     group_text,
+                    members_json,
+                    settle_until,
                     available_at,
                     now,
                     now,
                 ),
             )
             inserted = cursor.rowcount == 1
+            target_key = dedup_key
             if not inserted and group_text is not None:
                 # Album updates arrive separately; wait for the group to settle.
-                conn.execute(
-                    """
-                    UPDATE forward_queue
-                    SET source_message_id = MIN(source_message_id, ?),
-                        source_chat_name = COALESCE(?, source_chat_name),
-                        sender_id = COALESCE(sender_id, ?),
-                        available_at = CASE WHEN status = 'pending'
-                            THEN MAX(available_at, ?) ELSE available_at END,
-                        updated_at = ?
-                    WHERE dedup_key = ? AND status = 'pending' AND next_target_index = 0
-                    """,
-                    (
-                        int(source_message_id),
-                        str(source_chat_name) if source_chat_name else None,
-                        sender_id,
-                        available_at,
-                        now,
-                        dedup_key,
-                    ),
-                )
+                existing = conn.execute(
+                    "SELECT id, status, group_member_ids FROM forward_queue WHERE dedup_key = ?",
+                    (dedup_key,),
+                ).fetchone()
+                if existing is not None:
+                    existing_members = parse_member_ids(existing["group_member_ids"])
+                    already_member = int(source_message_id) in existing_members
+                    if existing["status"] in ("pending", "processing") and not already_member:
+                        # Normal case: fold the member in and extend the settle window.
+                        members = sorted(set(existing_members + [int(source_message_id)]))
+                        conn.execute(
+                            """
+                            UPDATE forward_queue
+                            SET source_message_id = MIN(source_message_id, ?),
+                                source_chat_name = COALESCE(?, source_chat_name),
+                                sender_id = COALESCE(sender_id, ?),
+                                available_at = CASE WHEN status = 'pending'
+                                    THEN MAX(available_at, ?) ELSE available_at END,
+                                group_settle_until = CASE WHEN status = 'pending'
+                                    THEN MAX(COALESCE(group_settle_until, 0), ?)
+                                    ELSE group_settle_until END,
+                                group_member_ids = ?,
+                                updated_at = ?
+                            WHERE dedup_key = ? AND next_target_index = 0
+                            """,
+                            (
+                                int(source_message_id),
+                                str(source_chat_name) if source_chat_name else None,
+                                sender_id,
+                                available_at,
+                                settle_until,
+                                json.dumps(members),
+                                now,
+                                dedup_key,
+                            ),
+                        )
+                    elif existing["status"] in ("completed", "failed") and not already_member:
+                        # Late member: the album already shipped, so resend the
+                        # stragglers as a fresh queue task (same settle window).
+                        late_row = conn.execute(
+                            """
+                            SELECT id, dedup_key, status, group_member_ids
+                            FROM forward_queue
+                            WHERE grouped_id = ? AND dedup_key LIKE ?
+                            ORDER BY id DESC LIMIT 1
+                            """,
+                            (group_text, "%:late:%"),
+                        ).fetchone()
+                        if late_row is not None and late_row["status"] in ("pending", "processing"):
+                            target_key = late_row["dedup_key"]
+                            late_members = sorted(
+                                set(parse_member_ids(late_row["group_member_ids"])
+                                    + [int(source_message_id)])
+                            )
+                            conn.execute(
+                                """
+                                UPDATE forward_queue
+                                SET source_message_id = MIN(source_message_id, ?),
+                                    group_member_ids = ?,
+                                    available_at = CASE WHEN status = 'pending'
+                                        THEN MAX(available_at, ?) ELSE available_at END,
+                                    group_settle_until = CASE WHEN status = 'pending'
+                                        THEN MAX(COALESCE(group_settle_until, 0), ?)
+                                        ELSE group_settle_until END,
+                                    updated_at = ?
+                                WHERE id = ? AND next_target_index = 0
+                                """,
+                                (
+                                    int(source_message_id),
+                                    json.dumps(late_members),
+                                    available_at,
+                                    settle_until,
+                                    now,
+                                    late_row["id"],
+                                ),
+                            )
+                        else:
+                            # No open late task: seed a new resend job.
+                            target_key = f"{dedup_key}:late:{int(source_message_id)}"
+                            conn.execute(
+                                """
+                                INSERT OR IGNORE INTO forward_queue
+                                (dedup_key, rule_name, rule_data, rule_fingerprint,
+                                 source_chat_id, source_chat_name, source_message_id,
+                                 sender_id, grouped_id, group_member_ids,
+                                 group_settle_until, status, available_at,
+                                 created_at, updated_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                                """,
+                                (
+                                    target_key,
+                                    str(rule_data.get("name", "")),
+                                    encoded_rule,
+                                    fingerprint,
+                                    int(source_chat_id),
+                                    str(source_chat_name) if source_chat_name else None,
+                                    int(source_message_id),
+                                    sender_id,
+                                    group_text,
+                                    json.dumps([int(source_message_id)]),
+                                    settle_until,
+                                    available_at,
+                                    now,
+                                    now,
+                                ),
+                            )
+                            inserted = True
+                            logger.warning(
+                                t(
+                                    "log.forward_queue.media_group_late_resent",
+                                    rule=str(rule_data.get("name", "")),
+                                    chat=str(source_chat_id),
+                                    message_id=int(source_message_id),
+                                    group=group_text,
+                                )
+                            )
             item_id = conn.execute(
-                "SELECT id FROM forward_queue WHERE dedup_key = ?", (dedup_key,)
+                "SELECT id FROM forward_queue WHERE dedup_key = ?", (target_key,)
             ).fetchone()[0]
             return self._get(conn, item_id), inserted
 
@@ -291,9 +430,10 @@ class ForwardQueueStore:
                 """
                 SELECT * FROM forward_queue
                 WHERE status = 'pending' AND available_at <= ?
+                  AND (group_settle_until IS NULL OR group_settle_until <= ?)
                 ORDER BY id ASC LIMIT 1
                 """,
-                (now,),
+                (now, now),
             ).fetchone()
             if row is None:
                 conn.commit()
@@ -311,7 +451,12 @@ class ForwardQueueStore:
     def next_available_at(self) -> Optional[float]:
         with self._lock, self._connect() as conn:
             row = conn.execute(
-                "SELECT MIN(available_at) FROM forward_queue WHERE status = 'pending'"
+                """
+                SELECT MIN(
+                    CASE WHEN group_settle_until IS NULL THEN available_at
+                         ELSE MAX(available_at, group_settle_until) END
+                ) FROM forward_queue WHERE status = 'pending'
+                """
             ).fetchone()
             return row[0]
 

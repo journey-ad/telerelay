@@ -82,9 +82,15 @@ class MessageForwarder:
         sender_id: int,
         skip_dedup: bool = False,
         start_target_index: int = 0,
+        messages_override: Optional[List[Message]] = None,
         on_target_success: Optional[Callable[[int], None]] = None,
     ) -> bool:
         """Forward a message, resuming from a durable target checkpoint.
+
+        ``messages_override`` supplies the full album member list already
+        fetched by the queue consumer (bot sessions cannot page history, so
+        the consumer aggregates member IDs at enqueue time).  When omitted,
+        the media group handler falls back to history paging.
 
         FloodWait and target errors intentionally propagate to the persistent
         queue, which owns retry and global pause policy.
@@ -94,7 +100,11 @@ class MessageForwarder:
             raise RuntimeError(t("log.forward.no_target"))
 
         # 1. Preprocess
-        messages = await self.media_group.get_messages(message)
+        messages = (
+            messages_override
+            if messages_override is not None
+            else await self.media_group.get_messages(message)
+        )
         is_media_group = len(messages) > 1
 
         if is_media_group and not self.media_group.should_forward(messages, self.filter, sender_id):
