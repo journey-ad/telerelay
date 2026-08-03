@@ -465,6 +465,8 @@ class TelegramExportSource:
             return "photo"
         if getattr(message, "gif", None):
             return "animation"
+        if getattr(message, "sticker", None):
+            return "sticker"
         if getattr(message, "video_note", None):
             return "video_note"
         if getattr(message, "video", None):
@@ -473,8 +475,6 @@ class TelegramExportSource:
             return "voice"
         if getattr(message, "audio", None):
             return "audio"
-        if getattr(message, "sticker", None):
-            return "sticker"
         if getattr(message, "document", None):
             return "document"
         media = message.media

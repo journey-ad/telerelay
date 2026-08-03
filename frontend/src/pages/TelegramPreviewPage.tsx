@@ -116,6 +116,17 @@ function visualMediaPath(chatId: number, messageId: number): string {
 function mediaFrame(media: NonNullable<TelegramPreviewMessage['media']>) {
   const width = media.width && media.width > 0 ? media.width : 4
   const height = media.height && media.height > 0 ? media.height : 3
+  const isStickerLike =
+    media.type === 'sticker' ||
+    media.mime_type === 'video/webm' ||
+    media.file_name?.toLowerCase().endsWith('.webm')
+  if (isStickerLike) {
+    return {
+      aspectRatio: `${width} / ${height}`,
+      width: '180px',
+      maxWidth: '100%',
+    }
+  }
   const ratio = Math.min(2, Math.max(0.56, width / height))
   const preferredWidth = ratio < 1 ? 240 + ((ratio - 0.56) / 0.44) * 120 : 360 + (ratio - 1) * 160
   return {
@@ -240,6 +251,12 @@ function MediaPreview({
   if (!media) return null
   if (media.poll) return <PollPreview poll={media.poll} />
   const path = media.is_visual_media ? visualMediaPath(message.chat_id, message.id) : null
+  const isWebm =
+    media.mime_type === 'video/webm' || media.file_name?.toLowerCase().endsWith('.webm')
+  const autoLoadFull =
+    media.type === 'photo' ||
+    (media.type === 'sticker' && Boolean(media.mime_type?.startsWith('image/'))) ||
+    isWebm
   const downloadLabel =
     media.type === 'animation'
       ? t('telegramPreview.downloadAnimation')
@@ -256,8 +273,12 @@ function MediaPreview({
         style={compact ? undefined : mediaFrame(media)}
       >
         <AuthenticatedImage
-          path={media.inline_thumbnail ? null : thumbnailPath(message.chat_id, message.id)}
+          path={autoLoadFull ? visualMediaPath(message.chat_id, message.id) : null}
+          thumbnailPath={media.inline_thumbnail ? null : thumbnailPath(message.chat_id, message.id)}
           inlineSource={media.inline_thumbnail}
+          blurred
+          spinnerWhileLoading={autoLoadFull}
+          isVideo={isWebm}
           alt={media.file_name || t('telegramPreview.image')}
           accountId={accountId}
           className="size-full"
