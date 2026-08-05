@@ -230,11 +230,11 @@ class BotManager:
         except Exception as e:
             logger.error(t("log.bot.main_error", error=str(e)), exc_info=True)
         finally:
+            self.is_connected = False
             if self.forward_queue:
                 await self.forward_queue.stop(timeout=max(1, BOT_STOP_TIMEOUT - 2))
             if self.client_manager:
                 await self.client_manager.disconnect()
-            self.is_connected = False
             self.is_running = False
             self._publish_event(
                 "telegram-account",
@@ -955,7 +955,12 @@ class BotManager:
             return False
 
         logger.debug(t("log.bot.stopping"))
-        if task and not self.is_connected:
+        was_connected = self.is_connected
+        # Stop serving new Telegram API requests before disconnecting the
+        # underlying client. This closes the window where callers see a stale
+        # connected flag while Telethon is already shutting down.
+        self.is_connected = False
+        if task and not was_connected:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         else:

@@ -63,7 +63,10 @@ export function AppShell({ onLogout }: { onLogout: () => void }) {
   const accountsQuery = useQuery({
     queryKey: ['telegram-accounts'],
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
-    refetchInterval: 30_000,
+    refetchInterval: (query) =>
+      query.state.data?.some((account) => account.authenticated && !account.connected)
+        ? 2_000
+        : 30_000,
   })
   const activeAccount =
     accountsQuery.data?.find((account) => account.active) ?? accountsQuery.data?.[0]

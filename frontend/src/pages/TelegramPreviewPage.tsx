@@ -84,6 +84,14 @@ function ToolButton({
   )
 }
 
+function retryTelegramConnection(failureCount: number, error: Error) {
+  return (
+    failureCount < 5 &&
+    error instanceof ApiError &&
+    error.code === 'telegram_not_connected'
+  )
+}
+
 export function TelegramPreviewPage() {
   const { t, i18n } = useTranslation()
   const locale = i18n.resolvedLanguage ?? 'zh-CN'
@@ -118,7 +126,10 @@ export function TelegramPreviewPage() {
   const accounts = useQuery({
     queryKey: ['telegram-accounts'],
     queryFn: () => request<TelegramAccount[]>('/api/v1/telegram-accounts'),
-    refetchInterval: 30_000,
+    refetchInterval: (query) =>
+      query.state.data?.some((account) => account.authenticated && !account.connected)
+        ? 2_000
+        : 30_000,
   })
   const active = accounts.data?.find((account) => account.id === accountId)
 
@@ -154,6 +165,8 @@ export function TelegramPreviewPage() {
     },
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     refetchOnMount: 'always',
+    retry: retryTelegramConnection,
+    retryDelay: (failureCount) => Math.min(500 * 2 ** failureCount, 4_000),
   })
 
   const refreshDialogsFirstPage = useCallback(async () => {

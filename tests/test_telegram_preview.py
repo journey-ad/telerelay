@@ -90,6 +90,16 @@ class FakeClient:
         ]
         self.calls = []
         self.event_handlers = []
+        self.connected = True
+        self.connect_calls = 0
+        self.disconnect_during_next_dialog_load = False
+
+    def is_connected(self):
+        return self.connected
+
+    async def connect(self):
+        self.connect_calls += 1
+        self.connected = True
 
     async def get_input_entity(self, peer_id):
         self.calls.append(("get_input_entity", peer_id))
@@ -110,6 +120,10 @@ class FakeClient:
 
     async def iter_dialogs(self, **options):
         self.calls.append(("iter_dialogs", options))
+        if self.disconnect_during_next_dialog_load:
+            self.disconnect_during_next_dialog_load = False
+            self.connected = False
+            raise ConnectionError("Cannot send requests while disconnected")
         archived = options.get("archived", False)
         values = [item for item in self.dialogs if (item.folder_id == 1) == archived]
         if archived and not options.get("ignore_pinned"):
@@ -231,6 +245,43 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(main["items"][0]["kind"], "supergroup")
         self.assertTrue(main["items"][0]["pinned"])
         self.assertEqual([item["title"] for item in archived["items"]], ["通知频道"])
+
+    async def test_dialog_list_reconnects_a_stale_client(self):
+        self.client.connected = False
+
+        result = await self.service.list_dialogs(
+            account_id="work", folder="main", limit=40, cursor=None
+        )
+
+        self.assertEqual([item["title"] for item in result["items"]], ["项目群"])
+        self.assertEqual(self.client.connect_calls, 1)
+
+    async def test_dialog_list_recovers_when_transport_drops_during_request(self):
+        self.client.disconnect_during_next_dialog_load = True
+
+        result = await self.service.list_dialogs(
+            account_id="work", folder="main", limit=40, cursor=None
+        )
+
+        self.assertEqual([item["title"] for item in result["items"]], ["项目群"])
+        self.assertEqual(self.client.connect_calls, 1)
+
+    async def test_dialog_list_reports_unavailable_when_reconnect_fails(self):
+        self.client.connected = False
+
+        async def fail_connect():
+            self.client.connect_calls += 1
+            raise ConnectionError("offline")
+
+        self.client.connect = fail_connect
+
+        with self.assertRaisesRegex(TelegramPreviewError, "not connected") as raised:
+            await self.service.list_dialogs(
+                account_id="work", folder="main", limit=40, cursor=None
+            )
+
+        self.assertEqual(raised.exception.code, "telegram_not_connected")
+        self.assertEqual(self.client.connect_calls, 1)
 
     async def test_message_history_search_and_reply_are_read_only(self):
         result = await self.service.list_messages(

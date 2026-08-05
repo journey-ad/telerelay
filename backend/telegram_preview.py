@@ -177,6 +177,7 @@ class TelegramPreviewService:
     CACHE_MAGIC = b"TPXC1"
     CACHE_KEY_BYTES = 32
     CACHE_TAG_BYTES = 16
+    CLIENT_RECONNECT_TIMEOUT = 10.0
 
     def __init__(self, bot_manager: Any, account_store: Any):
         self.bot_manager = bot_manager
@@ -184,6 +185,9 @@ class TelegramPreviewService:
         self._cache_keys: dict[Path, bytes] = {}
         self._cache_key_lock = threading.Lock()
         self._cache_locks: weakref.WeakValueDictionary[Path, asyncio.Lock] = (
+            weakref.WeakValueDictionary()
+        )
+        self._client_connection_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
         self._last_cache_prune: dict[Path, float] = {}
@@ -215,9 +219,44 @@ class TelegramPreviewService:
             )
         return runtime, client
 
-    def _client(self, account_id: str | None = None):
-        _, client = self._runtime_and_client(account_id)
-        return client
+    @staticmethod
+    def _client_is_connected(client: Any) -> bool:
+        is_connected = getattr(client, "is_connected", None)
+        return bool(is_connected()) if callable(is_connected) else True
+
+    async def _client(self, account_id: str | None = None):
+        """Resolve a live client, reconnecting a stale transport once when possible."""
+        active_id = self._active_account(account_id)
+        _, client = self._runtime_and_client(active_id)
+        if self._client_is_connected(client):
+            return client
+
+        lock = self._client_connection_locks.setdefault(active_id, asyncio.Lock())
+        async with lock:
+            # The runtime may have stopped or replaced its client while this
+            # request waited for another reconnect attempt.
+            _, client = self._runtime_and_client(active_id)
+            if self._client_is_connected(client):
+                return client
+            connect = getattr(client, "connect", None)
+            if not callable(connect):
+                raise TelegramPreviewError(
+                    "telegram_not_connected",
+                    "The requested Telegram account is not connected",
+                )
+            try:
+                await asyncio.wait_for(connect(), timeout=self.CLIENT_RECONNECT_TIMEOUT)
+            except Exception as exc:
+                raise TelegramPreviewError(
+                    "telegram_not_connected",
+                    "The requested Telegram account is not connected",
+                ) from exc
+            if not self._client_is_connected(client):
+                raise TelegramPreviewError(
+                    "telegram_not_connected",
+                    "The requested Telegram account is not connected",
+                )
+            return client
 
     @staticmethod
     def _preview_stream_alive(runtime: Any, client: Any) -> bool:
@@ -231,7 +270,11 @@ class TelegramPreviewService:
             if not runtime.is_connected:
                 return False
             manager = runtime.client_manager
-            return manager is not None and manager.get_client() is client
+            return (
+                manager is not None
+                and manager.get_client() is client
+                and TelegramPreviewService._client_is_connected(client)
+            )
         except TelegramAccountError:
             return False
 
@@ -244,22 +287,38 @@ class TelegramPreviewService:
         cursor: str | None,
     ) -> dict[str, Any]:
         active_id = self._active_account(account_id)
-        client = self._client(active_id)
-        options: dict[str, Any] = {
-            "limit": limit + 1,
-            "archived": folder == "archived",
-            "ignore_pinned": folder == "archived",
-        }
-        if cursor:
-            cursor_data = self._decode_cursor(cursor, active_id, folder)
-            options.update(
-                offset_date=cursor_data["date"],
-                offset_id=cursor_data["message_id"],
-                offset_peer=await client.get_input_entity(cursor_data["peer_id"]),
-                ignore_pinned=True,
+        dialogs = None
+        for attempt in range(2):
+            client = await self._client(active_id)
+            options: dict[str, Any] = {
+                "limit": limit + 1,
+                "archived": folder == "archived",
+                "ignore_pinned": folder == "archived",
+            }
+            try:
+                if cursor:
+                    cursor_data = self._decode_cursor(cursor, active_id, folder)
+                    options.update(
+                        offset_date=cursor_data["date"],
+                        offset_id=cursor_data["message_id"],
+                        offset_peer=await client.get_input_entity(cursor_data["peer_id"]),
+                        ignore_pinned=True,
+                    )
+                dialogs = [dialog async for dialog in client.iter_dialogs(**options)]
+                break
+            except TelegramPreviewError:
+                raise
+            except ConnectionError as exc:
+                if attempt == 1:
+                    raise TelegramPreviewError(
+                        "telegram_not_connected",
+                        "The requested Telegram account is not connected",
+                    ) from exc
+        if dialogs is None:
+            raise TelegramPreviewError(
+                "telegram_not_connected",
+                "The requested Telegram account is not connected",
             )
-
-        dialogs = [dialog async for dialog in client.iter_dialogs(**options)]
         has_more = len(dialogs) > limit
         visible = dialogs[:limit]
         items = [await self._dialog_data(dialog) for dialog in visible]
@@ -283,7 +342,7 @@ class TelegramPreviewService:
         before_id: int | None,
         query: str | None,
     ) -> dict[str, Any]:
-        client = self._client(account_id)
+        client = await self._client(account_id)
         try:
             entity = await client.get_entity(chat_id)
         except Exception as exc:
@@ -354,7 +413,7 @@ class TelegramPreviewService:
         chat_id: int,
         text: str,
     ) -> dict[str, Any]:
-        client = self._client(account_id)
+        client = await self._client(account_id)
         try:
             entity = await client.get_entity(chat_id)
         except Exception as exc:
@@ -404,7 +463,7 @@ class TelegramPreviewService:
         account_id: str,
         chat_id: int,
     ) -> dict[str, Any]:
-        client = self._client(account_id)
+        client = await self._client(account_id)
         try:
             entity = await client.get_entity(chat_id)
             if not getattr(entity, "bot", False):
@@ -481,7 +540,7 @@ class TelegramPreviewService:
 
     async def avatar(self, *, account_id: str, peer_id: int) -> bytes:
         async def load() -> bytes:
-            client = self._client(account_id)
+            client = await self._client(account_id)
             try:
                 entity = await client.get_entity(peer_id)
                 content = await client.download_profile_photo(
@@ -624,7 +683,7 @@ class TelegramPreviewService:
         return path, mime_type, Path(filename).name
 
     async def _message(self, *, client_account: str, chat_id: int, message_id: int):
-        client = self._client(client_account)
+        client = await self._client(client_account)
         try:
             message = await client.get_messages(chat_id, ids=message_id)
         except Exception as exc:

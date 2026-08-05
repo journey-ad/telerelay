@@ -227,9 +227,9 @@ class TelegramClientManager:
     
     async def disconnect(self) -> None:
         """Disconnect"""
+        self.is_connected = False
         if self.client:
             await self.client.disconnect()
-            self.is_connected = False
             logger.debug(t("log.client.disconnected"))
     
     def add_message_handler(
