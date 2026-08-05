@@ -9,11 +9,6 @@ import {
   Archive,
   ArrowDown,
   ArrowLeft,
-  Bot,
-  CheckCircle2,
-  Download,
-  File,
-  Image,
   Inbox,
   LoaderCircle,
   MessageCircle,
@@ -21,8 +16,6 @@ import {
   Radio,
   Search,
   Send,
-  UserRound,
-  UsersRound,
   X,
 } from 'lucide-react'
 import {
@@ -36,12 +29,11 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { TFunction } from 'i18next'
 import { accountRequest, ApiError, json, request } from '../api/client'
-import { downloadFile } from '../api/downloads'
 import { connectTelegramPreviewUpdates } from '../api/events'
-import { AuthenticatedImage } from '../components/AuthenticatedImage'
-import { RichText } from '../components/RichText'
+import { Avatar, ChatGlyph, DialogRow } from '../components/preview/DialogList'
+import { ImageViewer } from '../components/preview/ImageViewer'
+import { MessageBubble } from '../components/preview/MessageBubble'
 import { EmptyState, IconButton, PageHeader, Tooltip } from '../components/ui'
 import { useAccountScope } from '../hooks/useAccountScope'
 import type {
@@ -52,624 +44,11 @@ import type {
   TelegramPreviewMessage,
   TelegramPreviewMessagesPage,
 } from '../types'
-import { avatarInitials } from '../utils/avatar'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
-import { hashColor } from '../utils/color'
 import { formatNumber, messageFrom } from '../utils/format'
-
-type DialogFolder = 'main' | 'archived'
-
-function previewTime(value: string | null | undefined, locale: string): string {
-  if (!value) return ''
-  const date = new Date(value)
-  const now = new Date()
-  if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
-  }
-  if (date.getFullYear() === now.getFullYear()) {
-    return date.toLocaleDateString(locale, { month: 'numeric', day: 'numeric' })
-  }
-  return date.toLocaleDateString(locale, { year: '2-digit', month: 'numeric', day: 'numeric' })
-}
-
-function messageTime(value: string | null | undefined, locale: string): string {
-  if (!value) return ''
-  return new Date(value).toLocaleTimeString(locale, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-}
-
-function messageDay(
-  value: string | null | undefined,
-  locale: string,
-  unknown: string,
-  todayLabel: string,
-  yesterdayLabel: string,
-): string {
-  if (!value) return unknown
-  const date = new Date(value)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  if (date.toDateString() === today.toDateString()) return todayLabel
-  if (date.toDateString() === yesterday.toDateString()) return yesterdayLabel
-  return date.toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' })
-}
-
-function fileSize(value?: number | null): string {
-  if (!value) return ''
-  if (value < 1024) return `${value} B`
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
-  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
-  return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
-
-function peerAvatarPath(peerId?: number | null): string | null {
-  if (!peerId) return null
-  return `/api/v1/telegram-preview/peers/${peerId}/avatar`
-}
-
-function thumbnailPath(chatId: number, messageId: number): string {
-  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/thumbnail`
-}
-
-function visualMediaPath(chatId: number, messageId: number): string {
-  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/visual-media`
-}
-
-function serviceText(
-  action: string | null | undefined,
-  details: TelegramPreviewMessage['service_details'],
-  senderName: string,
-  t: TFunction,
-  locale: string,
-): string {
-  const joiner = locale.startsWith('zh') ? '、' : ', '
-  const names = (details?.user_names ?? []).join(joiner)
-  const title = details?.title ?? ''
-  const sender = senderName || names
-  switch (action) {
-    case 'MessageActionChatAddUser':
-      return t('telegramPreview.service.chatAddUser', { names })
-    case 'MessageActionChatDeleteUser':
-      return t('telegramPreview.service.chatDeleteUser', { names })
-    case 'MessageActionChatCreate':
-      return t('telegramPreview.service.chatCreate', { sender, title })
-    case 'MessageActionChatEditTitle':
-      return t('telegramPreview.service.chatEditTitle', { title })
-    case 'MessageActionChatEditPhoto':
-      return t('telegramPreview.service.chatEditPhoto')
-    case 'MessageActionChatJoinedByLink':
-      return t('telegramPreview.service.chatJoinedByLink', { sender })
-    case 'MessageActionChatJoinedByRequest':
-      return t('telegramPreview.service.chatJoinedByRequest', { sender })
-    case 'MessageActionPinMessage':
-      return t('telegramPreview.service.chatPinMessage', { sender })
-    default:
-      return t('telegramPreview.serviceUpdated')
-  }
-}
-
-function mediaFrame(media: NonNullable<TelegramPreviewMessage['media']>) {
-  const width = media.width && media.width > 0 ? media.width : 4
-  const height = media.height && media.height > 0 ? media.height : 3
-  const isStickerLike =
-    media.type === 'sticker' ||
-    media.mime_type === 'video/webm' ||
-    media.file_name?.toLowerCase().endsWith('.webm')
-  if (isStickerLike) {
-    return {
-      aspectRatio: `${width} / ${height}`,
-      width: '180px',
-      maxWidth: '100%',
-    }
-  }
-  const ratio = Math.min(2, Math.max(0.56, width / height))
-  const preferredWidth = ratio < 1 ? 240 + ((ratio - 0.56) / 0.44) * 120 : 360 + (ratio - 1) * 160
-  return {
-    aspectRatio: `${width} / ${height}`,
-    width: `${Math.round(preferredWidth)}px`,
-    maxWidth: '100%',
-  }
-}
-
-function ChatGlyph({ kind, size = 14 }: { kind: TelegramPreviewDialog['kind']; size?: number }) {
-  const Icon =
-    kind === 'bot' ? Bot : kind === 'private' ? UserRound : kind === 'channel' ? Radio : UsersRound
-  return <Icon size={size} />
-}
-
-function Avatar({
-  accountId,
-  peerId,
-  inlineSource,
-  title,
-  kind,
-  className,
-}: {
-  accountId: string
-  peerId?: number | null
-  inlineSource?: string | null
-  title: string
-  kind?: TelegramPreviewDialog['kind']
-  className?: string
-}) {
-  const { t } = useTranslation()
-  const colors = hashColor(String(peerId ?? title))
-  return (
-    <AuthenticatedImage
-      path={peerAvatarPath(peerId)}
-      inlineSource={inlineSource}
-      alt={t('telegramPreview.avatarAlt', { title })}
-      accountId={accountId}
-      className={cn('grid shrink-0 place-items-center rounded-md', className)}
-      style={{ backgroundColor: colors.background, color: colors.foreground }}
-      fallback={
-        <span className="grid size-full place-items-center text-xs font-bold">
-          {title ? avatarInitials(title) : kind ? <ChatGlyph kind={kind} /> : 'TG'}
-        </span>
-      }
-    />
-  )
-}
-
-function DialogRow({
-  accountId,
-  dialog,
-  selected,
-  onSelect,
-}: {
-  accountId: string
-  dialog: TelegramPreviewDialog
-  selected: boolean
-  onSelect: () => void
-}) {
-  const { t, i18n } = useTranslation()
-  const locale = i18n.resolvedLanguage ?? 'zh-CN'
-  return (
-    <button
-      data-testid={`dialog-${dialog.id}`}
-      className={cn(
-        'grid min-h-17 w-full grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-2.5',
-        'border-0 border-b border-slate-100 bg-transparent px-3 py-2.5 text-left transition',
-        selected ? 'bg-blue-50/85 shadow-[inset_2px_0_#2563eb]' : 'hover:bg-slate-50',
-      )}
-      onClick={onSelect}
-    >
-      <Avatar
-        accountId={accountId}
-        peerId={dialog.id}
-        inlineSource={dialog.inline_avatar}
-        title={dialog.title}
-        kind={dialog.kind}
-        className="size-10.5"
-      />
-      <span className="min-w-0">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <strong className="truncate text-sm text-slate-700">{dialog.title}</strong>
-          {dialog.verified ? <CheckCircle2 size={12} className="shrink-0 text-blue-500" /> : null}
-        </span>
-        <span className="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-400">
-          {dialog.last_message?.outgoing ? (
-            <span className="text-blue-500">{t('telegramPreview.you')}</span>
-          ) : null}
-          <span className="truncate">
-            {dialog.last_message
-              ? dialog.last_message.service_action
-                ? serviceText(
-                    dialog.last_message.service_action,
-                    dialog.last_message.service_details,
-                    dialog.last_message.sender_name ?? '',
-                    t,
-                    locale,
-                  )
-                : dialog.last_message.preview || t('telegramPreview.noMessages')
-              : t('telegramPreview.noMessages')}
-          </span>
-        </span>
-      </span>
-      <span className="flex h-full min-w-8 flex-col items-end justify-center gap-1.5">
-        <time className="text-xs text-slate-400">
-          {previewTime(dialog.last_message?.date, locale)}
-        </time>
-        {dialog.unread_count ? (
-          <span className="grid min-w-4.5 place-items-center rounded-full bg-blue-600 px-1 text-xs font-bold leading-4.5 text-white">
-            {dialog.unread_count > 99 ? '99+' : dialog.unread_count}
-          </span>
-        ) : dialog.pinned ? (
-          <span className="text-xs text-slate-300">{t('telegramPreview.pinned')}</span>
-        ) : null}
-      </span>
-    </button>
-  )
-}
-
-function MediaPreview({
-  accountId,
-  message,
-  compact = false,
-}: {
-  accountId: string
-  message: TelegramPreviewMessage
-  compact?: boolean
-}) {
-  const { t } = useTranslation()
-  const media = message.media
-  if (!media) return null
-  if (media.poll) return <PollPreview poll={media.poll} />
-  const path = media.is_visual_media ? visualMediaPath(message.chat_id, message.id) : null
-  const isWebm =
-    media.mime_type === 'video/webm' || media.file_name?.toLowerCase().endsWith('.webm')
-  const autoLoadFull =
-    media.type === 'photo' ||
-    (media.type === 'sticker' && Boolean(media.mime_type?.startsWith('image/'))) ||
-    isWebm
-  const downloadLabel =
-    media.type === 'animation'
-      ? t('telegramPreview.downloadAnimation')
-      : media.type === 'sticker'
-        ? t('telegramPreview.downloadSticker')
-        : t('telegramPreview.downloadImage')
-  if (media.has_thumbnail) {
-    return (
-      <div
-        className={cn(
-          'group relative w-full overflow-hidden rounded-[5px] bg-slate-100',
-          compact && 'aspect-square',
-        )}
-        style={compact ? undefined : mediaFrame(media)}
-      >
-        <AuthenticatedImage
-          path={autoLoadFull ? visualMediaPath(message.chat_id, message.id) : null}
-          thumbnailPath={media.inline_thumbnail ? null : thumbnailPath(message.chat_id, message.id)}
-          inlineSource={media.inline_thumbnail}
-          blurred
-          spinnerWhileLoading={autoLoadFull}
-          isVideo={isWebm}
-          alt={media.file_name || t('telegramPreview.image')}
-          accountId={accountId}
-          className="size-full"
-          fallback={
-            <span className="grid size-full place-items-center text-slate-300">
-              <Image size={28} />
-            </span>
-          }
-        />
-        {path ? (
-          <button
-            className="absolute right-2 bottom-2 grid size-7 place-items-center rounded bg-slate-900/70 text-white opacity-0 shadow transition group-hover:opacity-100 focus:opacity-100"
-            title={downloadLabel}
-            aria-label={downloadLabel}
-            onClick={() => void downloadFile(path, media.file_name || `telegram-${message.id}.jpg`)}
-          >
-            <Download size={14} />
-          </button>
-        ) : null}
-      </div>
-    )
-  }
-  return (
-    <div
-      className={cn(
-        'grid w-full items-center gap-2 rounded-[5px] border',
-        path ? 'grid-cols-[34px_minmax(0,1fr)_24px]' : 'grid-cols-[34px_minmax(0,1fr)]',
-        'border-slate-200 bg-white/70 p-2 text-left',
-      )}
-    >
-      <span className="grid size-8.5 place-items-center rounded bg-blue-50 text-blue-600">
-        <File size={17} />
-      </span>
-      <span className="min-w-0">
-        <strong className="block truncate text-xs text-slate-700">
-          {media.file_name || media.type}
-        </strong>
-        <small className="mt-0.5 block text-xs text-slate-400">
-          {[media.type, fileSize(media.size)].filter(Boolean).join(' · ')}
-        </small>
-      </span>
-      {path ? (
-        <button
-          className="grid size-6 place-items-center rounded border-0 bg-transparent text-slate-400 hover:bg-blue-50 hover:text-blue-600"
-          title={downloadLabel}
-          aria-label={downloadLabel}
-          onClick={() => void downloadFile(path, media.file_name || `telegram-${message.id}`)}
-        >
-          <Download size={14} />
-        </button>
-      ) : null}
-    </div>
-  )
-}
-
-function PollPreview({
-  poll,
-}: {
-  poll: NonNullable<NonNullable<TelegramPreviewMessage['media']>['poll']>
-}) {
-  const { t } = useTranslation()
-  return (
-    <div className="w-80 max-w-full rounded-[5px] border border-slate-200 bg-white/80 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <strong className="min-w-0 text-[13px] leading-4.5 text-slate-700">{poll.question}</strong>
-        {poll.closed ? (
-          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
-            {t('telegramPreview.poll.closed')}
-          </span>
-        ) : null}
-      </div>
-      <span className="mt-1 block text-xs text-slate-400">
-        {t(
-          poll.quiz
-            ? 'telegramPreview.poll.quiz'
-            : poll.multiple_choice
-              ? 'telegramPreview.poll.multiple'
-              : 'telegramPreview.poll.single',
-        )}
-      </span>
-      <div className="mt-2.5 space-y-2">
-        {poll.options.map((option, index) => {
-          const percentage = poll.total_voters
-            ? Math.min(100, Math.round((option.voters / poll.total_voters) * 100))
-            : 0
-          return (
-            <div key={`${index}-${option.text}`}>
-              <div className="flex items-start justify-between gap-3 text-[13px]">
-                <span
-                  className={cn(
-                    'min-w-0 break-words',
-                    option.correct
-                      ? 'font-semibold text-emerald-700'
-                      : option.chosen
-                        ? 'font-semibold text-blue-700'
-                        : 'text-slate-600',
-                  )}
-                >
-                  {option.text}
-                  {option.chosen ? t('telegramPreview.poll.chosen') : ''}
-                  {option.correct ? t('telegramPreview.poll.correct') : ''}
-                </span>
-                {poll.results_visible ? (
-                  <span className="shrink-0 text-xs text-slate-400">
-                    {t('telegramPreview.poll.votes', {
-                      percentage,
-                      value: formatNumber(option.voters),
-                    })}
-                  </span>
-                ) : null}
-              </div>
-              {poll.results_visible ? (
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                  <span
-                    className={cn(
-                      'block h-full rounded-full',
-                      option.correct
-                        ? 'bg-emerald-500'
-                        : option.chosen
-                          ? 'bg-blue-500'
-                          : 'bg-slate-300',
-                    )}
-                    style={{ width: `${percentage}%` }}
-                  />
-                </div>
-              ) : null}
-            </div>
-          )
-        })}
-      </div>
-      <div className="mt-2.5 border-t border-slate-100 pt-2 text-xs text-slate-400">
-        {poll.results_visible
-          ? t('telegramPreview.poll.participants', {
-              value: formatNumber(poll.total_voters),
-            })
-          : poll.total_voters
-            ? t('telegramPreview.poll.participantsHidden', {
-                value: formatNumber(poll.total_voters),
-              })
-            : t('telegramPreview.poll.resultsHidden')}
-      </div>
-      {poll.solution ? (
-        <p className="mt-2 rounded bg-emerald-50 p-2 text-xs leading-4 text-emerald-700">
-          {poll.solution}
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-interface MessageGroup {
-  key: string
-  items: TelegramPreviewMessage[]
-}
-
-function groupMessages(messages: TelegramPreviewMessage[]): MessageGroup[] {
-  const groups: MessageGroup[] = []
-  for (const message of messages) {
-    const previous = groups[groups.length - 1]
-    if (message.grouped_id && previous?.key === `album-${message.grouped_id}`) {
-      previous.items.push(message)
-    } else {
-      groups.push({
-        key: message.grouped_id ? `album-${message.grouped_id}` : `message-${message.id}`,
-        items: [message],
-      })
-    }
-  }
-  return groups
-}
-
-function MessageBubble({
-  accountId,
-  group,
-  showDay,
-  onReplyClick,
-  loadingReplyId,
-  unavailableReplyId,
-}: {
-  accountId: string
-  group: MessageGroup
-  showDay: boolean
-  onReplyClick: (id: number) => void
-  loadingReplyId: number | null
-  unavailableReplyId: number | null
-}) {
-  const { t, i18n } = useTranslation()
-  const locale = i18n.resolvedLanguage ?? 'zh-CN'
-  const message = group.items[0]
-  const outgoing = message.outgoing
-  if (message.service_action) {
-    return (
-      <>
-        {showDay ? <DayDivider value={message.date} /> : null}
-        <div id={`message-${message.id}`} className="my-2 flex justify-center">
-          <span className="rounded bg-slate-200/80 px-2.5 py-1 text-xs text-slate-500">
-            {message.text ||
-              serviceText(
-                message.service_action,
-                message.service_details,
-                message.sender?.name ?? '',
-                t,
-                locale,
-              )}
-          </span>
-        </div>
-      </>
-    )
-  }
-  const textMessage = group.items.find((item) => item.text)?.text ?? ''
-  return (
-    <>
-      {showDay ? <DayDivider value={message.date} /> : null}
-      <div
-        id={`message-${message.id}`}
-        className={cn('flex items-end gap-2', outgoing ? 'justify-end pl-12' : 'pr-12')}
-      >
-        {!outgoing ? (
-          <Avatar
-            accountId={accountId}
-            peerId={message.sender.id}
-            title={message.sender.name}
-            className="mb-0.5 size-7.5 rounded"
-          />
-        ) : null}
-        <div
-          className={cn(
-            'min-w-0 max-w-155 rounded-md border px-2.5 py-2 shadow-xs',
-            outgoing
-              ? 'border-emerald-200 bg-emerald-50 text-slate-700'
-              : 'border-slate-200 bg-white text-slate-700',
-          )}
-        >
-          {!outgoing && message.sender.name ? (
-            <strong className="mb-1 block text-[13px] text-blue-600">{message.sender.name}</strong>
-          ) : null}
-          {message.forward ? (
-            <div className="mb-1.5 border-l-2 border-blue-400 pl-2 text-xs text-blue-600">
-              {t('telegramPreview.forwardedFrom', { name: message.forward.from_name })}
-            </div>
-          ) : null}
-          {message.reply_to ? (
-            <button
-              className="mb-1.5 grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-0 border-l-2 border-slate-300 bg-slate-50/80 py-1 pr-1 pl-2 text-left"
-              onClick={() => onReplyClick(message.reply_to!.message_id)}
-            >
-              <span className="min-w-0">
-                {message.reply_to.sender_name ? (
-                  <strong className="block truncate text-xs text-blue-600">
-                    {message.reply_to.sender_name}
-                  </strong>
-                ) : null}
-                <span className="block truncate text-xs text-slate-500">
-                  {message.reply_to.text}
-                </span>
-              </span>
-              {loadingReplyId === message.reply_to.message_id ? (
-                <LoaderCircle size={12} className="animate-spin text-blue-500" />
-              ) : unavailableReplyId === message.reply_to.message_id ? (
-                <span className="text-[11px] text-rose-500">
-                  {t('telegramPreview.unavailable')}
-                </span>
-              ) : null}
-            </button>
-          ) : null}
-          {group.items.some((item) => item.media) ? (
-            <div
-              className={cn(
-                'mb-1.5 grid gap-1',
-                group.items.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
-              )}
-              style={
-                group.items.length > 1 ? { width: '520px', maxWidth: '100%' } : { maxWidth: '100%' }
-              }
-            >
-              {group.items.map((item) => (
-                <MediaPreview
-                  key={item.id}
-                  accountId={accountId}
-                  message={item}
-                  compact={group.items.length > 1}
-                />
-              ))}
-            </div>
-          ) : null}
-          {textMessage ? (
-            <RichText
-              text={textMessage}
-              entities={message.entities}
-              className="m-0 whitespace-pre-wrap wrap-break-word text-[13px] leading-4.5"
-            />
-          ) : null}
-          {message.reactions.length ? (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {message.reactions.map((reaction) => (
-                <span
-                  key={reaction.label}
-                  className={cn(
-                    'rounded-full border px-1.5 py-0.5 text-xs',
-                    reaction.chosen
-                      ? 'border-blue-200 bg-blue-50 text-blue-700'
-                      : 'border-slate-200 bg-white/70 text-slate-500',
-                  )}
-                >
-                  {reaction.label} {reaction.count}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          <span className="mt-1 flex items-center justify-end gap-1.5 text-[11px] text-slate-400">
-            {message.edited_at ? <span>{t('telegramPreview.edited')}</span> : null}
-            {message.views ? (
-              <span>{t('telegramPreview.views', { value: formatNumber(message.views) })}</span>
-            ) : null}
-            <time>{messageTime(message.date, locale)}</time>
-          </span>
-        </div>
-      </div>
-    </>
-  )
-}
-
-function DayDivider({ value }: { value?: string | null }) {
-  const { t, i18n } = useTranslation()
-  const locale = i18n.resolvedLanguage ?? 'zh-CN'
-  return (
-    <div className="flex items-center gap-3 py-1.5 text-xs text-slate-400">
-      <span className="h-px flex-1 bg-slate-200" />
-      <time>
-        {messageDay(
-          value,
-          locale,
-          t('telegramPreview.unknownDate'),
-          t('telegramPreview.today'),
-          t('telegramPreview.yesterday'),
-        )}
-      </time>
-      <span className="h-px flex-1 bg-slate-200" />
-    </div>
-  )
-}
+import { groupMessages, isPreviewableMedia, messageDay } from '../utils/preview'
+import type { DialogFolder, ImageGroup } from '../utils/preview'
 
 function Loading({ label }: { label: string }) {
   return (
@@ -717,6 +96,9 @@ export function TelegramPreviewPage() {
   const [messageQuery, setMessageQuery] = useState('')
   const [messageSearchOpen, setMessageSearchOpen] = useState(false)
   const [messageDraft, setMessageDraft] = useState('')
+  const [viewerTarget, setViewerTarget] = useState<{ chatId: number; messageId: number } | null>(
+    null,
+  )
   const [replyTargetId, setReplyTargetId] = useState<number | null>(null)
   const [loadingReplyId, setLoadingReplyId] = useState<number | null>(null)
   const [unavailableReplyId, setUnavailableReplyId] = useState<number | null>(null)
@@ -747,6 +129,7 @@ export function TelegramPreviewPage() {
     replyRequestId.current += 1
     selectedRef.current = null
     setSelected(null)
+    setViewerTarget(null)
     setSearchInput('')
     setMessageQuery('')
     setMessageSearchOpen(false)
@@ -921,6 +304,39 @@ export function TelegramPreviewPage() {
       })
       .sort((left, right) => left.id - right.id)
   }, [messages.data?.pages])
+  const imageGroups = useMemo<ImageGroup[]>(() => {
+    const groups: ImageGroup[] = []
+    for (const message of allMessages) {
+      const media = message.media
+      if (!media || !isPreviewableMedia(media)) continue
+      const previous = groups[groups.length - 1]
+      if (
+        message.grouped_id &&
+        previous &&
+        previous.message.grouped_id === message.grouped_id &&
+        previous.message.chat_id === message.chat_id
+      ) {
+        previous.items.push(message)
+      } else {
+        groups.push({ message, items: [message] })
+      }
+    }
+    return groups
+  }, [allMessages])
+  const viewerGroupIndex = viewerTarget
+    ? imageGroups.findIndex((group) =>
+        group.items.some(
+          (message) =>
+            message.chat_id === viewerTarget.chatId && message.id === viewerTarget.messageId,
+        ),
+      )
+    : -1
+  const viewerItemIndex =
+    viewerTarget && viewerGroupIndex >= 0
+      ? imageGroups[viewerGroupIndex].items.findIndex(
+          (message) => message.id === viewerTarget.messageId,
+        )
+      : -1
   const messageGroups = useMemo(() => groupMessages(allMessages), [allMessages])
   const newestMessageId = allMessages[allMessages.length - 1]?.id
 
@@ -995,6 +411,7 @@ export function TelegramPreviewPage() {
       exact: true,
     })
     setSelected(dialog)
+    setViewerTarget(null)
     setSearchInput('')
     setMessageQuery('')
     setMessageSearchOpen(false)
@@ -1023,6 +440,12 @@ export function TelegramPreviewPage() {
     if (!selected || !text || sendMessage.isPending) return
     sendMessage.mutate({ targetAccountId: accountId, chatId: selected.id, text })
   }
+
+  const loadEarlierImages = useCallback(() => {
+    // 与 loadOlder 一致：保留消息列表当前滚动位置，避免分页后视口内容跳动
+    if (viewportRef.current) previousScrollHeight.current = viewportRef.current.scrollHeight
+    void messages.fetchNextPage()
+  }, [messages.fetchNextPage])
 
   async function loadOlder() {
     stickToBottom.current = false
@@ -1355,6 +778,9 @@ export function TelegramPreviewPage() {
                               )
                           }
                           onReplyClick={(id) => void replyClick(id)}
+                          onOpenPreview={(message) =>
+                            setViewerTarget({ chatId: message.chat_id, messageId: message.id })
+                          }
                           loadingReplyId={loadingReplyId}
                           unavailableReplyId={unavailableReplyId}
                         />
@@ -1498,6 +924,20 @@ export function TelegramPreviewPage() {
           )}
         </article>
       </section>
+      {viewerGroupIndex >= 0 && viewerItemIndex >= 0 && viewerTarget ? (
+        <ImageViewer
+          accountId={accountId}
+          groups={imageGroups}
+          groupIndex={viewerGroupIndex}
+          itemIndex={viewerItemIndex}
+          hasNextPage={Boolean(messages.hasNextPage)}
+          onNavigate={(message) =>
+            setViewerTarget({ chatId: message.chat_id, messageId: message.id })
+          }
+          onLoadEarlier={loadEarlierImages}
+          onClose={() => setViewerTarget(null)}
+        />
+      ) : null}
     </div>
   )
 }

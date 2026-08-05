@@ -119,6 +119,7 @@ export function AuthenticatedImage({
   blurred = false,
   spinnerWhileLoading = false,
   isVideo = false,
+  fit = 'cover',
 }: {
   path?: string | null
   thumbnailPath?: string | null
@@ -131,6 +132,7 @@ export function AuthenticatedImage({
   blurred?: boolean
   spinnerWhileLoading?: boolean
   isVideo?: boolean
+  fit?: 'cover' | 'contain'
 }) {
   const [thumb, setThumb] = useState<Layer>(() =>
     inlineSource
@@ -280,7 +282,8 @@ export function AuthenticatedImage({
           src={thumb.src}
           alt={alt}
           className={cn(
-            'absolute inset-0 size-full object-cover',
+            'absolute inset-0 size-full',
+            fit === 'contain' ? 'object-contain' : 'object-cover',
             !thumbRestored && 'transition-opacity duration-300 ease-out',
             showBlur && 'scale-110 blur-lg',
             thumb.ready ? 'opacity-100' : 'opacity-0',
@@ -302,7 +305,8 @@ export function AuthenticatedImage({
             key={full.src}
             src={full.src}
             className={cn(
-              'absolute inset-0 size-full object-cover',
+              'absolute inset-0 size-full',
+              fit === 'contain' ? 'object-contain' : 'object-cover',
               !fullRestored && 'transition-opacity duration-400 ease-out',
               full.ready ? 'opacity-100' : 'opacity-0',
             )}
@@ -320,7 +324,8 @@ export function AuthenticatedImage({
             src={full.src}
             alt={alt}
             className={cn(
-              'absolute inset-0 size-full object-cover',
+              'absolute inset-0 size-full',
+              fit === 'contain' ? 'object-contain' : 'object-cover',
               !fullRestored && 'transition-opacity duration-400 ease-out',
               full.ready ? 'opacity-100' : 'opacity-0',
             )}

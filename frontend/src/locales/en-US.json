@@ -750,6 +750,11 @@
     "messagePlaceholder": "Write a text message",
     "sendMessage": "Send message",
     "sendingMessage": "Sending message",
+    "viewImage": "View image preview",
+    "imagePreview": "Image preview",
+    "closePreview": "Close preview",
+    "previousImage": "Previous image",
+    "nextImage": "Next image",
     "latest": "Jump to latest message",
     "selectChat": "Select a chat to start browsing"
   },

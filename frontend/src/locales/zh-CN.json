@@ -750,6 +750,11 @@
     "messagePlaceholder": "输入文本消息",
     "sendMessage": "发送消息",
     "sendingMessage": "正在发送消息",
+    "viewImage": "点击查看图片预览",
+    "imagePreview": "图片预览",
+    "closePreview": "关闭预览",
+    "previousImage": "上一张图片",
+    "nextImage": "下一张图片",
     "latest": "回到最新消息",
     "selectChat": "选择一个会话开始浏览"
   },
