@@ -191,20 +191,29 @@ export function AuthenticatedImage({
 
   useEffect(() => {
     let active = true
-    if (inlineSource) {
-      setThumb((prev) => (prev?.src === inlineSource ? prev : { src: inlineSource, ready: false }))
-    } else if (thumbnailPath) {
+    if (thumbnailPath) {
       const cached = getResolvedUrl(thumbnailPath, accountId)
       if (cached) {
         setThumb((prev) => (prev?.src === cached ? prev : { src: cached, ready: false }))
       } else if (inView) {
+        if (inlineSource) {
+          setThumb((prev) =>
+            prev?.src === inlineSource ? prev : { src: inlineSource, ready: false },
+          )
+        }
         void load(thumbnailPath, accountId).then((url) => {
           if (active && url)
             setThumb((prev) => (prev?.src === url ? prev : { src: url, ready: false }))
         })
+      } else if (inlineSource) {
+        setThumb((prev) =>
+          prev?.src === inlineSource ? prev : { src: inlineSource, ready: false },
+        )
       } else {
         setThumb(null)
       }
+    } else if (inlineSource) {
+      setThumb((prev) => (prev?.src === inlineSource ? prev : { src: inlineSource, ready: false }))
     } else {
       setThumb(null)
     }

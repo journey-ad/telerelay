@@ -148,6 +148,32 @@ class FakeTelegramPreview:
         return generate()
 
 
+class FakeTelegramMedia:
+    def __init__(self):
+        self.calls = []
+
+    async def issue_video_ticket(self, **values):
+        self.calls.append(("video_ticket", values))
+        return {
+            "ticket": "video-ticket-123",
+            "expires_at": 2_000_000_000,
+            "mime_type": "video/mp4",
+        }
+
+    async def bind_video_ticket(self, **values):
+        self.calls.append(("bind_video_ticket", values))
+        return {
+            "perm_auth_key_id": "23",
+            "nonce": "31",
+            "expires_at": 2_000_000_000,
+            "message_id": "37",
+            "encrypted_message": "AA",
+        }
+
+    async def clear_account(self, account_id):
+        self.calls.append(("clear_account", account_id))
+
+
 class FakeTelegramChats:
     def __init__(self):
         self.calls = []
@@ -287,6 +313,7 @@ class ApiContractTests(unittest.TestCase):
         self.stats_patch.start()
         self.addCleanup(self.stats_patch.stop)
         self.telegram_preview = FakeTelegramPreview()
+        self.telegram_media = FakeTelegramMedia()
         self.telegram_chats = FakeTelegramChats()
         self.exports = FakeExports()
         self.account_registry = FakeAccountRegistry(self)
@@ -302,6 +329,7 @@ class ApiContractTests(unittest.TestCase):
             account_registry=self.account_registry,
             telegram_chats=self.telegram_chats,
             telegram_preview=self.telegram_preview,
+            telegram_media=self.telegram_media,
         )
         self.client = TestClient(make_app(self.context))
         self.addCleanup(self.client.close)
@@ -944,6 +972,48 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(whitespace.status_code, 422)
         self.assertEqual(media.status_code, 422)
         self.assertEqual(too_long.status_code, 422)
+
+    def test_telegram_video_ticket_and_bind_contracts(self):
+        ticket = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages/12/video-ticket",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+        )
+        bound = self.client.post(
+            "/api/v1/telegram-preview/video-tickets/video-ticket-123/bind",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+            json={"session_id": "-4611686018427387904"},
+        )
+        out_of_range = self.client.post(
+            "/api/v1/telegram-preview/video-tickets/video-ticket-123/bind",
+            json={"session_id": str(1 << 63)},
+        )
+
+        self.assertEqual(ticket.status_code, 200, ticket.text)
+        self.assertEqual(ticket.json()["ticket"], "video-ticket-123")
+        self.assertEqual(bound.status_code, 200, bound.text)
+        self.assertEqual(bound.json()["encrypted_message"], "AA")
+        self.assertEqual(out_of_range.status_code, 422)
+        self.assertEqual(
+            self.telegram_media.calls[:2],
+            [
+                (
+                    "video_ticket",
+                    {
+                        "account_id": self.account_id,
+                        "chat_id": -1001,
+                        "message_id": 12,
+                    },
+                ),
+                (
+                    "bind_video_ticket",
+                    {
+                        "account_id": self.account_id,
+                        "ticket_id": "video-ticket-123",
+                        "session_id": -4611686018427387904,
+                    },
+                ),
+            ],
+        )
 
     def test_telegram_preview_bot_commands_and_updates_contracts(self):
         commands = self.client.get(

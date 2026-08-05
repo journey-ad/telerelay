@@ -1,5 +1,6 @@
 import { Download, ExternalLink, File, Image, Play } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useState } from 'react'
 import { downloadFile } from '../../api/downloads'
 import type { TelegramPreviewMessage } from '../../types'
 import { cn } from '../../utils/cn'
@@ -14,6 +15,7 @@ import {
   visualMediaPath,
 } from '../../utils/preview'
 import { AuthenticatedImage } from '../AuthenticatedImage'
+import { TelegramVideoPreview } from './TelegramVideoPreview'
 
 function safeWebPageUrl(value?: string | null): string | null {
   if (!value) return null
@@ -209,6 +211,8 @@ export function MediaPreview({
   onOpenPreview: (message: TelegramPreviewMessage) => void
 }) {
   const { t } = useTranslation()
+  const [videoOpen, setVideoOpen] = useState(false)
+  const [videoMounted, setVideoMounted] = useState(false)
   const media = message.media
   if (!media) return null
   if (!hasMediaPreview(media)) return null
@@ -225,6 +229,10 @@ export function MediaPreview({
     media.type === 'photo' ||
     (media.type === 'sticker' && Boolean(media.mime_type?.startsWith('image/'))) ||
     isWebm
+  const openVideo = () => {
+    setVideoMounted(true)
+    setVideoOpen(true)
+  }
   const downloadLabel =
     media.type === 'animation'
       ? t('telegramPreview.downloadAnimation')
@@ -233,71 +241,88 @@ export function MediaPreview({
         : t('telegramPreview.downloadImage')
   if (media.has_thumbnail) {
     return (
-      <div
-        className={cn(
-          'group relative w-full overflow-hidden rounded-[5px] bg-slate-100',
-          compact && 'aspect-square',
-          canPreview && 'cursor-zoom-in',
-        )}
-        style={compact ? undefined : mediaFrame(media)}
-        onClick={canPreview ? () => onOpenPreview(message) : undefined}
-        role={canPreview ? 'button' : undefined}
-        tabIndex={canPreview ? 0 : undefined}
-        aria-label={canPreview ? t('telegramPreview.viewImage') : undefined}
-        onKeyDown={
-          canPreview
-            ? (event) => {
-                if (event.target !== event.currentTarget) return
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  onOpenPreview(message)
-                }
-              }
-            : undefined
-        }
-      >
-        <AuthenticatedImage
-          path={autoLoadFull && !isVideo ? visualMediaPath(message.chat_id, message.id) : null}
-          thumbnailPath={media.inline_thumbnail ? null : thumbnailPath(message.chat_id, message.id)}
-          inlineSource={media.inline_thumbnail}
-          blurred
-          spinnerWhileLoading={autoLoadFull}
-          isVideo={isWebm}
-          alt={media.file_name || t('telegramPreview.image')}
-          accountId={accountId}
-          className={cn('size-full', isVideo && 'scale-105 blur-sm')}
-          fallback={
-            <span className="grid size-full place-items-center text-slate-300">
-              <Image size={28} />
-            </span>
+      <>
+        <div
+          className={cn(
+            'group relative w-full overflow-hidden rounded-[5px] bg-slate-100',
+            compact && 'aspect-square',
+            isVideo ? 'cursor-pointer' : canPreview && 'cursor-zoom-in',
+          )}
+          style={compact ? undefined : mediaFrame(media)}
+          onClick={isVideo ? openVideo : canPreview ? () => onOpenPreview(message) : undefined}
+          role={isVideo || canPreview ? 'button' : undefined}
+          tabIndex={isVideo || canPreview ? 0 : undefined}
+          aria-label={
+            isVideo
+              ? t('telegramPreview.playVideo')
+              : canPreview
+                ? t('telegramPreview.viewImage')
+                : undefined
           }
-        />
-        {isVideo ? (
-          <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/10">
-            <span className="grid size-11 place-items-center rounded-full bg-slate-950/70 text-white shadow-sm backdrop-blur-sm">
-              <Play size={20} fill="currentColor" className="ml-0.5" />
+          onKeyDown={
+            isVideo || canPreview
+              ? (event) => {
+                  if (event.target !== event.currentTarget) return
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    if (isVideo) openVideo()
+                    else onOpenPreview(message)
+                  }
+                }
+              : undefined
+          }
+        >
+          <AuthenticatedImage
+            path={autoLoadFull && !isVideo ? visualMediaPath(message.chat_id, message.id) : null}
+            thumbnailPath={thumbnailPath(message.chat_id, message.id)}
+            inlineSource={media.inline_thumbnail}
+            blurred
+            spinnerWhileLoading={autoLoadFull}
+            isVideo={isWebm}
+            alt={media.file_name || t('telegramPreview.image')}
+            accountId={accountId}
+            className="size-full"
+            fallback={
+              <span className="grid size-full place-items-center text-slate-300">
+                <Image size={28} />
+              </span>
+            }
+          />
+          {isVideo ? (
+            <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/10">
+              <span className="grid size-11 place-items-center rounded-full bg-slate-950/70 text-white shadow-sm backdrop-blur-sm">
+                <Play size={20} fill="currentColor" className="ml-0.5" />
+              </span>
             </span>
-          </span>
+          ) : null}
+          {isVideo && mediaDuration(media.duration) ? (
+            <span className="pointer-events-none absolute right-2 bottom-2 rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums">
+              {mediaDuration(media.duration)}
+            </span>
+          ) : null}
+          {path ? (
+            <button
+              className="absolute right-2 bottom-2 grid size-7 place-items-center rounded bg-slate-900/70 text-white opacity-0 shadow transition group-hover:opacity-100 focus:opacity-100"
+              title={downloadLabel}
+              aria-label={downloadLabel}
+              onClick={(event) => {
+                event.stopPropagation()
+                void downloadFile(path, media.file_name || `telegram-${message.id}.jpg`)
+              }}
+            >
+              <Download size={14} />
+            </button>
+          ) : null}
+        </div>
+        {isVideo && videoMounted ? (
+          <TelegramVideoPreview
+            accountId={accountId}
+            message={message}
+            open={videoOpen}
+            onClose={() => setVideoOpen(false)}
+          />
         ) : null}
-        {isVideo && mediaDuration(media.duration) ? (
-          <span className="pointer-events-none absolute right-2 bottom-2 rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums">
-            {mediaDuration(media.duration)}
-          </span>
-        ) : null}
-        {path ? (
-          <button
-            className="absolute right-2 bottom-2 grid size-7 place-items-center rounded bg-slate-900/70 text-white opacity-0 shadow transition group-hover:opacity-100 focus:opacity-100"
-            title={downloadLabel}
-            aria-label={downloadLabel}
-            onClick={(event) => {
-              event.stopPropagation()
-              void downloadFile(path, media.file_name || `telegram-${message.id}.jpg`)
-            }}
-          >
-            <Download size={14} />
-          </button>
-        ) : null}
-      </div>
+      </>
     )
   }
   return (

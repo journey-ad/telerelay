@@ -12,6 +12,9 @@ export default defineConfig(({ mode }) => {
   return {
     envDir,
     plugins: [react(), tailwindcss()],
+    optimizeDeps: {
+      include: ['aes-js'],
+    },
     server: {
       host: '0.0.0.0',
       port: 5174,

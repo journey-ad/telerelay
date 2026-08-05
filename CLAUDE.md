@@ -125,9 +125,9 @@ Telegram preview may send only new plain-text messages through its explicit comp
 
 Remote bot command discovery is read-only and depends on the selected dialog being a bot, not on the current account's session mode. Live preview update handlers must exist only for an active preview SSE connection and must be removed when the browser disconnects or navigates away.
 
-The persistent preview cache contains only avatars and thumbnails and is bounded to 128 MB. Full images, GIFs, and stickers use temporary files and must be cleaned after the response. Do not enable video, audio, voice, or arbitrary document downloads through this feature.
+The persistent preview cache contains only avatars and thumbnails and is bounded to 128 MB. Full images, GIFs, and stickers use temporary files and must be cleaned after the response. Video preview is an explicit exception: the backend may issue a short-lived in-memory media ticket containing a temporary MTProto auth key and document location; video bytes must never pass through the backend.
 
-Do not send MTProto `auth_key`, file references, or session material to the browser.
+Permanent MTProto `auth_key`, Telethon session material, and account credentials must never be sent to the browser. Temporary media tickets are allowed only for the browser-direct video preview endpoint, must be short-lived, one-time bindable, and must not be persisted in browser storage or server databases.
 
 ### Credential Boundaries
 

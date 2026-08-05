@@ -157,6 +157,28 @@ export interface TelegramPreviewUpdate {
   message_id: number
 }
 
+export interface TelegramVideoTicket {
+  ticket: string
+  api_id: number
+  dc_id: number
+  dc_address: string
+  dc_port: number
+  auth_key: string
+  auth_key_id: string
+  server_salt: string
+  expires_at: number
+  file: {
+    id: string
+    access_hash: string
+    file_reference: string
+    dc_id: number
+    size: number
+  }
+  mime_type: string
+  file_name: string
+  size?: number | null
+}
+
 export interface ForwardingRule {
   name: string
   enabled: boolean

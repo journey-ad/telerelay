@@ -40,6 +40,7 @@ from backend.schemas import (
     TelegramAccountUpdate,
     TelegramChatResponse,
     TelegramTextMessageRequest,
+    TelegramVideoTicketBindRequest,
     TogglePayload,
     config_json_schema,
     config_validation_message,
@@ -110,6 +111,16 @@ def _telegram_chats(context: ApplicationContext):
             409,
         )
     return context.telegram_chats
+
+
+def _telegram_media(context: ApplicationContext):
+    if not context.telegram_media:
+        raise _error(
+            "not_user_mode",
+            "Direct Telegram media preview is only available in user mode",
+            409,
+        )
+    return context.telegram_media
 
 
 def _account_scope(context: ApplicationContext):
@@ -203,6 +214,15 @@ def _preview_error(exc: TelegramPreviewError) -> HTTPException:
         "bot_commands_unavailable": 502,
         "message_send_failed": 502,
         "visual_media_download_failed": 502,
+        "video_not_supported": 415,
+        "video_reference_missing": 409,
+        "video_dc_unsupported": 409,
+        "telegram_api_credentials_missing": 503,
+        "video_ticket_failed": 502,
+        "video_ticket_invalid": 403,
+        "video_ticket_expired": 410,
+        "video_ticket_used": 409,
+        "video_bind_failed": 502,
     }.get(exc.code, 409)
     return _error(exc.code, str(exc), status)
 
@@ -377,6 +397,38 @@ async def telegram_preview_message(
         raise _preview_error(exc) from exc
 
 
+@router.post("/telegram-preview/chats/{chat_id}/messages/{message_id}/video-ticket")
+async def telegram_preview_video_ticket(
+    chat_id: int,
+    message_id: int,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _telegram_media(context).issue_video_ticket(
+            account_id=_selected_account_id(context),
+            chat_id=chat_id,
+            message_id=message_id,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.post("/telegram-preview/video-tickets/{ticket}/bind")
+async def telegram_preview_bind_video_ticket(
+    ticket: str,
+    payload: TelegramVideoTicketBindRequest,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _telegram_media(context).bind_video_ticket(
+            account_id=_selected_account_id(context),
+            ticket_id=ticket,
+            session_id=payload.session_id,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
 @router.get("/telegram-preview/peers/{peer_id}/avatar")
 async def telegram_preview_avatar(
     peer_id: int,
@@ -505,6 +557,8 @@ async def delete_telegram_account(
         raise _error(exc.code, str(exc), status_code) from exc
     if context.telegram_preview:
         await context.telegram_preview.clear_account_cache(account_id)
+    if context.telegram_media:
+        await context.telegram_media.clear_account(account_id)
     context.events.publish("telegram-account", {"action": "delete", "id": account_id})
     return ApiMessage(code="telegram_account_deleted")
 

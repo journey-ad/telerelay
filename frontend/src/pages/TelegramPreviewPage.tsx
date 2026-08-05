@@ -757,7 +757,7 @@ export function TelegramPreviewPage() {
                       const previous = messageGroups[index - 1]?.items[0]
                       return (
                         <MessageBubble
-                          key={group.key}
+                          key={`${selected.id}:${group.key}`}
                           accountId={accountId}
                           group={group}
                           showDay={
