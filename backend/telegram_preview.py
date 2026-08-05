@@ -1,4 +1,4 @@
-"""Read-only Telegram dialog and message preview services."""
+"""Telegram dialog preview and plain-text messaging services."""
 
 from __future__ import annotations
 
@@ -14,11 +14,14 @@ import tempfile
 import threading
 import time
 import weakref
+from collections.abc import AsyncIterator
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from telethon import utils
+from telethon import events, functions, utils
+from telethon.errors import RPCError
 from telethon.tl import types
 
 from backend.telegram_accounts import TelegramAccountError
@@ -161,7 +164,7 @@ def _stripped_thumbnail(content: bytes | None) -> str | None:
 
 
 class TelegramPreviewService:
-    """Expose Telegram data without changing read state or sending messages."""
+    """Expose Telegram data without read acknowledgements and send plain text."""
 
     CACHE_MAX_BYTES = 128 * 1024 * 1024
     AVATAR_MAX_AGE = 6 * 60 * 60
@@ -191,7 +194,8 @@ class TelegramPreviewService:
             ) from exc
         return target
 
-    def _client(self, account_id: str | None = None):
+    def _runtime_and_client(self, account_id: str | None = None):
+        """Resolve the live runtime and its Telethon client for an account."""
         target = self._active_account(account_id)
         try:
             runtime = self.bot_manager.get_runtime(target)
@@ -204,7 +208,27 @@ class TelegramPreviewService:
                 "telegram_not_connected",
                 "The requested Telegram account is not connected",
             )
+        return runtime, client
+
+    def _client(self, account_id: str | None = None):
+        _, client = self._runtime_and_client(account_id)
         return client
+
+    @staticmethod
+    def _preview_stream_alive(runtime: Any, client: Any) -> bool:
+        """True while the runtime still serves the same connected client.
+
+        Account restart replaces the client object; once that happens the
+        handler registered on the old client will never fire again, so the
+        stream must end and let the browser reconnect.
+        """
+        try:
+            if not runtime.is_connected:
+                return False
+            manager = runtime.client_manager
+            return manager is not None and manager.get_client() is client
+        except TelegramAccountError:
+            return False
 
     async def list_dialogs(
         self,
@@ -317,6 +341,138 @@ class TelegramPreviewService:
             if reply is not None:
                 replies[int(reply.id)] = reply
         return await self._message_data(message, chat_id, replies=replies)
+
+    async def send_text_message(
+        self,
+        *,
+        account_id: str,
+        chat_id: int,
+        text: str,
+    ) -> dict[str, Any]:
+        client = self._client(account_id)
+        try:
+            entity = await client.get_entity(chat_id)
+        except Exception as exc:
+            raise TelegramPreviewError("chat_not_found", "Telegram chat was not found") from exc
+
+        try:
+            sent = await client.send_message(
+                entity,
+                message=text,
+                parse_mode=None,
+                link_preview=False,
+            )
+        except RPCError as exc:
+            code = type(exc).code
+            if code == 420:  # Telegram internal rate-limit code, surfaced as 429
+                seconds = getattr(exc, "seconds", None)
+                detail = (
+                    f"Telegram rate limited, retry in {seconds}s"
+                    if seconds
+                    else "Telegram rate limited"
+                )
+                raise TelegramPreviewError("flood_wait", detail) from exc
+            if code == 403:
+                raise TelegramPreviewError(
+                    "chat_write_forbidden",
+                    "Telegram denied sending to this chat",
+                ) from exc
+            raise TelegramPreviewError(
+                "message_send_failed",
+                "Telegram could not send the text message",
+            ) from exc
+        except Exception as exc:
+            raise TelegramPreviewError(
+                "message_send_failed",
+                "Telegram could not send the text message",
+            ) from exc
+        if sent is None:
+            raise TelegramPreviewError(
+                "message_send_failed",
+                "Telegram did not return the sent message",
+            )
+        return await self._message_data(sent, chat_id)
+
+    async def list_bot_commands(
+        self,
+        *,
+        account_id: str,
+        chat_id: int,
+    ) -> dict[str, Any]:
+        client = self._client(account_id)
+        try:
+            entity = await client.get_entity(chat_id)
+            if not getattr(entity, "bot", False):
+                return {"account_id": account_id, "chat_id": chat_id, "items": []}
+            input_peer = await client.get_input_entity(chat_id)
+            bot_info = await client(
+                functions.bots.GetBotInfoRequest(
+                    lang_code="",
+                    bot=utils.get_input_user(input_peer),
+                )
+            )
+        except Exception as exc:
+            raise TelegramPreviewError(
+                "bot_commands_unavailable",
+                "Telegram bot commands are unavailable",
+            ) from exc
+
+        return {
+            "account_id": account_id,
+            "chat_id": chat_id,
+            "items": [
+                {
+                    "command": str(command.command).lstrip("/"),
+                    "description": str(command.description or ""),
+                }
+                for command in (getattr(bot_info, "commands", None) or [])
+                if str(getattr(command, "command", "")).strip("/")
+            ],
+        }
+
+    PREVIEW_STREAM_KEEPALIVE = 20.0
+
+    async def stream_updates(self, *, account_id: str) -> AsyncIterator[str]:
+        """Create a message-ID stream scoped to one active preview connection."""
+
+        async def generate() -> AsyncIterator[str]:
+            try:
+                runtime, client = self._runtime_and_client(account_id)
+            except TelegramPreviewError:
+                return
+            queue: asyncio.Queue[dict[str, int]] = asyncio.Queue(maxsize=256)
+
+            async def on_message(event: Any) -> None:
+                chat_id = getattr(event, "chat_id", None)
+                message_id = getattr(getattr(event, "message", None), "id", None)
+                if chat_id is None or message_id is None:
+                    return
+                if queue.full():
+                    with suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+                with suppress(asyncio.QueueFull):
+                    queue.put_nowait(
+                        {"chat_id": int(chat_id), "message_id": int(message_id)}
+                    )
+
+            event_builder = events.NewMessage()
+            client.add_event_handler(on_message, event_builder)
+            try:
+                yield "event: ready\ndata: {}\n\n"
+                while True:
+                    try:
+                        payload = await asyncio.wait_for(
+                            queue.get(), timeout=self.PREVIEW_STREAM_KEEPALIVE
+                        )
+                        yield f"event: message\ndata: {json.dumps(payload)}\n\n"
+                    except asyncio.TimeoutError:
+                        if not self._preview_stream_alive(runtime, client):
+                            return
+                        yield ": keep-alive\n\n"
+            finally:
+                client.remove_event_handler(on_message, event_builder)
+
+        return generate()
 
     async def avatar(self, *, account_id: str, peer_id: int) -> bytes:
         async def load() -> bytes:

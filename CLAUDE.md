@@ -4,7 +4,7 @@ This file provides repository guidance for coding agents.
 
 ## Current Project
 
-TeleRelay is a self-hosted Telegram relay, read-only chat preview, automation, and archive service.
+TeleRelay is a self-hosted Telegram relay, chat preview and text messaging, automation, and archive service.
 
 - Backend: Python 3.11+, FastAPI, Telethon, APScheduler, and SQLite.
 - Frontend: React 19, React Router 7, TanStack Query 5, Recharts, Tailwind CSS 4, i18next, and Vite 7.
@@ -79,7 +79,7 @@ backend/
   client.py               Telegram client/session management
   telegram_accounts.py    Account registry, sessions, avatars, selection
   telegram_runtimes.py    Parallel per-account runtime registry
-  telegram_preview.py     Read-only dialogs/messages/media service
+  telegram_preview.py     Dialog/message/media reads and plain-text sending
   services/rules.py       Forwarding and button-rule application service
   forwarder/              Filtering and Telegram delivery pipeline
   forward_queue.py        Persistent queue, retries, and recovery
@@ -119,9 +119,11 @@ Authenticated account IDs are Telegram numeric user IDs. Account configuration i
 
 The `default` ID and the former shared paths are legacy migration inputs only. Migration must be idempotent and must never overwrite an existing account-scoped destination.
 
-### Read-Only Preview
+### Preview Mutation Boundary
 
-Telegram preview must not send, edit, delete, react, vote, or acknowledge messages as read. Reads must use Telegram APIs that do not issue read confirmations.
+Telegram preview may send only new plain-text messages through its explicit compose endpoint. It must not send media, create replies, forward, edit, delete, react, vote, or acknowledge messages as read. Plain-text sends must disable formatting parsing and link previews. Reads must use Telegram APIs that do not issue read confirmations.
+
+Remote bot command discovery is read-only and depends on the selected dialog being a bot, not on the current account's session mode. Live preview update handlers must exist only for an active preview SSE connection and must be removed when the browser disconnects or navigates away.
 
 The persistent preview cache contains only avatars and thumbnails and is bounded to 128 MB. Full images, GIFs, and stickers use temporary files and must be cleaned after the response. Do not enable video, audio, voice, or arbitrary document downloads through this feature.
 
@@ -206,7 +208,7 @@ Schema or path changes must preserve existing deployments or include an explicit
 - API contracts and routes: `backend/schemas/__init__.py`, `backend/api/router.py`
 - Multi-account metadata: `backend/telegram_accounts.py`
 - Multi-account lifecycle: `backend/telegram_runtimes.py`
-- Read-only dialogs and messages: `backend/telegram_preview.py`
+- Dialog/message preview and plain-text sending: `backend/telegram_preview.py`
 - Export behavior and schedules: `backend/exporter/`
 - Dashboard/history statistics: `backend/stats_db.py`
 - Frontend routes and pages: `frontend/src/App.tsx`, `frontend/src/pages/`

@@ -132,6 +132,22 @@ export interface TelegramPreviewMessagesPage {
   next_before_id?: number | null
 }
 
+export interface TelegramBotCommand {
+  command: string
+  description: string
+}
+
+export interface TelegramBotCommandsResponse {
+  account_id: string
+  chat_id: number
+  items: TelegramBotCommand[]
+}
+
+export interface TelegramPreviewUpdate {
+  chat_id: number
+  message_id: number
+}
+
 export interface ForwardingRule {
   name: string
   enabled: boolean

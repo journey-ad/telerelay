@@ -674,7 +674,7 @@
     "deleteRunConfirm": "This export record and its files will be permanently deleted"
   },
   "telegramPreview": {
-    "eyebrow": "Telegram reader",
+    "eyebrow": "Telegram messages",
     "unknownDate": "Unknown date",
     "today": "Today",
     "yesterday": "Yesterday",
@@ -714,7 +714,7 @@
     "edited": "Edited",
     "views": "{{value}} views",
     "title": "Chat preview",
-    "description": "Browse chats and messages for the selected account.",
+    "description": "Browse chats and send text messages from the selected account.",
     "main": "Main",
     "archived": "Archived",
     "filterChats": "Filter chats",
@@ -747,6 +747,9 @@
     "loadMessagesFailed": "Unable to load messages",
     "noMatchingMessages": "No matching messages",
     "chatEmpty": "This chat has no messages yet",
+    "messagePlaceholder": "Write a text message",
+    "sendMessage": "Send message",
+    "sendingMessage": "Sending message",
     "latest": "Jump to latest message",
     "selectChat": "Select a chat to start browsing"
   },

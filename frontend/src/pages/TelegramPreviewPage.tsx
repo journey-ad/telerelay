@@ -1,5 +1,6 @@
 import {
   useInfiniteQuery,
+  useMutation,
   useQuery,
   useQueryClient,
   type InfiniteData,
@@ -8,6 +9,7 @@ import {
   Archive,
   ArrowDown,
   ArrowLeft,
+  Bot,
   CheckCircle2,
   Download,
   File,
@@ -18,11 +20,13 @@ import {
   MessagesSquare,
   Radio,
   Search,
+  Send,
   UserRound,
   UsersRound,
   X,
 } from 'lucide-react'
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -33,14 +37,16 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { accountRequest, request } from '../api/client'
+import { accountRequest, ApiError, json, request } from '../api/client'
 import { downloadFile } from '../api/downloads'
+import { connectTelegramPreviewUpdates } from '../api/events'
 import { AuthenticatedImage } from '../components/AuthenticatedImage'
 import { RichText } from '../components/RichText'
-import { EmptyState, IconButton, PageHeader } from '../components/ui'
+import { EmptyState, IconButton, PageHeader, Tooltip } from '../components/ui'
 import { useAccountScope } from '../hooks/useAccountScope'
 import type {
   TelegramAccount,
+  TelegramBotCommandsResponse,
   TelegramPreviewDialog,
   TelegramPreviewDialogsPage,
   TelegramPreviewMessage,
@@ -172,7 +178,7 @@ function mediaFrame(media: NonNullable<TelegramPreviewMessage['media']>) {
 
 function ChatGlyph({ kind, size = 14 }: { kind: TelegramPreviewDialog['kind']; size?: number }) {
   const Icon =
-    kind === 'private' || kind === 'bot' ? UserRound : kind === 'channel' ? Radio : UsersRound
+    kind === 'bot' ? Bot : kind === 'private' ? UserRound : kind === 'channel' ? Radio : UsersRound
   return <Icon size={size} />
 }
 
@@ -709,12 +715,18 @@ export function TelegramPreviewPage() {
   const [selected, setSelected] = useState<TelegramPreviewDialog | null>(null)
   const [searchInput, setSearchInput] = useState('')
   const [messageQuery, setMessageQuery] = useState('')
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false)
+  const [messageDraft, setMessageDraft] = useState('')
   const [replyTargetId, setReplyTargetId] = useState<number | null>(null)
   const [loadingReplyId, setLoadingReplyId] = useState<number | null>(null)
   const [unavailableReplyId, setUnavailableReplyId] = useState<number | null>(null)
   const dialogsViewportRef = useRef<HTMLDivElement>(null)
   const dialogsLoadMoreRef = useRef<HTMLDivElement>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
+  const messageSearchInputRef = useRef<HTMLInputElement>(null)
+  const messageComposerRef = useRef<HTMLTextAreaElement>(null)
+  const selectedRef = useRef<TelegramPreviewDialog | null>(null)
+  const lastDialogsRefresh = useRef(0)
   const previousScrollHeight = useRef<number | null>(null)
   const stickToBottom = useRef(true)
   const suppressAutoLoadRef = useRef(false)
@@ -728,10 +740,17 @@ export function TelegramPreviewPage() {
   const active = accounts.data?.find((account) => account.id === accountId)
 
   useEffect(() => {
+    selectedRef.current = selected
+  }, [selected])
+
+  useEffect(() => {
     replyRequestId.current += 1
+    selectedRef.current = null
     setSelected(null)
     setSearchInput('')
     setMessageQuery('')
+    setMessageSearchOpen(false)
+    setMessageDraft('')
     setReplyTargetId(null)
     setLoadingReplyId(null)
     setUnavailableReplyId(null)
@@ -750,6 +769,7 @@ export function TelegramPreviewPage() {
       )
     },
     getNextPageParam: (page) => page.next_cursor ?? undefined,
+    refetchOnMount: 'always',
   })
 
   const messages = useInfiniteQuery({
@@ -766,7 +786,119 @@ export function TelegramPreviewPage() {
       )
     },
     getNextPageParam: (page) => page.next_before_id ?? undefined,
+    refetchOnMount: 'always',
   })
+
+  const botCommands = useQuery({
+    queryKey: ['telegram-preview', accountId, 'bot-commands', selected?.id ?? null],
+    enabled: Boolean(accountId && active?.connected && selected?.kind === 'bot'),
+    queryFn: () =>
+      accountRequest<TelegramBotCommandsResponse>(
+        accountId,
+        `/api/v1/telegram-preview/chats/${selected!.id}/bot-commands`,
+      ),
+    staleTime: 5 * 60_000,
+  })
+
+  const appendMessage = useCallback(
+    (targetAccountId: string, chatId: number, message: TelegramPreviewMessage) => {
+      queryClient.setQueryData<InfiniteData<TelegramPreviewMessagesPage>>(
+        ['telegram-preview', targetAccountId, 'messages', chatId, ''],
+        (current) => {
+          if (!current?.pages.length) return current
+          if (current.pages.some((page) => page.items.some((item) => item.id === message.id))) {
+            return current
+          }
+          const pages = [...current.pages]
+          pages[0] = { ...pages[0], items: [...pages[0].items, message] }
+          return { ...current, pages }
+        },
+      )
+    },
+    [queryClient],
+  )
+
+  const sendMessage = useMutation({
+    mutationFn: ({
+      targetAccountId,
+      chatId,
+      text,
+    }: {
+      targetAccountId: string
+      chatId: number
+      text: string
+    }) =>
+      accountRequest<TelegramPreviewMessage>(
+        targetAccountId,
+        `/api/v1/telegram-preview/chats/${chatId}/messages`,
+        json('POST', { text }),
+      ),
+    onSuccess: (message, variables) => {
+      appendMessage(variables.targetAccountId, variables.chatId, message)
+      void queryClient.invalidateQueries({
+        queryKey: ['telegram-preview', variables.targetAccountId, 'dialogs'],
+      })
+      if (accountId === variables.targetAccountId && selected?.id === variables.chatId) {
+        stickToBottom.current = true
+        setSearchInput('')
+        setMessageQuery('')
+        setMessageDraft('')
+      }
+    },
+  })
+
+  useEffect(() => {
+    if (!accountId || !active?.connected) return
+    const controller = new AbortController()
+
+    async function monitor(): Promise<void> {
+      while (!controller.signal.aborted) {
+        try {
+          await connectTelegramPreviewUpdates(
+            (update) => {
+              const now = Date.now()
+              if (now - lastDialogsRefresh.current >= 3_000) {
+                lastDialogsRefresh.current = now
+                void queryClient.invalidateQueries({
+                  queryKey: ['telegram-preview', accountId, 'dialogs'],
+                })
+              }
+              const current = selectedRef.current
+              if (!current || current.id !== update.chat_id) return
+              void accountRequest<TelegramPreviewMessage>(
+                accountId,
+                `/api/v1/telegram-preview/chats/${update.chat_id}/messages/${update.message_id}`,
+                { signal: controller.signal },
+              )
+                .then((message) => appendMessage(accountId, update.chat_id, message))
+                .catch(() => undefined)
+            },
+            controller.signal,
+            accountId,
+          )
+        } catch (error) {
+          if (controller.signal.aborted) return
+          if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+            return
+          }
+        }
+        await new Promise<void>((resolve) => {
+          const onAbort = () => {
+            window.clearTimeout(timeout)
+            resolve()
+          }
+          const timeout = window.setTimeout(() => {
+            controller.signal.removeEventListener('abort', onAbort)
+            resolve()
+          }, 2_000)
+          controller.signal.addEventListener('abort', onAbort, { once: true })
+        })
+      }
+    }
+
+    void monitor()
+    return () => controller.abort()
+  }, [accountId, active?.connected, appendMessage, queryClient])
 
   const allDialogs = useMemo(() => {
     const seen = new Set<number>()
@@ -865,6 +997,9 @@ export function TelegramPreviewPage() {
     setSelected(dialog)
     setSearchInput('')
     setMessageQuery('')
+    setMessageSearchOpen(false)
+    setMessageDraft('')
+    sendMessage.reset()
     setReplyTargetId(null)
     setLoadingReplyId(null)
     setUnavailableReplyId(null)
@@ -874,6 +1009,19 @@ export function TelegramPreviewPage() {
     event.preventDefault()
     stickToBottom.current = false
     setMessageQuery(searchInput.trim())
+    setMessageSearchOpen(false)
+  }
+
+  function openMessageSearch() {
+    setMessageSearchOpen(true)
+    window.requestAnimationFrame(() => messageSearchInputRef.current?.focus())
+  }
+
+  function submitMessage(event: FormEvent) {
+    event.preventDefault()
+    const text = messageDraft.trim()
+    if (!selected || !text || sendMessage.isPending) return
+    sendMessage.mutate({ targetAccountId: accountId, chatId: selected.id, text })
   }
 
   async function loadOlder() {
@@ -938,13 +1086,13 @@ export function TelegramPreviewPage() {
         className={cn(
           'grid min-h-0 flex-1 grid-cols-[310px_minmax(0,1fr)] overflow-hidden',
           'rounded-md border border-slate-200 bg-white shadow-sm',
-          'max-md:grid-cols-1',
+          'max-lg:grid-cols-1',
         )}
       >
         <aside
           className={cn(
             'flex min-h-0 flex-col border-r border-slate-200 bg-white',
-            selected && 'max-md:hidden',
+            selected && 'max-lg:hidden',
           )}
         >
           <div className="border-b border-slate-200 p-3">
@@ -1055,16 +1203,16 @@ export function TelegramPreviewPage() {
         <article
           className={cn(
             'relative min-h-0 min-w-0 flex-col bg-[#f4f7fa]',
-            selected ? 'flex' : 'hidden md:flex',
+            selected ? 'flex' : 'hidden lg:flex',
           )}
         >
           {selected ? (
             <>
-              <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-slate-200 bg-white px-3.5">
+              <header className="relative flex h-14 shrink-0 items-center gap-2.5 border-b border-slate-200 bg-white px-3.5">
                 <IconButton
                   label={t('telegramPreview.backToChats')}
                   icon={ArrowLeft}
-                  className="hidden max-md:grid"
+                  className="hidden max-lg:grid"
                   onClick={() => setSelected(null)}
                 />
                 <Avatar
@@ -1075,28 +1223,49 @@ export function TelegramPreviewPage() {
                   kind={selected.kind}
                   className="size-9"
                 />
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-1 overflow-hidden">
                   <strong className="block truncate text-sm text-slate-700">
                     {selected.title}
                   </strong>
-                  <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
-                    <ChatGlyph kind={selected.kind} size={11} />
-                    {t(`telegramPreview.kinds.${selected.kind}`)}
-                    {selected.username ? ` · @${selected.username}` : ''}
+                  <span className="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-slate-400">
+                    <span className="shrink-0">
+                      <ChatGlyph kind={selected.kind} size={11} />
+                    </span>
+                    <span className="truncate">
+                      {t(`telegramPreview.kinds.${selected.kind}`)}
+                      {selected.username ? ` · @${selected.username}` : ''}
+                    </span>
                   </span>
                 </div>
+                <IconButton
+                  type="button"
+                  label={t('telegramPreview.searchCurrent')}
+                  icon={Search}
+                  className="sm:hidden"
+                  onClick={openMessageSearch}
+                />
                 <form
-                  className="flex h-8.5 w-66 items-center gap-1.5 rounded-[5px] border border-slate-200 bg-slate-50 px-2 max-sm:w-36"
+                  className={cn(
+                    'flex h-8.5 w-66 items-center gap-1.5 rounded-[5px] border',
+                    'border-slate-200 bg-slate-50 px-2',
+                    messageSearchOpen
+                      ? 'max-sm:absolute max-sm:inset-0 max-sm:z-10 max-sm:h-full max-sm:w-full max-sm:rounded-none max-sm:border-0 max-sm:bg-white max-sm:px-3.5 max-sm:shadow-sm'
+                      : 'max-sm:hidden',
+                  )}
                   onSubmit={searchMessages}
                 >
                   <Search size={13} className="shrink-0 text-slate-400" />
                   <input
+                    ref={messageSearchInputRef}
                     className="min-w-0 flex-1 border-0 bg-transparent text-[13px] text-slate-700 outline-none"
                     value={searchInput}
                     onChange={(event) => setSearchInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Escape') setMessageSearchOpen(false)
+                    }}
                     placeholder={t('telegramPreview.searchCurrent')}
                   />
-                  {messageQuery || searchInput ? (
+                  {messageQuery || searchInput || messageSearchOpen ? (
                     <button
                       type="button"
                       className="grid size-5 place-items-center border-0 bg-transparent text-slate-400"
@@ -1104,6 +1273,7 @@ export function TelegramPreviewPage() {
                       onClick={() => {
                         setSearchInput('')
                         setMessageQuery('')
+                        setMessageSearchOpen(false)
                         stickToBottom.current = true
                       }}
                     >
@@ -1202,9 +1372,104 @@ export function TelegramPreviewPage() {
                   />
                 )}
               </div>
+              {botCommands.data?.items.length ? (
+                <div className="shrink-0 border-t border-slate-200 bg-white px-3.5 pt-2 max-sm:px-2.5">
+                  <div className="flex h-8 gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {botCommands.data.items.map((item) => {
+                      const button = (
+                        <button
+                          key={item.command}
+                          type="button"
+                          className="h-7 shrink-0 rounded-[5px] border border-blue-100 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition hover:border-blue-200 hover:bg-blue-100"
+                          onClick={() => {
+                            setMessageDraft(`/${item.command}`)
+                            window.requestAnimationFrame(() => messageComposerRef.current?.focus())
+                          }}
+                        >
+                          /{item.command}
+                        </button>
+                      )
+                      return item.description ? (
+                        <Tooltip key={item.command} label={item.description}>
+                          {button}
+                        </Tooltip>
+                      ) : (
+                        button
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              <form
+                className={cn(
+                  'relative flex shrink-0 items-end gap-2 bg-white px-3.5 py-2.5 max-sm:px-2.5',
+                  botCommands.data?.items.length ? '' : 'border-t border-slate-200',
+                )}
+                onSubmit={submitMessage}
+              >
+                <div className="min-w-0 flex-1">
+                  <textarea
+                    ref={messageComposerRef}
+                    className={cn(
+                      'block h-10 w-full resize-none rounded-[5px] border bg-slate-50 px-3 py-2',
+                      'text-[13px] leading-5 text-slate-700 outline-none transition',
+                      'placeholder:text-slate-400 focus:border-blue-300 focus:bg-white',
+                      'focus:ring-3 focus:ring-blue-500/10 disabled:cursor-not-allowed',
+                      sendMessage.isError ? 'border-rose-300' : 'border-slate-200',
+                    )}
+                    value={messageDraft}
+                    maxLength={4096}
+                    disabled={sendMessage.isPending}
+                    placeholder={t('telegramPreview.messagePlaceholder')}
+                    aria-label={t('telegramPreview.messagePlaceholder')}
+                    onChange={(event) => {
+                      setMessageDraft(event.target.value)
+                      if (sendMessage.isError) sendMessage.reset()
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === 'Enter' &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
+                        event.preventDefault()
+                        event.currentTarget.form?.requestSubmit()
+                      }
+                    }}
+                  />
+                  {sendMessage.isError ? (
+                    <span className="mt-1 block text-xs text-rose-600">
+                      {messageFrom(sendMessage.error)}
+                    </span>
+                  ) : messageDraft.length > 3600 ? (
+                    <span className="mt-1 block text-right text-[11px] text-slate-400">
+                      {formatNumber(messageDraft.length)} / {formatNumber(4096)}
+                    </span>
+                  ) : null}
+                </div>
+                <IconButton
+                  type="submit"
+                  label={t(
+                    sendMessage.isPending
+                      ? 'telegramPreview.sendingMessage'
+                      : 'telegramPreview.sendMessage',
+                  )}
+                  icon={sendMessage.isPending ? LoaderCircle : Send}
+                  disabled={!messageDraft.trim() || sendMessage.isPending}
+                  className={cn(
+                    'size-10 border-blue-600 bg-blue-600 text-white',
+                    'hover:border-blue-700 hover:bg-blue-700 hover:text-white',
+                    sendMessage.isPending && '[&_svg]:animate-spin',
+                  )}
+                />
+              </form>
               {!stickToBottom.current && allMessages.length ? (
                 <button
-                  className="absolute right-4 bottom-4 grid size-9 place-items-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-lg"
+                  className={cn(
+                    'absolute right-4 grid size-9 place-items-center rounded-full border',
+                    'border-slate-200 bg-white text-slate-500 shadow-lg',
+                    botCommands.data?.items.length ? 'bottom-32' : 'bottom-24',
+                  )}
                   title={t('telegramPreview.latest')}
                   aria-label={t('telegramPreview.latest')}
                   onClick={() => {

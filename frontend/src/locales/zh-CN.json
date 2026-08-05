@@ -674,7 +674,7 @@
     "deleteRunConfirm": "该导出记录及其导出文件将被永久删除"
   },
   "telegramPreview": {
-    "eyebrow": "Telegram 阅读器",
+    "eyebrow": "Telegram 消息",
     "unknownDate": "日期未知",
     "today": "今天",
     "yesterday": "昨天",
@@ -714,7 +714,7 @@
     "edited": "已编辑",
     "views": "{{value}} 次查看",
     "title": "会话预览",
-    "description": "浏览选中账号的会话与消息",
+    "description": "浏览选中账号的会话与消息，并发送文本消息",
     "main": "主列表",
     "archived": "已归档",
     "filterChats": "筛选会话",
@@ -747,6 +747,9 @@
     "loadMessagesFailed": "无法读取消息",
     "noMatchingMessages": "没有匹配的消息",
     "chatEmpty": "这个会话还没有消息",
+    "messagePlaceholder": "输入文本消息",
+    "sendMessage": "发送消息",
+    "sendingMessage": "正在发送消息",
     "latest": "回到最新消息",
     "selectChat": "选择一个会话开始浏览"
   },

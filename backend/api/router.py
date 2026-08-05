@@ -39,6 +39,7 @@ from backend.schemas import (
     TelegramAccountCreate,
     TelegramAccountUpdate,
     TelegramChatResponse,
+    TelegramTextMessageRequest,
     TogglePayload,
     config_json_schema,
     config_validation_message,
@@ -197,6 +198,10 @@ def _preview_error(exc: TelegramPreviewError) -> HTTPException:
         "message_not_found": 404,
         "thumbnail_not_found": 404,
         "invalid_cursor": 422,
+        "flood_wait": 429,
+        "chat_write_forbidden": 403,
+        "bot_commands_unavailable": 502,
+        "message_send_failed": 502,
         "visual_media_download_failed": 502,
     }.get(exc.code, 409)
     return _error(exc.code, str(exc), status)
@@ -304,6 +309,53 @@ async def telegram_preview_messages(
             limit=limit,
             before_id=before_id,
             query=(query or "").strip() or None,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.post("/telegram-preview/chats/{chat_id}/messages", status_code=201)
+async def telegram_preview_send_message(
+    chat_id: int,
+    payload: TelegramTextMessageRequest,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _telegram_preview(context).send_text_message(
+            account_id=_selected_account_id(context),
+            chat_id=chat_id,
+            text=payload.text,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.get("/telegram-preview/chats/{chat_id}/bot-commands")
+async def telegram_preview_bot_commands(
+    chat_id: int,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _telegram_preview(context).list_bot_commands(
+            account_id=_selected_account_id(context),
+            chat_id=chat_id,
+        )
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.get("/telegram-preview/updates")
+async def telegram_preview_updates(
+    context: ApplicationContext = Depends(get_context),
+) -> StreamingResponse:
+    try:
+        updates = await _telegram_preview(context).stream_updates(
+            account_id=_selected_account_id(context),
+        )
+        return StreamingResponse(
+            updates,
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
     except TelegramPreviewError as exc:
         raise _preview_error(exc) from exc

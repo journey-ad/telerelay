@@ -23,6 +23,7 @@ from backend.telegram_accounts import (
     TelegramAccountStore,
 )
 from backend.telegram_chats import TelegramChat
+from backend.telegram_preview import TelegramPreviewError
 from backend.telegram_runtimes import TelegramRuntimeRegistry
 
 
@@ -119,6 +120,32 @@ class FakeTelegramPreview:
             "chat_id": values["chat_id"],
             "text": "原始消息",
         }
+
+    async def send_text_message(self, **values):
+        self.calls.append(("send_message", values))
+        return {
+            "id": 13,
+            "chat_id": values["chat_id"],
+            "text": values["text"],
+            "outgoing": True,
+        }
+
+    async def list_bot_commands(self, **values):
+        self.calls.append(("bot_commands", values))
+        return {
+            "account_id": values["account_id"],
+            "chat_id": values["chat_id"],
+            "items": [{"command": "start", "description": "开始使用"}],
+        }
+
+    async def stream_updates(self, **values):
+        self.calls.append(("updates", values))
+
+        async def generate():
+            yield "event: ready\ndata: {}\n\n"
+            yield 'event: message\ndata: {"chat_id": -1001, "message_id": 13}\n\n'
+
+        return generate()
 
 
 class FakeTelegramChats:
@@ -845,6 +872,11 @@ class ApiContractTests(unittest.TestCase):
             "/api/v1/telegram-preview/chats/-1001/messages/12",
             params={"account_id": self.account_id},
         )
+        sent = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+            json={"text": "  release sent  "},
+        )
 
         self.assertEqual(dialogs.status_code, 200, dialogs.text)
         self.assertEqual(dialogs.json()["folder"], "archived")
@@ -852,6 +884,8 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(messages.json()["chat"]["id"], -1001)
         self.assertEqual(message.status_code, 200, message.text)
         self.assertEqual(message.json()["id"], 12)
+        self.assertEqual(sent.status_code, 201, sent.text)
+        self.assertEqual(sent.json()["text"], "release sent")
         self.assertEqual(
             self.telegram_preview.calls,
             [
@@ -882,7 +916,144 @@ class ApiContractTests(unittest.TestCase):
                         "message_id": 12,
                     },
                 ),
+                (
+                    "send_message",
+                    {
+                        "account_id": self.account_id,
+                        "chat_id": -1001,
+                        "text": "release sent",
+                    },
+                ),
             ],
+        )
+
+    def test_telegram_preview_send_rejects_non_text_payloads(self):
+        whitespace = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            json={"text": "   "},
+        )
+        media = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            json={"text": "hello", "media": "file.jpg"},
+        )
+        too_long = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            json={"text": "x" * 4097},
+        )
+
+        self.assertEqual(whitespace.status_code, 422)
+        self.assertEqual(media.status_code, 422)
+        self.assertEqual(too_long.status_code, 422)
+
+    def test_telegram_preview_bot_commands_and_updates_contracts(self):
+        commands = self.client.get(
+            "/api/v1/telegram-preview/chats/303/bot-commands",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+        )
+        updates = self.client.get(
+            "/api/v1/telegram-preview/updates",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+        )
+
+        self.assertEqual(commands.status_code, 200, commands.text)
+        self.assertEqual(commands.json()["items"][0]["command"], "start")
+        self.assertEqual(updates.status_code, 200, updates.text)
+        self.assertIn("event: ready", updates.text)
+        self.assertIn('"message_id": 13', updates.text)
+        self.assertIn(
+            (
+                "bot_commands",
+                {"account_id": self.account_id, "chat_id": 303},
+            ),
+            self.telegram_preview.calls,
+        )
+        self.assertIn(
+            ("updates", {"account_id": self.account_id}),
+            self.telegram_preview.calls,
+        )
+
+    def test_telegram_preview_bot_commands_preserve_structured_errors(self):
+        self.telegram_preview.list_bot_commands = AsyncMock(
+            side_effect=TelegramPreviewError(
+                "bot_commands_unavailable",
+                "Telegram bot commands are unavailable",
+            )
+        )
+
+        response = self.client.get(
+            "/api/v1/telegram-preview/chats/303/bot-commands",
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "code": "bot_commands_unavailable",
+                "message": "Telegram bot commands are unavailable",
+            },
+        )
+
+    def test_telegram_preview_send_preserves_structured_errors(self):
+        self.telegram_preview.send_text_message = AsyncMock(
+            side_effect=TelegramPreviewError(
+                "message_send_failed",
+                "Telegram could not send the text message",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            json={"text": "hello"},
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "code": "message_send_failed",
+                "message": "Telegram could not send the text message",
+            },
+        )
+
+    def test_telegram_preview_send_maps_flood_wait_to_429(self):
+        self.telegram_preview.send_text_message = AsyncMock(
+            side_effect=TelegramPreviewError(
+                "flood_wait",
+                "Telegram rate limited, retry in 5s",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            json={"text": "hello"},
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "code": "flood_wait",
+                "message": "Telegram rate limited, retry in 5s",
+            },
+        )
+
+    def test_telegram_preview_send_maps_write_forbidden_to_403(self):
+        self.telegram_preview.send_text_message = AsyncMock(
+            side_effect=TelegramPreviewError(
+                "chat_write_forbidden",
+                "Telegram denied sending to this chat",
+            )
+        )
+
+        response = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages",
+            json={"text": "hello"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.json()["detail"]["code"],
+            "chat_write_forbidden",
         )
 
     def test_config_schema_drives_known_fields_and_preserves_extensions(self):

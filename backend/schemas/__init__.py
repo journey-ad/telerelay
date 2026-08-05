@@ -272,6 +272,18 @@ class BotTokenPayload(StrictModel):
     bot_token: str = Field(min_length=1, max_length=200)
 
 
+class TelegramTextMessageRequest(StrictModel):
+    text: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("text")
+    @classmethod
+    def clean_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Message text is required")
+        return value
+
+
 class TelegramChatResponse(StrictModel):
     id: int
     title: str

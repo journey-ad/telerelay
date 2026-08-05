@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from telethon.tl import types
+from telethon.errors import ChatWriteForbiddenError, FloodWaitError
+from telethon.tl import functions, types
 
 from backend.telegram_preview import TelegramPreviewError, TelegramPreviewService
 
@@ -24,7 +25,7 @@ def sender(peer_id, name, username=None):
     )
 
 
-def message(message_id, chat_id, text, author, *, reply_to=None, grouped_id=None):
+def fake_message(message_id, chat_id, text, author, *, reply_to=None, grouped_id=None):
     created = datetime(2026, 7, 30, 8, tzinfo=timezone.utc) + timedelta(
         minutes=message_id
     )
@@ -66,29 +67,39 @@ class FakeDialog:
 class FakeClient:
     def __init__(self):
         alice = sender(11, "Alice", "alice")
+        self.current_user = sender(99, "Current User", "current")
         self.chat = entity(101, "项目群", megagroup=True, broadcast=False, username="project")
         self.archive = entity(202, "通知频道", megagroup=False, broadcast=True, username=None)
+        self.remote_bot = entity(
+            303,
+            "发布助手",
+            bot=True,
+            username="release_helper_bot",
+        )
         self.messages = {
             101: [
-                message(1, 101, "原始消息", alice),
-                message(2, 101, "needle reply", alice, reply_to=1),
-                message(3, 101, "最近消息", alice),
+                fake_message(1, 101, "原始消息", alice),
+                fake_message(2, 101, "needle reply", alice, reply_to=1),
+                fake_message(3, 101, "最近消息", alice),
             ],
-            202: [message(4, 202, "归档消息", alice)],
+            202: [fake_message(4, 202, "归档消息", alice)],
         }
         self.dialogs = [
             FakeDialog(self.chat, self.messages[101][-1], pinned=True),
             FakeDialog(self.archive, self.messages[202][-1], archived=True),
         ]
         self.calls = []
+        self.event_handlers = []
 
     async def get_input_entity(self, peer_id):
         self.calls.append(("get_input_entity", peer_id))
+        if peer_id == self.remote_bot.id:
+            return types.InputPeerUser(user_id=peer_id, access_hash=1)
         return peer_id
 
     async def get_entity(self, peer_id):
         self.calls.append(("get_entity", peer_id))
-        for candidate in (self.chat, self.archive):
+        for candidate in (self.chat, self.archive, self.remote_bot):
             if candidate.id == peer_id:
                 return candidate
         raise ValueError("missing")
@@ -126,6 +137,35 @@ class FakeClient:
             by_id = {item.id: item for item in values}
             return [by_id.get(item_id) for item_id in ids]
         return next((item for item in values if item.id == ids), None)
+
+    async def send_message(self, peer, message, **options):
+        self.calls.append(
+            (
+                "send_message",
+                {"peer_id": peer.id, "message": message, **options},
+            )
+        )
+        sent = fake_message(5, peer.id, message, self.current_user)
+        sent.out = True
+        self.messages[peer.id].append(sent)
+        return sent
+
+    async def __call__(self, request):
+        self.calls.append(("request", request))
+        if isinstance(request, functions.bots.GetBotInfoRequest):
+            return types.BotInfo(
+                commands=[
+                    types.BotCommand("start", "开始使用"),
+                    types.BotCommand("status", "查看状态"),
+                ]
+            )
+        raise AssertionError(f"unexpected request: {request!r}")
+
+    def add_event_handler(self, callback, event):
+        self.event_handlers.append((callback, event))
+
+    def remove_event_handler(self, callback, event):
+        self.event_handlers.remove((callback, event))
 
 
 def preview_dependencies(client, data_dir):
@@ -236,6 +276,144 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
             "send_read_acknowledge",
             [name for name, _ in self.client.calls],
         )
+
+    async def test_send_text_message_disables_formatting_and_link_previews(self):
+        result = await self.service.send_text_message(
+            account_id="work",
+            chat_id=101,
+            text="literal **text** https://example.com",
+        )
+
+        self.assertEqual(result["text"], "literal **text** https://example.com")
+        self.assertTrue(result["outgoing"])
+        self.assertIn(
+            (
+                "send_message",
+                {
+                    "peer_id": 101,
+                    "message": "literal **text** https://example.com",
+                    "parse_mode": None,
+                    "link_preview": False,
+                },
+            ),
+            self.client.calls,
+        )
+
+    async def test_send_text_message_wraps_telegram_failures(self):
+        async def fail_send(*args, **kwargs):
+            raise RuntimeError("write forbidden")
+
+        self.client.send_message = fail_send
+
+        with self.assertRaises(TelegramPreviewError) as raised:
+            await self.service.send_text_message(
+                account_id="work",
+                chat_id=101,
+                text="hello",
+            )
+
+        self.assertEqual(raised.exception.code, "message_send_failed")
+
+    async def test_send_text_message_classifies_flood_wait(self):
+        async def fail_send(*args, **kwargs):
+            raise FloodWaitError(None, 5)
+
+        self.client.send_message = fail_send
+
+        with self.assertRaises(TelegramPreviewError) as raised:
+            await self.service.send_text_message(
+                account_id="work",
+                chat_id=101,
+                text="hello",
+            )
+
+        self.assertEqual(raised.exception.code, "flood_wait")
+        self.assertIn("5", str(raised.exception))
+
+    async def test_send_text_message_classifies_write_forbidden(self):
+        async def fail_send(*args, **kwargs):
+            raise ChatWriteForbiddenError(None)
+
+        self.client.send_message = fail_send
+
+        with self.assertRaises(TelegramPreviewError) as raised:
+            await self.service.send_text_message(
+                account_id="work",
+                chat_id=101,
+                text="hello",
+            )
+
+        self.assertEqual(raised.exception.code, "chat_write_forbidden")
+
+    async def test_lists_commands_from_the_remote_bot_dialog(self):
+        result = await self.service.list_bot_commands(
+            account_id="work",
+            chat_id=303,
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "account_id": "work",
+                "chat_id": 303,
+                "items": [
+                    {"command": "start", "description": "开始使用"},
+                    {"command": "status", "description": "查看状态"},
+                ],
+            },
+        )
+        request = next(
+            value for name, value in self.client.calls if name == "request"
+        )
+        self.assertIsInstance(request, functions.bots.GetBotInfoRequest)
+        self.assertEqual(request.bot.user_id, 303)
+
+    async def test_non_bot_dialog_has_no_bot_commands(self):
+        result = await self.service.list_bot_commands(
+            account_id="work",
+            chat_id=101,
+        )
+
+        self.assertEqual(result["items"], [])
+        self.assertNotIn("request", [name for name, _ in self.client.calls])
+
+    async def test_preview_update_stream_registers_and_removes_handler(self):
+        stream = await self.service.stream_updates(account_id="work")
+
+        self.assertIn("event: ready", await anext(stream))
+        callback, event_builder = self.client.event_handlers[0]
+        await callback(SimpleNamespace(chat_id=303, message=SimpleNamespace(id=17)))
+        update = await anext(stream)
+
+        self.assertIn('"chat_id": 303', update)
+        self.assertIn('"message_id": 17', update)
+        await stream.aclose()
+        self.assertEqual(self.client.event_handlers, [])
+        self.assertIsNotNone(event_builder)
+
+    async def test_preview_update_stream_ends_when_account_disconnects(self):
+        self.service.PREVIEW_STREAM_KEEPALIVE = 0.05
+        runtime = self.service.bot_manager.get_runtime("work")
+        stream = await self.service.stream_updates(account_id="work")
+
+        self.assertIn("event: ready", await anext(stream))
+        runtime.is_connected = False
+
+        with self.assertRaises(StopAsyncIteration):
+            await anext(stream)
+        self.assertEqual(self.client.event_handlers, [])
+
+    async def test_preview_update_stream_ends_when_client_is_replaced(self):
+        self.service.PREVIEW_STREAM_KEEPALIVE = 0.05
+        runtime = self.service.bot_manager.get_runtime("work")
+        stream = await self.service.stream_updates(account_id="work")
+
+        self.assertIn("event: ready", await anext(stream))
+        runtime.client_manager.get_client = lambda: object()
+
+        with self.assertRaises(StopAsyncIteration):
+            await anext(stream)
+        self.assertEqual(self.client.event_handlers, [])
 
     async def test_explicit_account_id_is_not_limited_to_active_selection(self):
         result = await self.service.list_dialogs(
