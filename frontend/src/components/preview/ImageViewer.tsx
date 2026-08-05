@@ -5,7 +5,41 @@ import { useTranslation } from 'react-i18next'
 import type { TelegramPreviewMessage } from '../../types'
 import { cn } from '../../utils/cn'
 import { thumbnailPath, visualMediaPath, type ImageGroup } from '../../utils/preview'
-import { AuthenticatedImage } from '../AuthenticatedImage'
+import { AuthenticatedImage, preloadAuthenticatedImage } from '../AuthenticatedImage'
+
+const GENERATED_THUMBNAIL_SIZE = 128
+
+function createSquareThumbnail(image: HTMLImageElement): Promise<string | null> {
+  const sourceWidth = image.naturalWidth
+  const sourceHeight = image.naturalHeight
+  if (!sourceWidth || !sourceHeight) return Promise.resolve(null)
+
+  const sourceSize = Math.min(sourceWidth, sourceHeight)
+  const sourceX = (sourceWidth - sourceSize) / 2
+  const sourceY = (sourceHeight - sourceSize) / 2
+  const canvas = document.createElement('canvas')
+  canvas.width = GENERATED_THUMBNAIL_SIZE
+  canvas.height = GENERATED_THUMBNAIL_SIZE
+  const context = canvas.getContext('2d')
+  if (!context) return Promise.resolve(null)
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(
+    image,
+    sourceX,
+    sourceY,
+    sourceSize,
+    sourceSize,
+    0,
+    0,
+    GENERATED_THUMBNAIL_SIZE,
+    GENERATED_THUMBNAIL_SIZE,
+  )
+
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob ? URL.createObjectURL(blob) : null), 'image/webp', 0.82)
+  })
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -58,9 +92,14 @@ export function ImageViewer({
   const [stageNode, setStageNode] = useState<HTMLDivElement | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [isSettling, setIsSettling] = useState(false)
+  const [generatedThumbnails, setGeneratedThumbnails] = useState<Map<number, string>>(
+    () => new Map(),
+  )
   const scaleRef = useRef(1)
   const offsetRef = useRef({ x: 0, y: 0 })
   const wheelSettleTimerRef = useRef<number | null>(null)
+  const generatedThumbnailUrlsRef = useRef<Map<number, string | null>>(new Map())
+  const mountedRef = useRef(true)
   const dragRef = useRef<{
     pointerId: number
     startX: number
@@ -79,10 +118,46 @@ export function ImageViewer({
   ratioRef.current = ratio
 
   useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      for (const url of generatedThumbnailUrlsRef.current.values()) {
+        if (url) URL.revokeObjectURL(url)
+      }
+      generatedThumbnailUrlsRef.current.clear()
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const decodingImages: HTMLImageElement[] = []
+    for (const item of group.items) {
+      if (!item.media?.is_visual_media) continue
+      void preloadAuthenticatedImage(visualMediaPath(item.chat_id, item.id), accountId).then(
+        (url) => {
+          if (!active || !url) return
+          const image = new window.Image()
+          decodingImages.push(image)
+          image.onload = () => {
+            if (active) generateThumbnail(item.id, image)
+          }
+          image.src = url
+        },
+      )
+    }
+    return () => {
+      active = false
+      for (const image of decodingImages) image.onload = null
+    }
+  }, [accountId, group])
+
+  useEffect(() => {
+    const { maxY } = boundsFor(1)
+    const initialOffset = { x: 0, y: maxY }
     setScale(1)
-    setOffset({ x: 0, y: 0 })
+    setOffset(initialOffset)
     scaleRef.current = 1
-    offsetRef.current = { x: 0, y: 0 }
+    offsetRef.current = initialOffset
     if (wheelSettleTimerRef.current !== null) {
       window.clearTimeout(wheelSettleTimerRef.current)
       wheelSettleTimerRef.current = null
@@ -97,10 +172,7 @@ export function ImageViewer({
     if (groupIndex <= 2 && hasNextPage) onLoadEarlier()
   }, [groupIndex, hasNextPage, onLoadEarlier])
 
-  function boundsFor(
-    nextScale: number,
-    centerSmallerImage = true,
-  ): {
+  function boundsFor(nextScale: number): {
     maxX: number
     maxY: number
     viewportW: number
@@ -109,26 +181,24 @@ export function ImageViewer({
     const currentRatio = ratioRef.current
     const viewportW = stageNode?.clientWidth || window.innerWidth
     const viewportH = stageNode?.clientHeight || window.innerHeight
-    const baseW = Math.min(viewportW, viewportH * currentRatio)
+    const naturalW = media?.width && media.width > 0 ? media.width : null
+    const defaultMaxW = viewportW * 0.6
+    const baseW = naturalW
+      ? Math.min(defaultMaxW, naturalW)
+      : Math.min(defaultMaxW, viewportH * currentRatio)
     const baseH = baseW / currentRatio
     const scaledW = baseW * nextScale
     const scaledH = baseH * nextScale
-    const shouldCenter = centerSmallerImage && nextScale < 1
     return {
-      // Only views below 1x spring back to center; other scales retain their valid pan position.
-      maxX: shouldCenter ? 0 : Math.abs(scaledW - viewportW) / 2,
-      maxY: shouldCenter ? 0 : Math.abs(scaledH - viewportH) / 2,
+      maxX: Math.max(0, (scaledW - viewportW) / 2),
+      maxY: Math.max(0, (scaledH - viewportH) / 2),
       viewportW,
       viewportH,
     }
   }
 
-  function constrainedOffset(
-    nextScale: number,
-    nextOffset: { x: number; y: number },
-    centerSmallerImage = true,
-  ) {
-    const { maxX, maxY } = boundsFor(nextScale, centerSmallerImage)
+  function constrainedOffset(nextScale: number, nextOffset: { x: number; y: number }) {
+    const { maxX, maxY } = boundsFor(nextScale)
     return {
       x: clamp(nextOffset.x, -maxX, maxX),
       y: clamp(nextOffset.y, -maxY, maxY),
@@ -140,15 +210,14 @@ export function ImageViewer({
     nextOffset: { x: number; y: number },
     mode: 'settle' | 'elastic' | 'zoom' = 'settle',
   ) {
-    const keepSmallerImageCentered = mode === 'settle'
-    const { maxX, maxY, viewportW, viewportH } = boundsFor(nextScale, keepSmallerImageCentered)
+    const { maxX, maxY, viewportW, viewportH } = boundsFor(nextScale)
     if (mode === 'elastic') {
       nextOffset = {
         x: resistOutside(nextOffset.x, maxX, viewportW),
         y: resistOutside(nextOffset.y, maxY, viewportH),
       }
     } else {
-      nextOffset = constrainedOffset(nextScale, nextOffset, keepSmallerImageCentered)
+      nextOffset = constrainedOffset(nextScale, nextOffset)
     }
     scaleRef.current = nextScale
     offsetRef.current = nextOffset
@@ -171,6 +240,27 @@ export function ImageViewer({
     const next = scaleRef.current <= 1 ? 2 : 1
     setIsSettling(true)
     updateView(next, { x: 0, y: 0 })
+  }
+
+  function generateThumbnail(messageId: number, image: HTMLImageElement) {
+    if (generatedThumbnailUrlsRef.current.has(messageId)) return
+    generatedThumbnailUrlsRef.current.set(messageId, null)
+    void createSquareThumbnail(image).then((url) => {
+      if (!url) {
+        generatedThumbnailUrlsRef.current.delete(messageId)
+        return
+      }
+      if (!mountedRef.current) {
+        URL.revokeObjectURL(url)
+        return
+      }
+      generatedThumbnailUrlsRef.current.set(messageId, url)
+      setGeneratedThumbnails((current) => {
+        const next = new Map(current)
+        next.set(messageId, url)
+        return next
+      })
+    })
   }
 
   function move(delta: number) {
@@ -341,6 +431,7 @@ export function ImageViewer({
                   <button
                     key={item.id}
                     type="button"
+                    data-testid="lightbox-thumbnail"
                     className={cn(
                       'size-11 shrink-0 overflow-hidden rounded-md border-2 transition',
                       index === itemIndex
@@ -352,9 +443,13 @@ export function ImageViewer({
                     <AuthenticatedImage
                       path={null}
                       thumbnailPath={
-                        item.media?.inline_thumbnail ? null : thumbnailPath(item.chat_id, item.id)
+                        generatedThumbnails.has(item.id) || item.media?.inline_thumbnail
+                          ? null
+                          : thumbnailPath(item.chat_id, item.id)
                       }
-                      inlineSource={item.media?.inline_thumbnail}
+                      inlineSource={
+                        generatedThumbnails.get(item.id) ?? item.media?.inline_thumbnail
+                      }
                       accountId={accountId}
                       className="size-full"
                       fallback={null}
@@ -374,7 +469,10 @@ export function ImageViewer({
               key={message?.id}
               className="relative"
               style={{
-                width: `min(100vw, calc(100dvh * ${ratio}))`,
+                width:
+                  media?.width && media.width > 0
+                    ? `min(60vw, ${media.width}px)`
+                    : `min(60vw, calc(100dvh * ${ratio}))`,
                 aspectRatio: `${ratio}`,
                 transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${scale})`,
                 transition: isSettling ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
@@ -400,6 +498,7 @@ export function ImageViewer({
                 alt={media?.file_name || t('telegramPreview.image')}
                 accountId={accountId}
                 className="size-full"
+                onFullImageLoad={(image) => generateThumbnail(message.id, image)}
                 fallback={
                   <span className="grid size-full place-items-center text-slate-400">
                     <Image size={40} />

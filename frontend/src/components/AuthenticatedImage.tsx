@@ -71,6 +71,13 @@ function load(path: string, accountId?: string): Promise<string | null> {
   return promise
 }
 
+export function preloadAuthenticatedImage(
+  path: string,
+  accountId?: string,
+): Promise<string | null> {
+  return load(path, accountId)
+}
+
 function getResolvedUrl(path: string, accountId?: string): string | null {
   const entry = imageCache.get(cacheKey(path, accountId))
   return entry?.url ?? null
@@ -120,6 +127,7 @@ export function AuthenticatedImage({
   spinnerWhileLoading = false,
   isVideo = false,
   fit = 'cover',
+  onFullImageLoad,
 }: {
   path?: string | null
   thumbnailPath?: string | null
@@ -133,6 +141,7 @@ export function AuthenticatedImage({
   spinnerWhileLoading?: boolean
   isVideo?: boolean
   fit?: 'cover' | 'contain'
+  onFullImageLoad?: (image: HTMLImageElement) => void
 }) {
   const [thumb, setThumb] = useState<Layer>(() =>
     inlineSource
@@ -338,7 +347,10 @@ export function AuthenticatedImage({
               !fullRestored && 'transition-opacity duration-400 ease-out',
               full.ready ? 'opacity-100' : 'opacity-0',
             )}
-            onLoad={markReady(setFull)}
+            onLoad={(event) => {
+              markReady(setFull)()
+              onFullImageLoad?.(event.currentTarget)
+            }}
             onError={() => setFull(null)}
           />
         )

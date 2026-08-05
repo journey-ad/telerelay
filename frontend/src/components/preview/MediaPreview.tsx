@@ -245,7 +245,7 @@ export function MediaPreview({
         <div
           className={cn(
             'group relative w-full overflow-hidden rounded-[5px] bg-slate-100',
-            compact && 'aspect-square',
+            compact && 'size-full min-h-0 rounded-none',
             isVideo ? 'cursor-pointer' : canPreview && 'cursor-zoom-in',
           )}
           style={compact ? undefined : mediaFrame(media)}
@@ -300,7 +300,7 @@ export function MediaPreview({
               {mediaDuration(media.duration)}
             </span>
           ) : null}
-          {path ? (
+          {path && !compact ? (
             <button
               className="absolute right-2 bottom-2 grid size-7 place-items-center rounded bg-slate-900/70 text-white opacity-0 shadow transition group-hover:opacity-100 focus:opacity-100"
               title={downloadLabel}

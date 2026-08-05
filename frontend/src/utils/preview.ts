@@ -149,10 +149,17 @@ export function mediaFrame(media: NonNullable<TelegramPreviewMessage['media']>) 
       maxWidth: '100%',
     }
   }
-  const ratio = Math.min(2, Math.max(0.56, width / height))
-  const preferredWidth = ratio < 1 ? 240 + ((ratio - 0.56) / 0.44) * 120 : 360 + (ratio - 1) * 160
+  const image = isPreviewableMedia(media)
+  const minimumRatio = image ? 0.72 : 0.56
+  const ratio = Math.min(2, Math.max(minimumRatio, width / height))
+  const preferredWidth =
+    ratio < 1
+      ? image
+        ? 280 + ((ratio - 0.72) / 0.28) * 80
+        : 240 + ((ratio - 0.56) / 0.44) * 120
+      : 360 + (ratio - 1) * 160
   return {
-    aspectRatio: `${width} / ${height}`,
+    aspectRatio: image ? `${ratio}` : `${width} / ${height}`,
     width: `${Math.round(preferredWidth)}px`,
     maxWidth: '100%',
   }

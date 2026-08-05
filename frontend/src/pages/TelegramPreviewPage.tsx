@@ -109,6 +109,7 @@ export function TelegramPreviewPage() {
   const messageComposerRef = useRef<HTMLTextAreaElement>(null)
   const selectedRef = useRef<TelegramPreviewDialog | null>(null)
   const lastDialogsRefresh = useRef(0)
+  const dialogsRefreshPending = useRef(false)
   const previousScrollHeight = useRef<number | null>(null)
   const stickToBottom = useRef(true)
   const suppressAutoLoadRef = useRef(false)
@@ -154,6 +155,43 @@ export function TelegramPreviewPage() {
     getNextPageParam: (page) => page.next_cursor ?? undefined,
     refetchOnMount: 'always',
   })
+
+  const refreshDialogsFirstPage = useCallback(async () => {
+    if (dialogsRefreshPending.current) return
+    dialogsRefreshPending.current = true
+    try {
+      const params = new URLSearchParams({ folder, limit: '40' })
+      const firstPage = await accountRequest<TelegramPreviewDialogsPage>(
+        accountId,
+        `/api/v1/telegram-preview/dialogs?${params}`,
+      )
+      queryClient.setQueryData<InfiniteData<TelegramPreviewDialogsPage>>(
+        ['telegram-preview', accountId, 'dialogs', folder],
+        (current) => {
+          if (!current?.pages.length) return { pages: [firstPage], pageParams: [null] }
+
+          const refreshedIds = new Set(firstPage.items.map((item) => item.id))
+          const retainedItems = current.pages
+            .flatMap((page) => page.items)
+            .filter((item) => !refreshedIds.has(item.id))
+          const lastPage = current.pages[current.pages.length - 1]
+
+          return {
+            pages: [
+              {
+                ...firstPage,
+                items: [...firstPage.items, ...retainedItems],
+                next_cursor: lastPage.next_cursor,
+              },
+            ],
+            pageParams: [null],
+          }
+        },
+      )
+    } finally {
+      dialogsRefreshPending.current = false
+    }
+  }, [accountId, folder, queryClient])
 
   const messages = useInfiniteQuery({
     queryKey: ['telegram-preview', accountId, 'messages', selected?.id ?? null, messageQuery],
@@ -218,9 +256,9 @@ export function TelegramPreviewPage() {
       ),
     onSuccess: (message, variables) => {
       appendMessage(variables.targetAccountId, variables.chatId, message)
-      void queryClient.invalidateQueries({
-        queryKey: ['telegram-preview', variables.targetAccountId, 'dialogs'],
-      })
+      if (variables.targetAccountId === accountId) {
+        void refreshDialogsFirstPage().catch(() => undefined)
+      }
       if (accountId === variables.targetAccountId && selected?.id === variables.chatId) {
         stickToBottom.current = true
         setSearchInput('')
@@ -242,9 +280,7 @@ export function TelegramPreviewPage() {
               const now = Date.now()
               if (now - lastDialogsRefresh.current >= 3_000) {
                 lastDialogsRefresh.current = now
-                void queryClient.invalidateQueries({
-                  queryKey: ['telegram-preview', accountId, 'dialogs'],
-                })
+                void refreshDialogsFirstPage().catch(() => undefined)
               }
               const current = selectedRef.current
               if (!current || current.id !== update.chat_id) return
@@ -281,7 +317,7 @@ export function TelegramPreviewPage() {
 
     void monitor()
     return () => controller.abort()
-  }, [accountId, active?.connected, appendMessage, queryClient])
+  }, [accountId, active?.connected, appendMessage, refreshDialogsFirstPage])
 
   const allDialogs = useMemo(() => {
     const seen = new Set<number>()

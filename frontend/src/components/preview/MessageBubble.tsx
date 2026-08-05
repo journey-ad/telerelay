@@ -5,6 +5,7 @@ import { cn } from '../../utils/cn'
 import { formatNumber } from '../../utils/format'
 import {
   hasMediaPreview,
+  isPreviewableMedia,
   messageDay,
   messageTime,
   serviceText,
@@ -30,6 +31,64 @@ function DayDivider({ value }: { value?: string | null }) {
         )}
       </time>
       <span className="h-px flex-1 bg-slate-200" />
+    </div>
+  )
+}
+
+function AlbumPreview({
+  accountId,
+  items,
+  onOpenPreview,
+}: {
+  accountId: string
+  items: TelegramPreviewMessage[]
+  onOpenPreview: (message: TelegramPreviewMessage) => void
+}) {
+  const [primary, ...secondary] = items
+  const columns = secondary.length <= 3 ? 1 : secondary.length <= 6 ? 2 : 3
+  const rows = Math.ceil(secondary.length / columns)
+  const remainder = secondary.length % columns
+  const baseSpan = 6 / columns
+
+  function columnSpan(index: number) {
+    if (!remainder || index < secondary.length - remainder) return baseSpan
+    if (remainder === 1) return 6
+    if (columns === 3 && remainder === 2) return 3
+    return baseSpan
+  }
+
+  return (
+    <div
+      data-testid="media-album"
+      className="mb-1.5 grid aspect-[4/3] w-130 max-w-full gap-0.5 overflow-hidden rounded-[5px] bg-slate-200"
+      style={{
+        gridTemplateColumns:
+          items.length > 7 ? 'minmax(0, 3fr) minmax(0, 2fr)' : 'minmax(0, 2fr) minmax(0, 1fr)',
+      }}
+    >
+      <MediaPreview accountId={accountId} message={primary} compact onOpenPreview={onOpenPreview} />
+      <div
+        className="grid min-h-0 gap-0.5"
+        style={{
+          gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+          gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+        }}
+      >
+        {secondary.map((item, index) => (
+          <div
+            key={item.id}
+            className="min-h-0"
+            style={{ gridColumn: `span ${columnSpan(index)}` }}
+          >
+            <MediaPreview
+              accountId={accountId}
+              message={item}
+              compact
+              onOpenPreview={onOpenPreview}
+            />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -76,6 +135,10 @@ export function MessageBubble({
   }
   const textMessage = group.items.find((item) => item.text)?.text ?? ''
   const mediaItems = group.items.filter((item) => item.media && hasMediaPreview(item.media))
+  const imageItems = mediaItems.filter((item) => item.media && isPreviewableMedia(item.media))
+  const otherMediaItems = mediaItems.filter(
+    (item) => !item.media || !isPreviewableMedia(item.media),
+  )
   return (
     <>
       {showDay ? <DayDivider value={message.date} /> : null}
@@ -131,22 +194,30 @@ export function MessageBubble({
               ) : null}
             </button>
           ) : null}
-          {mediaItems.length ? (
-            <div
-              className={cn(
-                'mb-1.5 grid gap-1',
-                mediaItems.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
-              )}
-              style={
-                mediaItems.length > 1 ? { width: '520px', maxWidth: '100%' } : { maxWidth: '100%' }
-              }
-            >
-              {mediaItems.map((item) => (
+          {imageItems.length ? (
+            imageItems.length > 1 ? (
+              <AlbumPreview
+                accountId={accountId}
+                items={imageItems}
+                onOpenPreview={onOpenPreview}
+              />
+            ) : (
+              <div className="mb-1.5 max-w-full">
+                <MediaPreview
+                  accountId={accountId}
+                  message={imageItems[0]}
+                  onOpenPreview={onOpenPreview}
+                />
+              </div>
+            )
+          ) : null}
+          {otherMediaItems.length ? (
+            <div className="mb-1.5 grid max-w-full gap-1">
+              {otherMediaItems.map((item) => (
                 <MediaPreview
                   key={item.id}
                   accountId={accountId}
                   message={item}
-                  compact={mediaItems.length > 1}
                   onOpenPreview={onOpenPreview}
                 />
               ))}
