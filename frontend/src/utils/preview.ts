@@ -61,6 +61,15 @@ export function fileSize(value?: number | null): string {
   return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 
+export function mediaDuration(value?: number | null): string {
+  if (value === null || value === undefined || value < 0) return ''
+  const seconds = Math.floor(value)
+  const parts = [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60]
+  return (parts[0] ? parts : parts.slice(1))
+    .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, '0')))
+    .join(':')
+}
+
 export function peerAvatarPath(peerId?: number | null): string | null {
   if (!peerId) return null
   return `/api/v1/telegram-preview/peers/${peerId}/avatar`
@@ -75,7 +84,22 @@ export function visualMediaPath(chatId: number, messageId: number): string {
 }
 
 export function isPreviewableMedia(media: NonNullable<TelegramPreviewMessage['media']>): boolean {
-  return media.type !== 'sticker' && media.is_visual_media && media.has_thumbnail
+  return (
+    !['sticker', 'video', 'video_note', 'webpage'].includes(media.type) &&
+    media.is_visual_media &&
+    media.has_thumbnail
+  )
+}
+
+export function hasMediaPreview(media: NonNullable<TelegramPreviewMessage['media']>): boolean {
+  if (media.type !== 'webpage') return true
+  return Boolean(
+    media.has_thumbnail ||
+    media.webpage?.site_name ||
+    media.webpage?.title ||
+    media.webpage?.description ||
+    media.webpage?.author,
+  )
 }
 
 export function serviceText(

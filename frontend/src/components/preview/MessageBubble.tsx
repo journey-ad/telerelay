@@ -3,7 +3,13 @@ import { useTranslation } from 'react-i18next'
 import type { TelegramPreviewMessage } from '../../types'
 import { cn } from '../../utils/cn'
 import { formatNumber } from '../../utils/format'
-import { messageDay, messageTime, serviceText, type MessageGroup } from '../../utils/preview'
+import {
+  hasMediaPreview,
+  messageDay,
+  messageTime,
+  serviceText,
+  type MessageGroup,
+} from '../../utils/preview'
 import { RichText } from '../RichText'
 import { Avatar } from './DialogList'
 import { MediaPreview } from './MediaPreview'
@@ -69,6 +75,7 @@ export function MessageBubble({
     )
   }
   const textMessage = group.items.find((item) => item.text)?.text ?? ''
+  const mediaItems = group.items.filter((item) => item.media && hasMediaPreview(item.media))
   return (
     <>
       {showDay ? <DayDivider value={message.date} /> : null}
@@ -124,22 +131,22 @@ export function MessageBubble({
               ) : null}
             </button>
           ) : null}
-          {group.items.some((item) => item.media) ? (
+          {mediaItems.length ? (
             <div
               className={cn(
                 'mb-1.5 grid gap-1',
-                group.items.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
+                mediaItems.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
               )}
               style={
-                group.items.length > 1 ? { width: '520px', maxWidth: '100%' } : { maxWidth: '100%' }
+                mediaItems.length > 1 ? { width: '520px', maxWidth: '100%' } : { maxWidth: '100%' }
               }
             >
-              {group.items.map((item) => (
+              {mediaItems.map((item) => (
                 <MediaPreview
                   key={item.id}
                   accountId={accountId}
                   message={item}
-                  compact={group.items.length > 1}
+                  compact={mediaItems.length > 1}
                   onOpenPreview={onOpenPreview}
                 />
               ))}
@@ -164,7 +171,7 @@ export function MessageBubble({
                       : 'border-slate-200 bg-white/70 text-slate-500',
                   )}
                 >
-                  {reaction.label} {reaction.count}
+                  <span className="font-emoji">{reaction.label}</span> <span>{reaction.count}</span>
                 </span>
               ))}
             </div>

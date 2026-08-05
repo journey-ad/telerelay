@@ -76,6 +76,15 @@ export interface TelegramPreviewMessage {
     is_visual_media: boolean
     has_thumbnail: boolean
     inline_thumbnail?: string | null
+    webpage?: {
+      url?: string | null
+      display_url?: string | null
+      site_name?: string | null
+      title?: string | null
+      description?: string | null
+      author?: string | null
+      type?: string | null
+    } | null
     poll?: {
       question: string
       options: Array<{ text: string; voters: number; chosen: boolean; correct: boolean }>

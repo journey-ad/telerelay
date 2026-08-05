@@ -4,6 +4,7 @@
 @theme {
   --font-sans: 'DM Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-display: 'Manrope', 'PingFang SC', sans-serif;
+  --font-emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
 }
 
 @layer base {

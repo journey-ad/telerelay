@@ -579,6 +579,158 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(data["media"]["is_visual_media"])
         self.assertFalse(data["media"]["has_thumbnail"])
 
+    async def test_webpage_media_takes_priority_over_exposed_photo(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = types.MessageMediaWebPage(
+            webpage=types.WebPage(
+                id=1,
+                url="https://example.com/articles/preview",
+                display_url="example.com/articles/preview",
+                hash=0,
+                type="article",
+                site_name="Example News",
+                title="Telegram link previews",
+                description="Metadata supplied by Telegram.",
+                author="Example Author",
+            )
+        )
+        # Telethon exposes a webpage cover as message.photo.
+        media_message.photo = SimpleNamespace(
+            sizes=[types.PhotoSize("m", 640, 360, 10_000)]
+        )
+
+        data = await self.service._message_data(media_message, 101)
+
+        self.assertEqual(data["media"]["type"], "webpage")
+        self.assertFalse(data["media"]["is_visual_media"])
+        self.assertTrue(data["media"]["has_thumbnail"])
+        self.assertEqual(
+            data["media"]["webpage"],
+            {
+                "url": "https://example.com/articles/preview",
+                "display_url": "example.com/articles/preview",
+                "site_name": "Example News",
+                "title": "Telegram link previews",
+                "description": "Metadata supplied by Telegram.",
+                "author": "Example Author",
+                "type": "article",
+            },
+        )
+
+    async def test_pending_and_empty_webpages_have_safe_metadata(self):
+        media_message = self.client.messages[101][-1]
+        for webpage in (
+            types.WebPagePending(
+                id=2,
+                date=datetime(2026, 7, 30, tzinfo=timezone.utc),
+                url="https://pending.example/",
+            ),
+            types.WebPageEmpty(id=3, url="https://empty.example/"),
+        ):
+            with self.subTest(webpage=type(webpage).__name__):
+                media_message.media = types.MessageMediaWebPage(webpage=webpage)
+                media_message.photo = None
+
+                data = await self.service._message_data(media_message, 101)
+
+                self.assertEqual(data["media"]["type"], "webpage")
+                self.assertEqual(data["media"]["webpage"]["url"], webpage.url)
+                self.assertIsNone(data["media"]["webpage"]["title"])
+                self.assertFalse(data["media"]["has_thumbnail"])
+
+    async def test_webpage_cover_thumbnail_uses_encrypted_cache(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = types.MessageMediaWebPage(
+            webpage=types.WebPage(
+                id=4,
+                url="https://example.com/cover",
+                display_url="example.com/cover",
+                hash=0,
+            )
+        )
+        media_message.photo = SimpleNamespace(
+            sizes=[types.PhotoSize("m", 480, 270, 8_000)]
+        )
+        downloads = 0
+
+        async def download_media(message, *, file, thumb=None, **options):
+            nonlocal downloads
+            downloads += 1
+            self.assertIs(file, bytes)
+            self.assertIsNotNone(thumb)
+            return b"webpage-cover"
+
+        self.client.download_media = download_media
+
+        first, _ = await self.service.media_thumbnail(
+            account_id="work", chat_id=101, message_id=3
+        )
+        second, _ = await self.service.media_thumbnail(
+            account_id="work", chat_id=101, message_id=3
+        )
+
+        self.assertEqual(first, b"webpage-cover")
+        self.assertEqual(second, first)
+        self.assertEqual(downloads, 1)
+        cache_path = self.service._cache_path(
+            "work", "thumbnails", "101-3.jpg"
+        )
+        stored = cache_path.read_bytes()
+        self.assertTrue(stored.startswith(self.service.CACHE_MAGIC))
+        self.assertNotIn(first, stored)
+
+    async def test_video_thumbnail_is_cached_without_enabling_full_download(self):
+        media_message = self.client.messages[101][-1]
+        media_message.media = object()
+        media_message.video = object()
+        media_message.document = SimpleNamespace(
+            thumbs=[types.PhotoSize("m", 640, 360, 12_000)],
+            attributes=[types.DocumentAttributeVideo(95, 1280, 720)],
+        )
+        media_message.file = SimpleNamespace(
+            name="clip.mp4",
+            mime_type="video/mp4",
+            size=500 * 1024 * 1024,
+            duration=95,
+        )
+        downloads = 0
+
+        async def download_media(message, *, file, thumb=None, **options):
+            nonlocal downloads
+            downloads += 1
+            self.assertIs(file, bytes)
+            self.assertIsNotNone(thumb)
+            return b"video-thumbnail"
+
+        self.client.download_media = download_media
+
+        data = await self.service._message_data(media_message, 101)
+        first, _ = await self.service.media_thumbnail(
+            account_id="work", chat_id=101, message_id=3
+        )
+        second, _ = await self.service.media_thumbnail(
+            account_id="work", chat_id=101, message_id=3
+        )
+
+        self.assertEqual(data["media"]["type"], "video")
+        self.assertFalse(data["media"]["is_visual_media"])
+        self.assertTrue(data["media"]["has_thumbnail"])
+        self.assertEqual(first, b"video-thumbnail")
+        self.assertEqual(second, first)
+        self.assertEqual(downloads, 1)
+        with self.assertRaises(TelegramPreviewError) as raised:
+            await self.service.download_visual_media(
+                account_id="work", chat_id=101, message_id=3
+            )
+        self.assertEqual(raised.exception.code, "visual_media_not_found")
+        self.assertEqual(downloads, 1)
+        cache_path = self.service._cache_path(
+            "work", "thumbnails", "101-3.jpg"
+        )
+        stored = cache_path.read_bytes()
+        self.assertTrue(stored.startswith(self.service.CACHE_MAGIC))
+        self.assertNotIn(first, stored)
+
     async def test_gif_and_sticker_thumbnails_use_encrypted_cache(self):
         for kind in ("gif", "sticker"):
             with self.subTest(kind=kind):

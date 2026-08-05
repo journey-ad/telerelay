@@ -686,6 +686,8 @@
     "downloadSticker": "Download sticker",
     "downloadImage": "Download image",
     "image": "Image",
+    "linkPreview": "Link preview",
+    "openLink": "Open link",
     "poll": {
       "closed": "Closed",
       "quiz": "Quiz",

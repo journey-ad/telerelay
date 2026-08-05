@@ -93,8 +93,13 @@ def _chat_kind(entity: Any) -> str:
 def _media_type(message: Any) -> str:
     if getattr(message, "action", None) is not None:
         return "service"
-    if not getattr(message, "media", None):
+    media = getattr(message, "media", None)
+    if not media:
         return "text"
+    # Telethon exposes a web page's cover through message.photo, so web pages
+    # must be classified before ordinary photos.
+    if isinstance(media, types.MessageMediaWebPage):
+        return "webpage"
     if getattr(message, "photo", None):
         return "photo"
     if getattr(message, "gif", None):
@@ -111,7 +116,6 @@ def _media_type(message: Any) -> str:
         return "audio"
     if getattr(message, "document", None):
         return "document"
-    media = getattr(message, "media", None)
     if isinstance(media, types.MessageMediaContact):
         return "contact"
     if isinstance(media, types.MessageMediaPoll):
@@ -134,6 +138,7 @@ def _media_label(kind: str) -> str:
         "contact": "联系人",
         "poll": "投票",
         "location": "位置",
+        "webpage": "链接",
         "service": "服务消息",
         "media": "媒体",
     }.get(kind, "消息")
@@ -1009,7 +1014,24 @@ class TelegramPreviewService:
             "is_visual_media": self._is_visual_media(message),
             "has_thumbnail": self._has_thumbnail(message),
             "inline_thumbnail": self._inline_thumbnail(message),
+            "webpage": self._webpage_data(message),
             "poll": self._poll_data(message),
+        }
+
+    @staticmethod
+    def _webpage_data(message: Any) -> dict[str, Any] | None:
+        media = getattr(message, "media", None)
+        if not isinstance(media, types.MessageMediaWebPage):
+            return None
+        webpage = getattr(media, "webpage", None)
+        return {
+            "url": getattr(webpage, "url", None),
+            "display_url": getattr(webpage, "display_url", None),
+            "site_name": getattr(webpage, "site_name", None),
+            "title": getattr(webpage, "title", None),
+            "description": getattr(webpage, "description", None),
+            "author": getattr(webpage, "author", None),
+            "type": getattr(webpage, "type", None),
         }
 
     @staticmethod
@@ -1099,8 +1121,12 @@ class TelegramPreviewService:
 
     @staticmethod
     def _has_thumbnail(message: Any) -> bool:
+        kind = _media_type(message)
         return bool(
-            TelegramPreviewService._is_visual_media(message)
+            (
+                TelegramPreviewService._is_visual_media(message)
+                or kind in {"video", "video_note", "webpage"}
+            )
             and (
                 TelegramPreviewService._inline_thumbnail(message)
                 or TelegramPreviewService._thumbnail(message) is not None
@@ -1109,6 +1135,8 @@ class TelegramPreviewService:
 
     @staticmethod
     def _is_visual_media(message: Any) -> bool:
+        if isinstance(getattr(message, "media", None), types.MessageMediaWebPage):
+            return False
         if (
             getattr(message, "photo", None)
             or getattr(message, "gif", None)

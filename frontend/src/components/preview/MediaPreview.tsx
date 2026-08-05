@@ -1,4 +1,4 @@
-import { Download, File, Image } from 'lucide-react'
+import { Download, ExternalLink, File, Image, Play } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { downloadFile } from '../../api/downloads'
 import type { TelegramPreviewMessage } from '../../types'
@@ -6,12 +6,101 @@ import { cn } from '../../utils/cn'
 import { formatNumber } from '../../utils/format'
 import {
   fileSize,
+  hasMediaPreview,
   isPreviewableMedia,
+  mediaDuration,
   mediaFrame,
   thumbnailPath,
   visualMediaPath,
 } from '../../utils/preview'
 import { AuthenticatedImage } from '../AuthenticatedImage'
+
+function safeWebPageUrl(value?: string | null): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
+function WebPagePreview({
+  accountId,
+  message,
+  compact,
+}: {
+  accountId: string
+  message: TelegramPreviewMessage
+  compact: boolean
+}) {
+  const { t } = useTranslation()
+  const media = message.media
+  const webpage = media?.webpage
+  if (!media || !webpage) return null
+  const href = safeWebPageUrl(webpage.url)
+  const source = webpage.site_name || webpage.display_url || webpage.url
+  const content = (
+    <>
+      {media.has_thumbnail ? (
+        <div className={cn('shrink-0 overflow-hidden bg-slate-100', compact ? 'h-28' : 'h-36')}>
+          <AuthenticatedImage
+            path={thumbnailPath(message.chat_id, message.id)}
+            thumbnailPath={null}
+            inlineSource={media.inline_thumbnail}
+            blurred
+            accountId={accountId}
+            alt={webpage.title || source || t('telegramPreview.linkPreview')}
+            className="size-full"
+            fallback={
+              <span className="grid size-full place-items-center text-slate-300">
+                <Image size={28} />
+              </span>
+            }
+          />
+        </div>
+      ) : null}
+      <span className="block min-w-0 p-3">
+        <span className="flex items-start gap-3">
+          <span className="min-w-0 flex-1">
+            {source ? (
+              <span className="block truncate text-[11px] font-medium text-blue-600">{source}</span>
+            ) : null}
+            {webpage.title ? (
+              <strong className="mt-0.5 line-clamp-2 block text-[13px] leading-4.5 text-slate-700">
+                {webpage.title}
+              </strong>
+            ) : null}
+          </span>
+          {href ? <ExternalLink size={14} className="mt-0.5 shrink-0 text-slate-400" /> : null}
+        </span>
+        {webpage.description ? (
+          <span className="mt-1.5 line-clamp-3 block max-h-12 overflow-hidden wrap-break-word text-xs leading-4 text-slate-500">
+            {webpage.description}
+          </span>
+        ) : null}
+      </span>
+    </>
+  )
+  const className = cn(
+    'block w-90 max-w-full overflow-hidden rounded-[5px] border border-slate-200 bg-white/80 text-left no-underline',
+    href &&
+      'transition hover:border-blue-300 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500',
+  )
+  return href ? (
+    <a
+      className={className}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={webpage.title || t('telegramPreview.openLink')}
+    >
+      {content}
+    </a>
+  ) : (
+    <div className={className}>{content}</div>
+  )
+}
 
 function PollPreview({
   poll,
@@ -122,9 +211,14 @@ export function MediaPreview({
   const { t } = useTranslation()
   const media = message.media
   if (!media) return null
+  if (!hasMediaPreview(media)) return null
   if (media.poll) return <PollPreview poll={media.poll} />
+  if (media.webpage) {
+    return <WebPagePreview accountId={accountId} message={message} compact={compact} />
+  }
   const path = media.is_visual_media ? visualMediaPath(message.chat_id, message.id) : null
   const canPreview = isPreviewableMedia(media)
+  const isVideo = media.type === 'video' || media.type === 'video_note'
   const isWebm =
     media.mime_type === 'video/webm' || media.file_name?.toLowerCase().endsWith('.webm')
   const autoLoadFull =
@@ -163,7 +257,7 @@ export function MediaPreview({
         }
       >
         <AuthenticatedImage
-          path={autoLoadFull ? visualMediaPath(message.chat_id, message.id) : null}
+          path={autoLoadFull && !isVideo ? visualMediaPath(message.chat_id, message.id) : null}
           thumbnailPath={media.inline_thumbnail ? null : thumbnailPath(message.chat_id, message.id)}
           inlineSource={media.inline_thumbnail}
           blurred
@@ -171,13 +265,25 @@ export function MediaPreview({
           isVideo={isWebm}
           alt={media.file_name || t('telegramPreview.image')}
           accountId={accountId}
-          className="size-full"
+          className={cn('size-full', isVideo && 'scale-105 blur-sm')}
           fallback={
             <span className="grid size-full place-items-center text-slate-300">
               <Image size={28} />
             </span>
           }
         />
+        {isVideo ? (
+          <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/10">
+            <span className="grid size-11 place-items-center rounded-full bg-slate-950/70 text-white shadow-sm backdrop-blur-sm">
+              <Play size={20} fill="currentColor" className="ml-0.5" />
+            </span>
+          </span>
+        ) : null}
+        {isVideo && mediaDuration(media.duration) ? (
+          <span className="pointer-events-none absolute right-2 bottom-2 rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums">
+            {mediaDuration(media.duration)}
+          </span>
+        ) : null}
         {path ? (
           <button
             className="absolute right-2 bottom-2 grid size-7 place-items-center rounded bg-slate-900/70 text-white opacity-0 shadow transition group-hover:opacity-100 focus:opacity-100"

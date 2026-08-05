@@ -686,6 +686,8 @@
     "downloadSticker": "下载贴纸",
     "downloadImage": "下载图片",
     "image": "图片",
+    "linkPreview": "链接预览",
+    "openLink": "打开链接",
     "poll": {
       "closed": "已结束",
       "quiz": "测验",
