@@ -8,6 +8,15 @@ import { thumbnailPath, visualMediaPath, type ImageGroup } from '../../utils/pre
 import { AuthenticatedImage, preloadAuthenticatedImage } from '../AuthenticatedImage'
 
 const GENERATED_THUMBNAIL_SIZE = 128
+const SCALE_EPSILON = 0.001
+const ACTUAL_SIZE_SCALE = 1
+const ZOOMED_SCALE = 2
+const MIN_VIEWPORT_FRACTION = 0.8
+const MAX_VIEWPORT_FRACTION = 0.94
+const MAX_ASPECT_DISTANCE = Math.log(3)
+const LONG_IMAGE_MIN_RATIO = 0.56
+const LONG_IMAGE_MAX_RATIO = 2
+const LONG_IMAGE_WIDTH_FRACTION = 0.6
 
 function createSquareThumbnail(image: HTMLImageElement): Promise<string | null> {
   const sourceWidth = image.naturalWidth
@@ -43,6 +52,57 @@ function createSquareThumbnail(image: HTMLImageElement): Promise<string | null> 
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
+}
+
+function resolveViewport(
+  stageSize: { width: number; height: number },
+  stageNode: HTMLDivElement | null,
+): { width: number; height: number } {
+  return {
+    width: stageSize.width || stageNode?.clientWidth || window.innerWidth,
+    height: stageSize.height || stageNode?.clientHeight || window.innerHeight,
+  }
+}
+
+function sourceFrameFor(
+  viewportW: number,
+  viewportH: number,
+  imageRatio: number,
+  imageWidth?: number,
+  longImage = false,
+): { width: number; height: number } {
+  const maxWidth = longImage ? viewportW * LONG_IMAGE_WIDTH_FRACTION : viewportW
+  const width = imageWidth
+    ? Math.min(maxWidth, imageWidth)
+    : Math.min(maxWidth, viewportH * imageRatio)
+  return { width, height: width / imageRatio }
+}
+
+function initialViewFor(
+  viewportW: number,
+  viewportH: number,
+  imageRatio: number,
+  imageWidth: number | undefined,
+  longImage: boolean,
+): { width: number; height: number; scale: number } {
+  const frame = sourceFrameFor(viewportW, viewportH, imageRatio, imageWidth, longImage)
+  if (longImage) return { ...frame, scale: 1 }
+  const viewportRatio = viewportW / viewportH
+  const aspectDistance = Math.abs(Math.log(frame.width / frame.height / viewportRatio))
+  const progress = clamp(aspectDistance / MAX_ASPECT_DISTANCE, 0, 1)
+  const viewportFraction =
+    MIN_VIEWPORT_FRACTION + (MAX_VIEWPORT_FRACTION - MIN_VIEWPORT_FRACTION) * progress
+  const fitScale = Math.min(viewportW / frame.width, viewportH / frame.height)
+  return { ...frame, scale: Math.min(1, fitScale * viewportFraction) }
+}
+
+function initialOffsetFor(
+  tallImage: boolean,
+  frameHeight: number,
+  scale: number,
+  viewportHeight: number,
+): { x: number; y: number } {
+  return tallImage ? { x: 0, y: (frameHeight * scale - viewportHeight) / 2 } : { x: 0, y: 0 }
 }
 
 function resistOutside(value: number, limit: number, viewportSize: number): number {
@@ -87,15 +147,17 @@ export function ImageViewer({
   const previousLabel = t('telegramPreview.previousImage')
   const nextLabel = t('telegramPreview.nextImage')
 
-  const [scale, setScale] = useState(1)
+  const [scale, setScale] = useState(MIN_VIEWPORT_FRACTION)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const [stageNode, setStageNode] = useState<HTMLDivElement | null>(null)
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [isSettling, setIsSettling] = useState(false)
   const [generatedThumbnails, setGeneratedThumbnails] = useState<Map<number, string>>(
     () => new Map(),
   )
-  const scaleRef = useRef(1)
+  const scaleRef = useRef(MIN_VIEWPORT_FRACTION)
+  const defaultScaleRef = useRef(MIN_VIEWPORT_FRACTION)
   const offsetRef = useRef({ x: 0, y: 0 })
   const wheelSettleTimerRef = useRef<number | null>(null)
   const generatedThumbnailUrlsRef = useRef<Map<number, string | null>>(new Map())
@@ -114,6 +176,9 @@ export function ImageViewer({
     media?.width && media?.height && media.width > 0 && media.height > 0
       ? media.width / media.height
       : 16 / 9
+  const sourceWidth = media?.width && media.width > 0 ? media.width : undefined
+  const longImage = ratio < LONG_IMAGE_MIN_RATIO || ratio > LONG_IMAGE_MAX_RATIO
+  const tallImage = ratio < LONG_IMAGE_MIN_RATIO
   const ratioRef = useRef(ratio)
   ratioRef.current = ratio
 
@@ -127,6 +192,32 @@ export function ImageViewer({
       generatedThumbnailUrlsRef.current.clear()
     }
   }, [])
+
+  useEffect(() => {
+    if (!stageNode) return
+    const syncSize = () => {
+      const width = stageNode.clientWidth
+      const height = stageNode.clientHeight
+      if (!width || !height) return
+      setStageSize((current) =>
+        current.width === width && current.height === height ? current : { width, height },
+      )
+      const previousDefault = defaultScaleRef.current
+      const view = initialViewFor(width, height, ratioRef.current, sourceWidth, longImage)
+      defaultScaleRef.current = view.scale
+      if (Math.abs(scaleRef.current - previousDefault) < SCALE_EPSILON) {
+        const nextOffset = initialOffsetFor(tallImage, view.height, view.scale, height)
+        scaleRef.current = view.scale
+        offsetRef.current = nextOffset
+        setScale(view.scale)
+        setOffset(nextOffset)
+      }
+    }
+    syncSize()
+    const observer = new ResizeObserver(syncSize)
+    observer.observe(stageNode)
+    return () => observer.disconnect()
+  }, [stageNode, sourceWidth, longImage, tallImage])
 
   useEffect(() => {
     let active = true
@@ -152,11 +243,13 @@ export function ImageViewer({
   }, [accountId, group])
 
   useEffect(() => {
-    const { maxY } = boundsFor(1)
-    const initialOffset = { x: 0, y: maxY }
-    setScale(1)
+    const { width: viewportW, height: viewportH } = resolveViewport(stageSize, stageNode)
+    const view = initialViewFor(viewportW, viewportH, ratioRef.current, sourceWidth, longImage)
+    const initialOffset = initialOffsetFor(tallImage, view.height, view.scale, viewportH)
+    setScale(view.scale)
     setOffset(initialOffset)
-    scaleRef.current = 1
+    scaleRef.current = view.scale
+    defaultScaleRef.current = view.scale
     offsetRef.current = initialOffset
     if (wheelSettleTimerRef.current !== null) {
       window.clearTimeout(wheelSettleTimerRef.current)
@@ -178,17 +271,10 @@ export function ImageViewer({
     viewportW: number
     viewportH: number
   } {
-    const currentRatio = ratioRef.current
-    const viewportW = stageNode?.clientWidth || window.innerWidth
-    const viewportH = stageNode?.clientHeight || window.innerHeight
-    const naturalW = media?.width && media.width > 0 ? media.width : null
-    const defaultMaxW = viewportW * 0.6
-    const baseW = naturalW
-      ? Math.min(defaultMaxW, naturalW)
-      : Math.min(defaultMaxW, viewportH * currentRatio)
-    const baseH = baseW / currentRatio
-    const scaledW = baseW * nextScale
-    const scaledH = baseH * nextScale
+    const { width: viewportW, height: viewportH } = resolveViewport(stageSize, stageNode)
+    const frame = sourceFrameFor(viewportW, viewportH, ratioRef.current, sourceWidth, longImage)
+    const scaledW = frame.width * nextScale
+    const scaledH = frame.height * nextScale
     return {
       maxX: Math.max(0, (scaledW - viewportW) / 2),
       maxY: Math.max(0, (scaledH - viewportH) / 2),
@@ -237,7 +323,10 @@ export function ImageViewer({
   }
 
   function toggleScale() {
-    const next = scaleRef.current <= 1 ? 2 : 1
+    const defaultScale = defaultScaleRef.current
+    const actualSizeScale =
+      defaultScale < ACTUAL_SIZE_SCALE - SCALE_EPSILON ? ACTUAL_SIZE_SCALE : ZOOMED_SCALE
+    const next = scaleRef.current <= defaultScale + SCALE_EPSILON ? actualSizeScale : defaultScale
     setIsSettling(true)
     updateView(next, { x: 0, y: 0 })
   }
@@ -282,7 +371,8 @@ export function ImageViewer({
       event.preventDefault()
       const deltaY = wheelDeltaInPixels(event, stageNode.clientHeight)
       const factor = Math.exp(-deltaY * 0.002)
-      const next = clamp(scaleRef.current * factor, 0.333, 3)
+      const minScale = Math.min(defaultScaleRef.current, 0.333)
+      const next = clamp(scaleRef.current * factor, minScale, 3)
       if (next !== scaleRef.current) {
         const current = offsetRef.current
         const ratioScale = next / scaleRef.current
@@ -369,6 +459,9 @@ export function ImageViewer({
     dragRef.current = null
     settleView()
   }
+
+  const { width: viewportW, height: viewportH } = resolveViewport(stageSize, stageNode)
+  const frame = sourceFrameFor(viewportW, viewportH, ratio, sourceWidth, longImage)
 
   return (
     <DialogPrimitive.Root
@@ -469,14 +562,15 @@ export function ImageViewer({
               key={message?.id}
               className="relative"
               style={{
-                width:
-                  media?.width && media.width > 0
-                    ? `min(60vw, ${media.width}px)`
-                    : `min(60vw, calc(100dvh * ${ratio}))`,
+                width: `${frame.width}px`,
                 aspectRatio: `${ratio}`,
                 transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${scale})`,
                 transition: isSettling ? 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
-                cursor: isDragging ? 'grabbing' : scale === 1 ? 'zoom-in' : 'grab',
+                cursor: isDragging
+                  ? 'grabbing'
+                  : scale > defaultScaleRef.current + SCALE_EPSILON
+                    ? 'grab'
+                    : 'zoom-in',
                 willChange: 'transform',
               }}
               onClick={(event) => event.stopPropagation()}
