@@ -160,13 +160,14 @@ export interface TelegramPreviewUpdate {
 export interface TelegramVideoTicket {
   ticket: string
   api_id: number
+  api_layer: number
   dc_id: number
   dc_address: string
   dc_port: number
   auth_key: string
   auth_key_id: string
   server_salt: string
-  expires_at: number
+  time_offset: number
   file: {
     id: string
     access_hash: string

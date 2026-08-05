@@ -26,10 +26,8 @@ const METHOD = {
   initConnection: 0xc1cd5ea9,
   uploadGetFile: 0xbe5335be,
   inputDocumentFileLocation: 0xbad07584,
-  authBindTempAuthKey: 0xcdd42a05,
 } as const
 
-const API_LAYER = 216
 const REQUEST_TIMEOUT_MS = 15_000
 
 type FileLocation = {
@@ -40,18 +38,13 @@ type FileLocation = {
 
 type ClientOptions = {
   apiId: number
+  apiLayer: number
   dcId: number
   authKey: Uint8Array
+  expectedAuthKeyId: bigint
   serverSalt: bigint
   sessionId: bigint
-}
-
-export type BindTempAuthKeyProof = {
-  perm_auth_key_id: string
-  nonce: string
-  expires_at: number
-  message_id: string
-  encrypted_message: string
+  timeOffset: number
 }
 
 type PendingRequest = {
@@ -63,7 +56,7 @@ type PendingRequest = {
 
 class RetryRequestError extends Error {}
 
-class TlWriter {
+export class TlWriter {
   private parts: Uint8Array[] = []
 
   int(value: number) {
@@ -110,10 +103,14 @@ class TlWriter {
   }
 }
 
-class TlReader {
+export class TlReader {
   private offset = 0
 
   constructor(private readonly data: Uint8Array) {}
+
+  get position() {
+    return this.offset
+  }
 
   private require(length: number) {
     if (this.offset + length > this.data.length)
@@ -196,17 +193,7 @@ function createGetFile(location: FileLocation, offset: number, limit: number) {
     .build()
 }
 
-function createBindTempAuthKey(proof: BindTempAuthKeyProof) {
-  return new TlWriter()
-    .int(METHOD.authBindTempAuthKey)
-    .long(proof.perm_auth_key_id)
-    .long(proof.nonce)
-    .int(proof.expires_at)
-    .bytes(decodeBase64Url(proof.encrypted_message))
-    .build()
-}
-
-function createInitializedQuery(apiId: number, query: Uint8Array) {
+function createInitializedQuery(apiId: number, apiLayer: number, query: Uint8Array) {
   const connection = new TlWriter()
     .int(METHOD.initConnection)
     .int(0)
@@ -219,7 +206,7 @@ function createInitializedQuery(apiId: number, query: Uint8Array) {
     .string('en')
     .raw(query)
     .build()
-  return new TlWriter().int(METHOD.invokeWithLayer).int(API_LAYER).raw(connection).build()
+  return new TlWriter().int(METHOD.invokeWithLayer).int(apiLayer).raw(connection).build()
 }
 
 function createAck(messageIds: bigint[]) {
@@ -238,7 +225,7 @@ function packetHeader(payloadLength: number) {
   return new Uint8Array([0x7f, words & 0xff, (words >> 8) & 0xff, (words >> 16) & 0xff])
 }
 
-class ObfuscatedAbridgedSocket {
+export class ObfuscatedAbridgedSocket {
   private socket: WebSocket | null = null
   private encryptor: InstanceType<typeof aesjs.ModeOfOperation.ctr> | null = null
   private decryptor: InstanceType<typeof aesjs.ModeOfOperation.ctr> | null = null
@@ -251,8 +238,9 @@ class ObfuscatedAbridgedSocket {
     private readonly onClose: (error: Error) => void,
   ) {}
 
-  async connect() {
-    const url = `wss://kws${this.dcId}-1.web.telegram.org/apiws`
+  async connect(connectionType: 'client' | 'download' = 'download') {
+    const suffix = connectionType === 'client' ? '' : '-1'
+    const url = `wss://kws${this.dcId}${suffix}.web.telegram.org/apiws`
     const socket = new WebSocket(url, 'binary')
     socket.binaryType = 'arraybuffer'
     this.socket = socket
@@ -354,7 +342,12 @@ class ObfuscatedAbridgedSocket {
   close() {
     const socket = this.socket
     this.socket = null
-    socket?.close()
+    if (socket) {
+      socket.onmessage = null
+      socket.onerror = null
+      socket.onclose = null
+      socket.close()
+    }
     this.encryptor = null
     this.decryptor = null
     this.received = new Uint8Array()
@@ -370,6 +363,7 @@ export class TelegramMtprotoClient {
   private readonly authKey: Uint8Array
   private readonly sessionId: bigint
   private keyId = new Uint8Array()
+  private keyIdValue = 0n
   private salt: bigint
   private sequence = 0
   private lastMessageId = 0n
@@ -384,6 +378,7 @@ export class TelegramMtprotoClient {
     this.authKey = options.authKey
     this.sessionId = options.sessionId
     this.salt = options.serverSalt
+    this.timeOffset = options.timeOffset ?? 0
     this.socket = new ObfuscatedAbridgedSocket(
       options.dcId,
       (packet) => this.receivePacket(packet),
@@ -393,29 +388,34 @@ export class TelegramMtprotoClient {
 
   async connect() {
     this.keyId = new Uint8Array(await authKeyId(this.authKey))
+    this.keyIdValue = new DataView(
+      this.keyId.buffer,
+      this.keyId.byteOffset,
+      this.keyId.byteLength,
+    ).getBigUint64(0, true)
+    if (this.keyIdValue !== this.options.expectedAuthKeyId) {
+      throw new Error('Telegram auth key ID does not match its ticket')
+    }
     await this.socket.connect()
-  }
-
-  async bindTemporaryKey(proof: BindTempAuthKeyProof) {
-    await this.invoke(
-      createInitializedQuery(this.options.apiId, createBindTempAuthKey(proof)),
-      (reader) => this.parseBindResult(reader),
-      BigInt(proof.message_id),
-    )
-    this.initialized = true
   }
 
   async getFile(location: FileLocation, offset: number, limit: number) {
     const query = createGetFile(location, offset, limit)
-    const body = this.initialized ? query : createInitializedQuery(this.options.apiId, query)
+    const body = this.initialized
+      ? query
+      : createInitializedQuery(this.options.apiId, this.options.apiLayer, query)
     const result = await this.invoke(body, (reader) => this.parseFileResult(reader))
     this.initialized = true
     return result
   }
 
   private newMessageId() {
-    const now = BigInt(Date.now() + this.timeOffset * 1000)
-    let messageId = ((now << 32n) / 1000n) & ~3n
+    const now = Date.now()
+    const seconds = BigInt(Math.floor(now / 1000) + this.timeOffset)
+    const milliseconds = BigInt(now % 1000)
+    const random = randomBytes(2)
+    const random16 = BigInt(random[0] | (random[1] << 8))
+    let messageId = (seconds << 32n) | (milliseconds << 21n) | (random16 << 3n) | 4n
     if (messageId <= this.lastMessageId) messageId = this.lastMessageId + 4n
     this.lastMessageId = messageId
     return messageId
@@ -456,8 +456,7 @@ export class TelegramMtprotoClient {
       .int(body.length)
       .raw(body)
       .build()
-    const paddingLength =
-      12 + ((16 - ((envelope.length + 12) % 16)) % 16) + (randomBytes(1)[0] % 4) * 16
+    const paddingLength = 16 - (envelope.length % 16) + 16 * (1 + (randomBytes(1)[0] % 5))
     const packet = encryptMtprotoMessage(
       this.authKey,
       this.keyId,
@@ -497,7 +496,7 @@ export class TelegramMtprotoClient {
       .int(body.length)
       .raw(body)
       .build()
-    const paddingLength = 12 + ((16 - ((envelope.length + 12) % 16)) % 16)
+    const paddingLength = 16 - (envelope.length % 16) + 16 * (1 + (randomBytes(1)[0] % 5))
     const packet = encryptMtprotoMessage(
       this.authKey,
       this.keyId,
@@ -507,6 +506,10 @@ export class TelegramMtprotoClient {
   }
 
   private async receivePacket(packet: Uint8Array) {
+    if (packet.length === 4) {
+      const code = new DataView(packet.buffer, packet.byteOffset, 4).getInt32(0, true)
+      throw new Error(`Telegram transport error (${code}, auth_key_id=${this.keyIdValue})`)
+    }
     const plaintext = await decryptMtprotoMessage(this.authKey, this.keyId, packet)
     const reader = new TlReader(plaintext)
     reader.long()
@@ -606,21 +609,6 @@ export class TelegramMtprotoClient {
     return reader.bytes()
   }
 
-  private parseBindResult(reader: TlReader) {
-    const constructor = reader.uint()
-    if (constructor === CONSTRUCTOR.rpcError) {
-      const code = reader.int()
-      const message = reader.string()
-      throw new Error(`Telegram video authorization failed: ${message} (${code})`)
-    }
-    if (constructor !== 0x997275b5) {
-      throw new Error(
-        `Telegram returned an unexpected authorization response (0x${constructor.toString(16)})`,
-      )
-    }
-    return new Uint8Array()
-  }
-
   private retryPending(messageId: bigint, message: string) {
     this.rejectPending(messageId, new RetryRequestError(message))
   }
@@ -643,5 +631,7 @@ export class TelegramMtprotoClient {
     this.rejectAll(new Error('Telegram media connection was closed'))
     this.socket.close()
     this.authKey.fill(0)
+    this.keyId.fill(0)
+    this.keyIdValue = 0n
   }
 }

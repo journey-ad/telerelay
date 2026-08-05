@@ -284,21 +284,6 @@ class TelegramTextMessageRequest(StrictModel):
         return value
 
 
-class TelegramVideoTicketBindRequest(StrictModel):
-    session_id: int | str
-
-    @field_validator("session_id")
-    @classmethod
-    def validate_session_id(cls, value: int | str) -> int:
-        try:
-            value = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Session ID must be a Telegram long") from exc
-        if value < -(1 << 63) or value >= (1 << 63):
-            raise ValueError("Session ID must fit in a Telegram long")
-        return value
-
-
 class TelegramChatResponse(StrictModel):
     id: int
     title: str

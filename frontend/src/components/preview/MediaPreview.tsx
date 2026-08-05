@@ -244,7 +244,7 @@ export function MediaPreview({
       <>
         <div
           className={cn(
-            'group relative w-full overflow-hidden rounded-[5px] bg-slate-100',
+            'group relative min-w-0 max-w-full overflow-hidden rounded-[5px] bg-slate-100',
             compact && 'size-full min-h-0 rounded-none',
             isVideo ? 'cursor-pointer' : canPreview && 'cursor-zoom-in',
           )}

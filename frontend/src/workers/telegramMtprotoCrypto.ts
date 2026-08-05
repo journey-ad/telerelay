@@ -98,12 +98,18 @@ export async function decryptMtprotoMessage(
   expectedKeyId: Uint8Array,
   packet: Uint8Array,
 ): Promise<Uint8Array> {
-  if (packet.length < 40 || (packet.length - 24) % 16 !== 0) throw new Error('Invalid MTProto packet')
-  if (!equalBytes(packet.slice(0, 8), expectedKeyId)) throw new Error('Telegram returned an invalid auth key')
+  if (packet.length < 40 || (packet.length - 24) % 16 !== 0) {
+    throw new Error(`Invalid MTProto packet (${packet.length} bytes)`)
+  }
+  if (!equalBytes(packet.slice(0, 8), expectedKeyId))
+    throw new Error('Telegram returned an invalid auth key')
   const messageKey = packet.slice(8, 24)
   const { key, iv } = await deriveAesKeyIv(authKey, messageKey, true)
   const plaintext = aesIgeDecrypt(packet.slice(24), key, iv)
-  const expectedMessageKey = (await digest('SHA-256', concatBytes(authKey.slice(96, 128), plaintext))).slice(8, 24)
-  if (!equalBytes(messageKey, expectedMessageKey)) throw new Error('Telegram message integrity check failed')
+  const expectedMessageKey = (
+    await digest('SHA-256', concatBytes(authKey.slice(96, 128), plaintext))
+  ).slice(8, 24)
+  if (!equalBytes(messageKey, expectedMessageKey))
+    throw new Error('Telegram message integrity check failed')
   return plaintext
 }

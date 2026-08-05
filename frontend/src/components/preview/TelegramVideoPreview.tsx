@@ -179,18 +179,24 @@ export function TelegramVideoPreview({
     const startTimer = window.setTimeout(() => {
       if (controller.signal.aborted) return
       void (async () => {
+        let ticket: TelegramVideoTicket | null = null
         try {
-          const ticket = await accountRequest<TelegramVideoTicket>(
+          ticket = await accountRequest<TelegramVideoTicket>(
             accountId,
             `/api/v1/telegram-preview/chats/${message.chat_id}/messages/${message.id}/video-ticket`,
             { method: 'POST', signal: controller.signal },
           )
-          const nextSession = await openTelegramMediaSession(ticket, accountId, authorization())
+          const nextSession = await openTelegramMediaSession(ticket)
           sessionRef.current = nextSession
           if (!controller.signal.aborted) setSession(nextSession)
           else nextSession.close()
         } catch (error) {
-          console.error('Telegram video preview failed', error)
+          const detail = error instanceof Error ? error.message : String(error)
+          console.error(
+            `Telegram video preview failed ` +
+              `(chat=${message.chat_id}, message=${message.id}, dc=${ticket?.dc_id ?? 'unknown'}, ` +
+              `endpoint=${ticket ? `kws${ticket.dc_id}-1.web.telegram.org` : 'unknown'}): ${detail}`,
+          )
           if (!controller.signal.aborted) setError(true)
         }
       })()
@@ -375,7 +381,9 @@ export function TelegramVideoPreview({
 
   const closePlayer = () => {
     videoRef.current?.pause()
-    if (document.fullscreenElement === playerRef.current) void document.exitFullscreen()
+    if (document.fullscreenElement === playerRef.current) {
+      void document.exitFullscreen().catch(() => undefined)
+    }
     onClose()
   }
 

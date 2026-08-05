@@ -40,7 +40,6 @@ from backend.schemas import (
     TelegramAccountUpdate,
     TelegramChatResponse,
     TelegramTextMessageRequest,
-    TelegramVideoTicketBindRequest,
     TogglePayload,
     config_json_schema,
     config_validation_message,
@@ -219,10 +218,6 @@ def _preview_error(exc: TelegramPreviewError) -> HTTPException:
         "video_dc_unsupported": 409,
         "telegram_api_credentials_missing": 503,
         "video_ticket_failed": 502,
-        "video_ticket_invalid": 403,
-        "video_ticket_expired": 410,
-        "video_ticket_used": 409,
-        "video_bind_failed": 502,
     }.get(exc.code, 409)
     return _error(exc.code, str(exc), status)
 
@@ -401,30 +396,18 @@ async def telegram_preview_message(
 async def telegram_preview_video_ticket(
     chat_id: int,
     message_id: int,
+    response: Response,
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        return await _telegram_media(context).issue_video_ticket(
+        ticket = await _telegram_media(context).issue_video_ticket(
             account_id=_selected_account_id(context),
             chat_id=chat_id,
             message_id=message_id,
         )
-    except TelegramPreviewError as exc:
-        raise _preview_error(exc) from exc
-
-
-@router.post("/telegram-preview/video-tickets/{ticket}/bind")
-async def telegram_preview_bind_video_ticket(
-    ticket: str,
-    payload: TelegramVideoTicketBindRequest,
-    context: ApplicationContext = Depends(get_context),
-) -> dict:
-    try:
-        return await _telegram_media(context).bind_video_ticket(
-            account_id=_selected_account_id(context),
-            ticket_id=ticket,
-            session_id=payload.session_id,
-        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        return ticket
     except TelegramPreviewError as exc:
         raise _preview_error(exc) from exc
 

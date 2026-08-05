@@ -1,18 +1,16 @@
 /// <reference lib="webworker" />
 
-import {
-  TelegramMtprotoClient,
-  randomSessionId,
-  type BindTempAuthKeyProof,
-} from './telegramMtprotoClient'
+import { TelegramMtprotoClient, randomSessionId } from './telegramMtprotoClient'
 
 type Ticket = {
   ticket: string
   api_id: number
+  api_layer: number
   dc_id: number
   auth_key: string
+  auth_key_id: string
   server_salt: string
-  expires_at: number
+  time_offset: number
   mime_type?: string
   file: {
     id: string
@@ -26,8 +24,6 @@ type Ticket = {
 type InitMessage = {
   type: 'init'
   ticket: Ticket
-  accountId: string
-  authorization?: string
 }
 
 type ReadMessage = {
@@ -76,17 +72,17 @@ let maxLatency = 0
 let errors = 0
 let lastError = ''
 
-function decodeBase64Url(value: string): Uint8Array {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
-  const binary = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='))
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
-}
-
 function postError(id: number | null, error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   errors += 1
   lastError = message
   scope.postMessage({ type: 'error', id, message })
+}
+
+function decodeBase64Url(value: string): Uint8Array {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const binary = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='))
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
 function totalSize() {
@@ -191,41 +187,32 @@ function preloadChunks(from: number) {
   })().catch(() => {})
 }
 
-async function bindTemporaryKey(value: InitMessage, sessionId: bigint) {
-  const headers = new Headers({
-    'Content-Type': 'application/json',
-    'X-TeleRelay-Account-ID': value.accountId,
-  })
-  if (value.authorization) headers.set('Authorization', value.authorization)
-  const response = await fetch(
-    `/api/v1/telegram-preview/video-tickets/${encodeURIComponent(value.ticket.ticket)}/bind`,
-    {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ session_id: sessionId.toString() }),
-    },
-  )
-  if (!response.ok) throw new Error(`Video authorization failed (${response.status})`)
-  return response.json() as Promise<BindTempAuthKeyProof>
-}
-
 async function initialize(value: InitMessage) {
   if (active) return
   active = true
   ticket = value.ticket
   const sessionId = randomSessionId()
+  let stage = 'connect-dc'
   try {
-    const proof = await bindTemporaryKey(value, sessionId)
+    const authKey = decodeBase64Url(ticket.auth_key)
+    const expectedAuthKeyId = BigInt(ticket.auth_key_id)
+    const serverSalt = BigInt(ticket.server_salt)
+    ticket.auth_key = ''
+    ticket.auth_key_id = ''
+    ticket.server_salt = '0'
     client = new TelegramMtprotoClient({
       apiId: ticket.api_id,
+      apiLayer: ticket.api_layer,
       dcId: ticket.dc_id,
-      authKey: decodeBase64Url(ticket.auth_key),
-      serverSalt: BigInt(ticket.server_salt),
+      authKey,
+      expectedAuthKeyId,
+      serverSalt,
       sessionId,
+      timeOffset: ticket.time_offset,
     })
     await client.connect()
-    await client.bindTemporaryKey(proof)
     connectedAt = performance.now()
+    stage = 'read-initial-chunk'
     initialChunk = await client.getFile(ticket.file, 0, 4096)
     if (!initialChunk.length) throw new Error('Telegram returned an empty video file')
     if (
@@ -242,7 +229,8 @@ async function initialize(value: InitMessage) {
     client?.close()
     client = null
     ticket = null
-    postError(null, error)
+    const message = error instanceof Error ? error.message : String(error)
+    postError(null, new Error(`${message} [${stage}, dc ${value.ticket.dc_id}]`))
   }
 }
 

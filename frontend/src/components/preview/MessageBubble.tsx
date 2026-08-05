@@ -212,7 +212,7 @@ export function MessageBubble({
             )
           ) : null}
           {otherMediaItems.length ? (
-            <div className="mb-1.5 grid max-w-full gap-1">
+            <div className="mb-1.5 grid min-w-0 max-w-full gap-1">
               {otherMediaItems.map((item) => (
                 <MediaPreview
                   key={item.id}

@@ -188,8 +188,6 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
 
 export async function openTelegramMediaSession(
   ticket: TelegramVideoTicket,
-  accountId: string,
-  authorization: string | undefined,
 ): Promise<TelegramMediaSession> {
   await ensureServiceWorker()
   const worker = new Worker(new URL('../workers/telegramMediaWorker.ts', import.meta.url), {
@@ -236,17 +234,24 @@ export async function openTelegramMediaSession(
   }
   worker.addEventListener('message', onMessage)
   worker.addEventListener('error', onWorkerError)
-  worker.postMessage({ type: 'init', ticket, accountId, authorization })
+  const token = ticket.ticket
+  const declaredSize = ticket.size ?? ticket.file.size ?? null
+  const mimeType = ticket.mime_type || 'video/mp4'
+  const dcId = ticket.dc_id
+  worker.postMessage({ type: 'init', ticket })
+  ticket.auth_key = ''
+  ticket.auth_key_id = ''
+  ticket.server_salt = '0'
   let size: number | null
   try {
-    size = (await waitForWorkerReady(ready)) ?? ticket.size ?? ticket.file.size ?? null
+    size = (await waitForWorkerReady(ready)) ?? declaredSize
   } catch (error) {
     worker.terminate()
     throw error
   }
 
   const close = () => {
-    sessions.delete(ticket.ticket)
+    sessions.delete(token)
     for (const waiter of waiters.values()) waiter.reject(new Error('Video session was closed'))
     waiters.clear()
     for (const waiter of statsWaiters.values()) waiter.reject(new Error('Video session was closed'))
@@ -255,12 +260,12 @@ export async function openTelegramMediaSession(
     worker.terminate()
   }
   const session: TelegramMediaSession = {
-    token: ticket.ticket,
-    url: `/telegram-media/${encodeURIComponent(ticket.ticket)}`,
-    mimeType: ticket.mime_type || 'video/mp4',
+    token,
+    url: `/telegram-media/${encodeURIComponent(token)}`,
+    mimeType,
     size,
-    dcId: ticket.dc_id,
-    endpoint: `kws${ticket.dc_id}-1.web.telegram.org`,
+    dcId,
+    endpoint: `kws${dcId}-1.web.telegram.org`,
     read(offset, limit, purpose = 'playback') {
       const id = nextRequestId++
       return new Promise<Uint8Array>((resolve, reject) => {
