@@ -478,6 +478,10 @@ export function ImageViewer({
           className="fixed inset-0 z-81 overflow-hidden outline-none"
           aria-label={t('telegramPreview.imagePreview')}
           onClick={onClose}
+          // Radix restores focus to the opening image button on close, which
+          // makes the browser scroll the message list to keep it visible.
+          // Prevent that: the list position is restored explicitly by the page.
+          onCloseAutoFocus={(event) => event.preventDefault()}
         >
           <DialogPrimitive.Close asChild>
             <button

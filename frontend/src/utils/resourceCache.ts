@@ -179,7 +179,78 @@ export async function getMediaCacheStats(): Promise<{ count: number; bytes: numb
   })
 }
 
-/** Clear every cached media blob (future cache-management UI). */
-export async function clearMediaCache(): Promise<void> {
-  await withStore('readwrite', (store) => store.clear())
+/** Cacheable media kinds, derived from the deterministic cache key prefix. */
+export type MediaCacheType = 'avatar' | 'message-thumb' | 'message-full'
+
+export interface MediaCacheTypeStats {
+  type: MediaCacheType
+  count: number
+  bytes: number
+}
+
+export const MEDIA_CACHE_TYPES: MediaCacheType[] = ['avatar', 'message-thumb', 'message-full']
+
+function cacheTypeOf(key: IDBValidKey): MediaCacheType | null {
+  const value = String(key)
+  // Keys look like `<accountId>:msg:<chatId>:<messageId>:t|f` or
+  // `<accountId>:avatar:<peerId>` (see resourceCacheKey in utils/resource.ts).
+  if (value.includes(':avatar:')) return 'avatar'
+  if (value.includes(':msg:')) return value.endsWith(':t') ? 'message-thumb' : 'message-full'
+  return null
+}
+
+/** Per-type occupancy, used by the cache-management UI's percentage chart. */
+export async function getMediaCacheTypeStats(): Promise<MediaCacheTypeStats[]> {
+  const db = await openDatabase()
+  const byType = new Map<MediaCacheType, { count: number; bytes: number }>()
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readonly')
+    const request = transaction.objectStore(STORE_NAME).openCursor()
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (cursor) {
+        const type = cacheTypeOf(cursor.key)
+        if (type) {
+          const entry = byType.get(type) ?? { count: 0, bytes: 0 }
+          entry.count += 1
+          entry.bytes += (cursor.value as CachedResource).size
+          byType.set(type, entry)
+        }
+        cursor.continue()
+      } else {
+        resolve()
+      }
+    }
+    request.onerror = () => reject(request.error ?? new Error('Media cache scan failed'))
+  })
+  return MEDIA_CACHE_TYPES.filter((type) => byType.has(type)).map((type) => {
+    const { count, bytes } = byType.get(type) as { count: number; bytes: number }
+    return { type, count, bytes }
+  })
+}
+
+/**
+ * Clear cached media blobs, optionally only those of one type. Clearing by
+ * type walks the store and deletes matching keys so other types stay warm.
+ */
+export async function clearMediaCache(type?: MediaCacheType): Promise<void> {
+  if (!type) {
+    await withStore('readwrite', (store) => store.clear())
+    return
+  }
+  const db = await openDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite')
+    const store = transaction.objectStore(STORE_NAME)
+    const request = store.openCursor()
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (cursor) {
+        if (cacheTypeOf(cursor.key) === type) cursor.delete()
+        cursor.continue()
+      }
+    }
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error ?? new Error('Media cache clear failed'))
+  })
 }

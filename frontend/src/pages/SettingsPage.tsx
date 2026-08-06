@@ -1,9 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  Activity,
   Braces,
+  CheckCircle2,
+  CircleDashed,
+  Database,
   Download,
   ExternalLink,
   Github,
+  HardDrive,
   Info,
   KeyRound,
   RefreshCw,
@@ -18,6 +23,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { accountRequest, json, request } from '../api/client'
 import { downloadFile } from '../api/downloads'
+import { getTelegramResourceStatus } from '../api/telegramResource'
 import { useAccountScope } from '../hooks/useAccountScope'
 import {
   Badge,
@@ -38,6 +44,34 @@ import { ConfigJsonEditor, ConfigTreeForm } from '../components/ConfigTreeForm'
 import type { AppConfig, MetaInfo, TelegramAccount, TelegramAuth, UpdateInfo } from '../types'
 import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
+import {
+  clearMediaCache,
+  getMediaCacheTypeStats,
+  RESOURCE_CACHE_LIMIT_BYTES,
+  type MediaCacheType,
+} from '../utils/resourceCache'
+
+const CACHE_TYPE_STYLES = {
+  avatar: { bar: 'bg-blue-500', dot: 'bg-blue-500', labelKey: 'settings.cacheTypeAvatar' },
+  'message-thumb': {
+    bar: 'bg-amber-400',
+    dot: 'bg-amber-400',
+    labelKey: 'settings.cacheTypeMessageThumb',
+  },
+  'message-full': {
+    bar: 'bg-violet-500',
+    dot: 'bg-violet-500',
+    labelKey: 'settings.cacheTypeMessageFull',
+  },
+} as const satisfies Record<MediaCacheType, { bar: string; dot: string; labelKey: string }>
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+  const value = bytes / 1024 ** index
+  return `${index === 0 || value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`
+}
 
 export function SettingsPage() {
   const { t } = useTranslation()
@@ -96,6 +130,36 @@ export function SettingsPage() {
   const checkUpdate = useMutation({
     mutationFn: () => request<UpdateInfo>('/api/v1/update-check'),
   })
+  const mediaCache = useQuery({
+    queryKey: ['media-cache'],
+    queryFn: getMediaCacheTypeStats,
+  })
+  const clearCache = useMutation({
+    mutationFn: (type?: MediaCacheType) => clearMediaCache(type),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['media-cache'] }),
+  })
+  async function handleClearCache(type?: MediaCacheType) {
+    if (type) {
+      clearCache.mutate(type)
+      return
+    }
+    await confirm({
+      title: t('settings.cacheClearAllTitle'),
+      description: t('settings.cacheClearAllConfirm'),
+      confirmLabel: t('settings.cacheClearAll'),
+      onConfirm: () => clearCache.mutateAsync(undefined),
+    })
+  }
+  const resourceStatus = useQuery({
+    queryKey: ['telegram-resource-status'],
+    queryFn: getTelegramResourceStatus,
+    refetchInterval: 2000,
+  })
+  const cacheTotalBytes = mediaCache.data?.reduce((sum, entry) => sum + entry.bytes, 0) ?? 0
+  const cacheUsagePercent = Math.min(
+    100,
+    Math.round((cacheTotalBytes / RESOURCE_CACHE_LIMIT_BYTES) * 1000) / 10,
+  )
   useEffect(() => {
     if (config.data && typeof config.data.config === 'object' && config.data.config !== null) {
       const serialized = `${accountId}:${JSON.stringify(config.data.config)}`
@@ -578,6 +642,213 @@ export function SettingsPage() {
               ) : null}
             </div>
           </Panel>
+          <div className="mt-3 grid grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)] gap-3 max-lg:grid-cols-1">
+            <Panel
+              title={t('settings.cacheInfo')}
+              meta={<span className="text-xs text-slate-400">{t('settings.cacheInfoDetail')}</span>}
+            >
+              <div className="flex items-end justify-between gap-4 rounded-[5px] border border-slate-100 bg-slate-50 p-3.5 max-sm:items-start max-sm:flex-col">
+                <div className="flex items-center gap-3">
+                  <span
+                    className={cn(
+                      'grid size-10 shrink-0 place-items-center rounded-[5px] border',
+                      'border-blue-100 bg-white text-blue-600',
+                    )}
+                  >
+                    <HardDrive size={19} />
+                  </span>
+                  <div className="min-w-0">
+                    <strong className="block text-[13px] text-slate-700">
+                      {t('settings.cacheInfo')}
+                    </strong>
+                    <p className="mt-1 text-xs leading-4 text-slate-500">
+                      {t('settings.cacheTotal', { bytes: formatBytes(cacheTotalBytes) })}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right max-sm:text-left">
+                  <strong className="font-display text-lg font-bold tabular-nums text-slate-800">
+                    {cacheUsagePercent}%
+                  </strong>
+                  <p className="mt-0.5 text-[11px] text-slate-400">
+                    {t('settings.cacheLimit', { bytes: formatBytes(RESOURCE_CACHE_LIMIT_BYTES) })}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>{t('settings.cacheUsage')}</span>
+                  <span className="tabular-nums">{cacheUsagePercent}%</span>
+                </div>
+                <div
+                  className="h-2 overflow-hidden rounded-full bg-slate-100"
+                  role="img"
+                  aria-label={t('settings.cacheDistribution')}
+                >
+                  <div
+                    className="h-full rounded-full bg-blue-500 transition-[width] duration-500"
+                    style={{
+                      width: `${Math.max(cacheUsagePercent, cacheTotalBytes > 0 ? 0.5 : 0)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              {mediaCache.data && mediaCache.data.length > 0 ? (
+                <>
+                  <ul className="mt-4 divide-y divide-slate-100 rounded-[5px] border border-slate-100">
+                    {mediaCache.data.map((entry) => {
+                      const percent =
+                        cacheTotalBytes > 0 ? Math.round((entry.bytes / cacheTotalBytes) * 100) : 0
+                      return (
+                        <li
+                          key={entry.type}
+                          className="flex items-center justify-between gap-3 px-3 py-2.5 max-sm:items-start"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span
+                                className={cn(
+                                  'size-2 shrink-0 rounded-full',
+                                  CACHE_TYPE_STYLES[entry.type].dot,
+                                )}
+                              />
+                              <span className="truncate text-[13px] font-semibold text-slate-700">
+                                {t(CACHE_TYPE_STYLES[entry.type].labelKey)}
+                              </span>
+                            </div>
+                            <p className="mt-1 pl-4 text-[11px] text-slate-400">
+                              {t('settings.cacheItems', { count: entry.count })} ·{' '}
+                              {formatBytes(entry.bytes)}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-3">
+                            <span className="w-9 text-right text-xs font-semibold tabular-nums text-slate-500">
+                              {percent}%
+                            </span>
+                            <Button
+                              variant="secondary"
+                              icon={Trash2}
+                              className="min-h-7 px-2.5 text-xs max-sm:hidden"
+                              onClick={() => handleClearCache(entry.type)}
+                              disabled={clearCache.isPending}
+                            >
+                              {t('settings.cacheClear')}
+                            </Button>
+                            <button
+                              type="button"
+                              aria-label={`${t('settings.cacheClear')}: ${t(CACHE_TYPE_STYLES[entry.type].labelKey)}`}
+                              className="hidden size-7 place-items-center rounded-[5px] text-slate-400 hover:bg-rose-50 hover:text-rose-600 max-sm:grid"
+                              onClick={() => handleClearCache(entry.type)}
+                              disabled={clearCache.isPending}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                  <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                    <span className="text-[11px] text-slate-400">
+                      {t('settings.cacheClearHint')}
+                    </span>
+                    <Button
+                      variant="danger"
+                      icon={Trash2}
+                      className="min-h-7 px-2.5 text-xs"
+                      onClick={() => handleClearCache()}
+                      disabled={clearCache.isPending}
+                    >
+                      {t('settings.cacheClearAll')}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <div className="mt-4 flex items-center gap-2 rounded-[5px] border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-400">
+                  <Database size={15} />
+                  {t('settings.cacheEmpty')}
+                </div>
+              )}
+            </Panel>
+            <Panel
+              title={t('settings.technicalInfo')}
+              meta={
+                <span className="text-xs text-slate-400">{t('settings.technicalInfoDetail')}</span>
+              }
+            >
+              <dl className="mt-1">
+                <div
+                  className={cn(
+                    'flex items-baseline justify-between gap-4 border-b border-slate-50 py-2',
+                  )}
+                >
+                  <dt className="shrink-0 text-xs text-slate-500">{t('settings.techVersion')}</dt>
+                  <dd className="text-right text-[13px] text-slate-700">
+                    {meta.data?.version ?? '-'}
+                    {meta.data?.commit ? ` (${meta.data.commit})` : ''}
+                  </dd>
+                </div>
+                <div className="flex items-baseline justify-between gap-4 border-b border-slate-50 py-2">
+                  <dt className="shrink-0 text-xs text-slate-500">
+                    {t('settings.techApiEndpoint')}
+                  </dt>
+                  <dd className="max-w-[65%] truncate text-right font-mono text-xs text-slate-600">
+                    {location.origin}
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-2 border-t border-slate-100 pt-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                    <Activity size={14} />
+                    {t('settings.techPools')}
+                  </div>
+                  <span className="text-right text-[11px] text-slate-400">
+                    {t('settings.techPoolSummary', {
+                      pools: resourceStatus.data?.pools.length ?? 0,
+                      sessions: resourceStatus.data?.totalSessions ?? 0,
+                    })}
+                  </span>
+                </div>
+                {resourceStatus.data && resourceStatus.data.pools.length > 0 ? (
+                  <div className="mt-1 space-y-1">
+                    {resourceStatus.data.pools.map((pooled) => (
+                      <div
+                        key={pooled.dcId}
+                        className="flex items-center justify-between gap-2 rounded-[5px] bg-slate-50 px-2.5 py-2 text-[12px]"
+                      >
+                        <span className="text-slate-600">
+                          {t('settings.techPoolEntry', {
+                            dc: pooled.dcId,
+                            sessions: pooled.sessions,
+                          })}
+                        </span>
+                        <span
+                          className={cn(
+                            'flex items-center gap-1 text-xs',
+                            pooled.connected ? 'text-emerald-600' : 'text-slate-400',
+                          )}
+                        >
+                          {pooled.connected ? (
+                            <CheckCircle2 size={13} />
+                          ) : (
+                            <CircleDashed size={13} />
+                          )}
+                          {t(
+                            pooled.connected
+                              ? 'settings.techPoolConnected'
+                              : 'settings.techPoolDisconnected',
+                          )}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400">{t('settings.techEmpty')}</p>
+                )}
+              </div>
+            </Panel>
+          </div>
         </TabsContent>
       </Tabs>
       <Dialog

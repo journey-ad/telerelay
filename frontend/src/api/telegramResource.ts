@@ -234,8 +234,25 @@ export function clearDcCredentialsCache(): void {
   dcCredentialsInflight.clear()
 }
 
+/** Snapshot of the live media connection pool (for the technical-info panel). */
+export function getTelegramResourceStatus(): {
+  totalSessions: number
+  pools: Array<{ dcId: number; connected: boolean; sessions: number }>
+} {
+  const pools = [...pool.values()].map((pooled) => ({
+    dcId: pooled.dcId,
+    connected: pooled.connected,
+    sessions: pooled.sessions.size,
+  }))
+  return {
+    totalSessions: pools.reduce((sum, pooled) => sum + pooled.sessions, 0),
+    pools,
+  }
+}
+
 type PooledWorker = {
   poolKey: string
+  dcId: number
   worker: Worker
   sessions: Map<string, TelegramResourceSession>
   readWaiters: Map<
@@ -314,12 +331,13 @@ function dispatch(pooled: PooledWorker, event: MessageEvent<WorkerMessage>) {
   }
 }
 
-function createPooledWorker(poolKey: string): PooledWorker {
+function createPooledWorker(poolKey: string, dcId: number): PooledWorker {
   const worker = new Worker(new URL('../workers/telegramResourceWorker.ts', import.meta.url), {
     type: 'module',
   })
   const pooled: PooledWorker = {
     poolKey,
+    dcId,
     worker,
     sessions: new Map(),
     readWaiters: new Map(),
@@ -403,7 +421,7 @@ export async function openTelegramResourceSession(
   const poolKey = `${ticket.dc_id}:${ticket.auth_key_id}`
   let pooled = pool.get(poolKey)
   if (!pooled) {
-    pooled = createPooledWorker(poolKey)
+    pooled = createPooledWorker(poolKey, ticket.dc_id)
     pool.set(poolKey, pooled)
   }
   clearIdleClose(poolKey)

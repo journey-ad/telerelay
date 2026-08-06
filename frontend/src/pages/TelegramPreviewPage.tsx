@@ -118,6 +118,8 @@ export function TelegramPreviewPage() {
   const stickToBottom = useRef(true)
   const suppressAutoLoadRef = useRef(false)
   const replyRequestId = useRef(0)
+  /** Scroll snapshot taken when the image viewer opens, restored on close. */
+  const viewerScrollSnapshot = useRef<{ scrollHeight: number } | null>(null)
 
   const accounts = useQuery({
     queryKey: ['telegram-accounts'],
@@ -388,13 +390,36 @@ export function TelegramPreviewPage() {
   useLayoutEffect(() => {
     const viewport = viewportRef.current
     if (!viewport) return
+    // While the image viewer is open the message list must stay frozen: no
+    // auto-stick-to-bottom, no pagination compensation. Closing the viewer
+    // restores the position from the snapshot taken on open, so the list never
+    // jumps under the overlay.
+    if (viewerTarget) return
     if (previousScrollHeight.current !== null) {
       viewport.scrollTop += viewport.scrollHeight - previousScrollHeight.current
       previousScrollHeight.current = null
       return
     }
     if (stickToBottom.current) viewport.scrollTop = viewport.scrollHeight
-  }, [newestMessageId, selected?.id, messages.data?.pages.length])
+  }, [newestMessageId, selected?.id, messages.data?.pages.length, viewerTarget])
+
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (viewerTarget) {
+      // Snapshot the list height so closing the viewer can compensate for any
+      // pagination that appended older messages while it was open.
+      viewerScrollSnapshot.current = viewport ? { scrollHeight: viewport.scrollHeight } : null
+      return
+    }
+    const snapshot = viewerScrollSnapshot.current
+    viewerScrollSnapshot.current = null
+    // A stale pagination marker from before the viewer opened must not be
+    // consumed after close: the snapshot compensation below is authoritative.
+    previousScrollHeight.current = null
+    if (snapshot && viewport) {
+      viewport.scrollTop += viewport.scrollHeight - snapshot.scrollHeight
+    }
+  }, [viewerTarget])
 
   useEffect(() => {
     const viewport = dialogsViewportRef.current
@@ -487,16 +512,26 @@ export function TelegramPreviewPage() {
   }
 
   const loadEarlierImages = useCallback(() => {
-    // Same as loadOlder: keep the message list scroll position so pagination
-    // does not jump the viewport content
-    if (viewportRef.current) previousScrollHeight.current = viewportRef.current.scrollHeight
-    void messages.fetchNextPage()
-  }, [messages.fetchNextPage])
+    // While the image viewer is open, pagination is compensated by the scroll
+    // snapshot on close; do not arm the layout-effect marker then, or it would
+    // be consumed (with a stale height) on the close frame.
+    if (viewportRef.current && !viewerTarget) {
+      previousScrollHeight.current = viewportRef.current.scrollHeight
+    }
+    void messages.fetchNextPage().catch(() => {
+      // A failed page must not leave the marker armed for a later frame.
+      previousScrollHeight.current = null
+    })
+  }, [messages.fetchNextPage, viewerTarget])
 
   async function loadOlder() {
     stickToBottom.current = false
     if (viewportRef.current) previousScrollHeight.current = viewportRef.current.scrollHeight
-    await messages.fetchNextPage()
+    try {
+      await messages.fetchNextPage()
+    } catch {
+      previousScrollHeight.current = null
+    }
   }
 
   async function replyClick(id: number) {
