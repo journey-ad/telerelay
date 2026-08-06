@@ -31,14 +31,18 @@ class StatsDBTests(unittest.TestCase):
         rows, total = self.database.query_history(rule_name="规则A")
 
         self.assertEqual(total, 2)
+        # Match rows by content instead of relying on row order: forwarded_at
+        # has millisecond precision, so two records inserted in the same
+        # millisecond would make a position-based assertion flaky.
+        by_content = {row["content"]: row["entities"] for row in rows}
         self.assertEqual(
-            rows[0]["entities"],
+            by_content["看 https://example.com 和 alice@example.com"],
             [
                 {"type": "url", "offset": 2, "length": 18, "url": None},
                 {"type": "email", "offset": 22, "length": 17, "url": None},
             ],
         )
-        self.assertIsNone(rows[1]["entities"])
+        self.assertIsNone(by_content["无实体消息"])
 
     def test_all_time_daily_stats_are_not_limited_by_date(self):
         with self.database._get_conn() as connection:

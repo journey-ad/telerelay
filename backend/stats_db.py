@@ -387,7 +387,7 @@ class StatsDB:
                     f"sender_id, sender_name, sender_first_name, sender_last_name, sender_username, "
                     f"content, media_type, entities_json, forwarded_at "
                     f"FROM forwarded_messages{where_sql} "
-                    f"ORDER BY forwarded_at DESC LIMIT ? OFFSET ?",
+                    f"ORDER BY forwarded_at DESC, id DESC LIMIT ? OFFSET ?",
                     params + [limit, offset]
                 )
 
