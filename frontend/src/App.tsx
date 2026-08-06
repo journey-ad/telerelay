@@ -4,11 +4,15 @@ import { createHashRouter, RouterProvider } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { request } from './api/client'
 import { clearCredentials } from './api/credentials'
+import { clearDcCredentialsCache, closeAllTelegramResourceSessions } from './api/telegramResource'
 import { AppShell } from './components/AppShell'
 import { Brand } from './components/Brand'
+import { clearAuthenticatedImages } from './components/AuthenticatedImage'
 import { Login } from './components/Login'
 import type { SessionInfo } from './types'
 import { cn } from './utils/cn'
+import { resetResourceState } from './utils/resource'
+import { clearMediaCache } from './utils/resourceCache'
 
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((module) => ({ default: module.DashboardPage })),
@@ -101,6 +105,16 @@ export default function App() {
 
   function logout() {
     clearCredentials()
+    // Tear down the media runtime so the next account starts clean: close every
+    // live DC session (releases worker + WebSocket + in-memory auth key),
+    // forget in-memory download state, revoke image blob URLs, and empty the
+    // IndexedDB media cache (cached blobs are keyed per account but must not
+    // outlive sign-out).
+    closeAllTelegramResourceSessions()
+    clearDcCredentialsCache()
+    resetResourceState()
+    clearAuthenticatedImages()
+    void clearMediaCache().catch(() => undefined)
     setSession(null)
     queryClient.clear()
   }

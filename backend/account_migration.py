@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -76,10 +75,7 @@ class AccountMigration:
                 id_map[legacy_id] = target_id
                 changed = True
             elif account.get("telegram_user_id") is not None:
-                self._migrate_preview_cache(
-                    legacy_id,
-                    self.paths.for_account(target_id),
-                )
+                pass
             normalized_accounts.append(account)
 
         active_id = str(payload.get("active_account_id") or "")
@@ -183,7 +179,6 @@ class AccountMigration:
             self.paths.data_dir / "telegram_avatars" / "default.jpg",
             target.avatar,
         )
-        self._migrate_preview_cache(self.LEGACY_DEFAULT_ID, target)
 
     def _migrate_named_account(self, legacy_id: str, target: AccountPaths) -> None:
         config_candidates = (
@@ -213,23 +208,6 @@ class AccountMigration:
             self.paths.data_dir / "telegram_avatars" / f"{legacy_id}.jpg",
             target.avatar,
         )
-        self._migrate_preview_cache(legacy_id, target)
-
-    def _migrate_preview_cache(self, legacy_id: str, target: AccountPaths) -> None:
-        legacy_root = self.paths.data_dir / "telegram_preview_cache"
-        digest = hashlib.sha256(legacy_id.encode("utf-8")).hexdigest()[:20]
-        source = legacy_root / digest
-        if not source.is_dir():
-            return
-        source_key = self.paths.data_dir / ".telegram_preview_cache.key"
-        target_key = target.data_dir / ".telegram_preview_cache.key"
-        if not source_key.is_file() or (
-            target_key.exists() and target_key.read_bytes() != source_key.read_bytes()
-        ):
-            shutil.rmtree(source, ignore_errors=True)
-            return
-        self._copy_file(source_key, target_key)
-        self._merge_directory(source, target.data_dir / "telegram_preview_cache")
 
     def _cleanup_legacy_preview_cache(self) -> None:
         legacy_root = self.paths.data_dir / "telegram_preview_cache"

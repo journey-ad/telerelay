@@ -8,7 +8,7 @@ export interface MessageGroup {
   items: TelegramPreviewMessage[]
 }
 
-/** 按消息维度分组的视觉媒体（同一相册消息归一组） */
+/** Visual media grouped per message (same-album messages share one group) */
 export interface ImageGroup {
   message: TelegramPreviewMessage
   items: TelegramPreviewMessage[]
@@ -68,19 +68,6 @@ export function mediaDuration(value?: number | null): string {
   return (parts[0] ? parts : parts.slice(1))
     .map((part, index) => (index === 0 ? String(part) : String(part).padStart(2, '0')))
     .join(':')
-}
-
-export function peerAvatarPath(peerId?: number | null): string | null {
-  if (!peerId) return null
-  return `/api/v1/telegram-preview/peers/${peerId}/avatar`
-}
-
-export function thumbnailPath(chatId: number, messageId: number): string {
-  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/thumbnail`
-}
-
-export function visualMediaPath(chatId: number, messageId: number): string {
-  return `/api/v1/telegram-preview/chats/${chatId}/messages/${messageId}/visual-media`
 }
 
 export function isPreviewableMedia(media: NonNullable<TelegramPreviewMessage['media']>): boolean {

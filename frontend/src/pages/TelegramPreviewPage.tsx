@@ -487,7 +487,8 @@ export function TelegramPreviewPage() {
   }
 
   const loadEarlierImages = useCallback(() => {
-    // 与 loadOlder 一致：保留消息列表当前滚动位置，避免分页后视口内容跳动
+    // Same as loadOlder: keep the message list scroll position so pagination
+    // does not jump the viewport content
     if (viewportRef.current) previousScrollHeight.current = viewportRef.current.scrollHeight
     void messages.fetchNextPage()
   }, [messages.fetchNextPage])

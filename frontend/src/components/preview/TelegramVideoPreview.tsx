@@ -15,17 +15,14 @@ import {
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { ACCOUNT_ID_HEADER, accountRequest } from '../../api/client'
-import { authorization } from '../../api/credentials'
-import {
-  openTelegramMediaSession,
-  type TelegramMediaSession,
-  type TelegramMediaStats,
-} from '../../api/telegramMedia'
-import type { TelegramPreviewMessage, TelegramVideoTicket } from '../../types'
+import type { TelegramResourceStats } from '../../api/telegramResource'
+import { useTelegramResourceSession } from '../../hooks/useTelegramResourceSession'
+import type { TelegramPreviewMessage } from '../../types'
 import { cn } from '../../utils/cn'
+import { pauseActiveAudio } from '../../utils/audioPlayback'
+import { loadDirectResourceBlob, messageResourceRef } from '../../utils/resource'
 import { readMp4TechnicalInfo, type Mp4TechnicalInfo } from '../../utils/mp4TechnicalInfo'
-import { mediaDuration, thumbnailPath } from '../../utils/preview'
+import { mediaDuration } from '../../utils/preview'
 import { TelegramVideoStats, type VideoPlaybackStats } from './TelegramVideoStats'
 
 const controlButton =
@@ -105,10 +102,12 @@ export function TelegramVideoPreview({
 }) {
   const media = message.media
   const { t } = useTranslation()
-  const [error, setError] = useState(false)
-  const [session, setSession] = useState<TelegramMediaSession | null>(null)
-  const [attempt, setAttempt] = useState(0)
-  const sessionRef = useRef<TelegramMediaSession | null>(null)
+  const [playbackError, setPlaybackError] = useState(false)
+  const { session, error, retry, close } = useTelegramResourceSession({
+    accountId,
+    chatId: message.chat_id,
+    messageId: message.id,
+  })
   const playerRef = useRef<HTMLDivElement | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const previousVolumeRef = useRef(pageVideoVolume || 0.8)
@@ -129,7 +128,7 @@ export function TelegramVideoPreview({
   const [controlsVisible, setControlsVisible] = useState(true)
   const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(null)
   const [statsVisible, setStatsVisible] = useState(false)
-  const [transportStats, setTransportStats] = useState<TelegramMediaStats | null>(null)
+  const [transportStats, setTransportStats] = useState<TelegramResourceStats | null>(null)
   const [videoStats, setVideoStats] = useState<VideoPlaybackStats | null>(null)
   const [technicalInfo, setTechnicalInfo] = useState<Mp4TechnicalInfo | null>(null)
   const [statsCopied, setStatsCopied] = useState(false)
@@ -137,22 +136,18 @@ export function TelegramVideoPreview({
   useEffect(() => {
     const controller = new AbortController()
     let objectUrl: string | null = null
-    const headers = new Headers({ [ACCOUNT_ID_HEADER]: accountId })
-    const auth = authorization()
-    if (auth) headers.set('Authorization', auth)
-    void fetch(thumbnailPath(message.chat_id, message.id), {
-      headers,
-      signal: controller.signal,
-      cache: 'no-store',
-    })
-      .then(async (response) => {
-        if (!response.ok) return null
-        return response.blob()
-      })
+    void loadDirectResourceBlob(accountId, messageResourceRef(message.chat_id, message.id, true))
       .then((blob) => {
-        if (!blob || controller.signal.aborted) return
-        objectUrl = URL.createObjectURL(blob)
-        setPosterUrl(objectUrl)
+        if (controller.signal.aborted) return
+        if (blob) {
+          objectUrl = URL.createObjectURL(blob)
+          setPosterUrl(objectUrl)
+          return
+        }
+        // No downloadable thumbnail (the video only has an embedded stripped
+        // image): fall back to the inline data URL carried by the message.
+        const inline = message.media?.inline_thumbnail
+        if (inline) setPosterUrl(inline)
       })
       .catch((posterError) => {
         if (!controller.signal.aborted)
@@ -166,50 +161,6 @@ export function TelegramVideoPreview({
   }, [accountId, message.chat_id, message.id])
 
   useEffect(() => {
-    const controller = new AbortController()
-    sessionRef.current?.close()
-    sessionRef.current = null
-    setSession(null)
-    setError(false)
-    setPlaying(false)
-    setWaiting(true)
-    setDuration(0)
-    setCurrentTime(0)
-    setBuffered(0)
-    const startTimer = window.setTimeout(() => {
-      if (controller.signal.aborted) return
-      void (async () => {
-        let ticket: TelegramVideoTicket | null = null
-        try {
-          ticket = await accountRequest<TelegramVideoTicket>(
-            accountId,
-            `/api/v1/telegram-preview/chats/${message.chat_id}/messages/${message.id}/video-ticket`,
-            { method: 'POST', signal: controller.signal },
-          )
-          const nextSession = await openTelegramMediaSession(ticket)
-          sessionRef.current = nextSession
-          if (!controller.signal.aborted) setSession(nextSession)
-          else nextSession.close()
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : String(error)
-          console.error(
-            `Telegram video preview failed ` +
-              `(chat=${message.chat_id}, message=${message.id}, dc=${ticket?.dc_id ?? 'unknown'}, ` +
-              `endpoint=${ticket ? `kws${ticket.dc_id}-1.web.telegram.org` : 'unknown'}): ${detail}`,
-          )
-          if (!controller.signal.aborted) setError(true)
-        }
-      })()
-    }, 0)
-    return () => {
-      window.clearTimeout(startTimer)
-      controller.abort()
-      sessionRef.current?.close()
-      sessionRef.current = null
-    }
-  }, [accountId, message.chat_id, message.id, media?.size, attempt])
-
-  useEffect(() => {
     if (!session || !videoRef.current) return
     const video = videoRef.current
     if (!open) {
@@ -218,6 +169,7 @@ export function TelegramVideoPreview({
     }
     video.volume = pageVideoVolume
     video.muted = pageVideoMuted
+    pauseActiveAudio()
     let cancelled = false
     const start = async () => {
       try {
@@ -373,10 +325,8 @@ export function TelegramVideoPreview({
   const handleVideoError = () => {
     const video = videoRef.current
     console.error('Telegram video element failed', video?.error ?? 'Unknown media error')
-    sessionRef.current?.close()
-    sessionRef.current = null
-    setSession(null)
-    setError(true)
+    close()
+    setPlaybackError(true)
   }
 
   const closePlayer = () => {
@@ -790,20 +740,23 @@ export function TelegramVideoPreview({
               />
             ) : null}
             <span className="relative z-1 grid place-items-center gap-2 p-4 text-center">
-              {error ? (
+              {error || playbackError ? (
                 <RefreshCw size={22} />
               ) : (
                 <LoaderCircle size={22} className="animate-spin" />
               )}
               <span className="text-xs text-white/85">
-                {error ? t('telegramPreview.videoUnavailable') : t('telegramPreview.videoLoading')}
+                {error || playbackError
+                  ? t('telegramPreview.videoUnavailable')
+                  : t('telegramPreview.videoLoading')}
               </span>
-              {error ? (
+              {error || playbackError ? (
                 <button
                   className="rounded border border-white/30 px-2 py-1 text-xs hover:bg-white/10"
                   type="button"
                   onClick={() => {
-                    setAttempt((value) => value + 1)
+                    setPlaybackError(false)
+                    retry()
                   }}
                 >
                   {t('telegramPreview.retryVideo')}

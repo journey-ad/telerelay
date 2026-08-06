@@ -157,8 +157,35 @@ export interface TelegramPreviewUpdate {
   message_id: number
 }
 
-export interface TelegramVideoTicket {
-  ticket: string
+export type TelegramResourceLocation =
+  | {
+      location_type: 'document'
+      id: string
+      access_hash: string
+      file_reference: string
+      dc_id: number
+      size: number
+      thumb_size: string
+    }
+  | {
+      location_type: 'photo'
+      id: string
+      access_hash: string
+      file_reference: string
+      dc_id: number
+      size: number
+      thumb_size: string
+    }
+  | {
+      location_type: 'peer_photo'
+      peer: { type: 'user' | 'chat' | 'channel'; id: string; access_hash?: string }
+      photo_id: string
+      dc_id: number
+      size: number
+    }
+
+/** Account-level Telegram DC credentials (stable per account + DC; cached). */
+export interface TelegramDcCredentials {
   api_id: number
   api_layer: number
   dc_id: number
@@ -168,16 +195,18 @@ export interface TelegramVideoTicket {
   auth_key_id: string
   server_salt: string
   time_offset: number
-  file: {
-    id: string
-    access_hash: string
-    file_reference: string
-    dc_id: number
-    size: number
-  }
+}
+
+/** File-scoped media reference; DC credentials come from a separate call. */
+export interface TelegramResourceInfo {
+  ticket: string
+  location_type?: 'document' | 'photo' | 'peer_photo'
+  file: TelegramResourceLocation & { size?: number | null }
   mime_type: string
   file_name: string
   size?: number | null
+  /** Stable cache key (e.g. avatar-{peer}-{photo_id}) for browser-side caches */
+  cache_key?: string
 }
 
 export interface ForwardingRule {

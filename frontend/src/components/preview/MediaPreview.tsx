@@ -1,8 +1,8 @@
-import { Download, ExternalLink, File, Image, Play } from 'lucide-react'
+import { Download, ExternalLink, File, Image, LoaderCircle, Pause, Play } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { useState } from 'react'
-import { downloadFile } from '../../api/downloads'
+import { useEffect, useState } from 'react'
 import type { TelegramPreviewMessage } from '../../types'
+import { downloadManager, downloadTaskKey, type DownloadTask } from '../../services/downloadManager'
 import { cn } from '../../utils/cn'
 import { formatNumber } from '../../utils/format'
 import {
@@ -11,10 +11,10 @@ import {
   isPreviewableMedia,
   mediaDuration,
   mediaFrame,
-  thumbnailPath,
-  visualMediaPath,
 } from '../../utils/preview'
+import { messageResourceRef } from '../../utils/resource'
 import { AuthenticatedImage } from '../AuthenticatedImage'
+import { AudioPlayer } from './AudioPlayer'
 import { TelegramVideoPreview } from './TelegramVideoPreview'
 
 function safeWebPageUrl(value?: string | null): string | null {
@@ -25,6 +25,85 @@ function safeWebPageUrl(value?: string | null): string | null {
   } catch {
     return null
   }
+}
+
+function DownloadButton({
+  state,
+  progress,
+  label,
+  iconSize = 14,
+  className,
+  onToggle,
+}: {
+  state: 'idle' | 'requesting' | 'downloading' | 'paused'
+  progress: number
+  label: string
+  iconSize?: number
+  className?: string
+  onToggle: (event: React.MouseEvent<HTMLButtonElement>) => void
+}) {
+  const { t } = useTranslation()
+  const active = state !== 'idle'
+  const circumference = 2 * Math.PI * 7
+  const title =
+    state === 'paused'
+      ? t('telegramPreview.resumeDownload')
+      : state === 'downloading'
+        ? t('telegramPreview.pauseDownload')
+        : label
+  return (
+    <button
+      type="button"
+      className={cn('grid place-items-center', className)}
+      title={title}
+      aria-label={title}
+      onClick={(event) => onToggle(event)}
+    >
+      <span className="relative grid size-full place-items-center">
+        {active ? (
+          <svg
+            viewBox="0 0 18 18"
+            className={cn(
+              'pointer-events-none absolute inset-0 size-full -rotate-90',
+              progress < 0 && 'animate-spin',
+            )}
+          >
+            <circle
+              cx="9"
+              cy="9"
+              r="7"
+              fill="none"
+              strokeWidth="1.6"
+              stroke="currentColor"
+              opacity="0.3"
+            />
+            <circle
+              cx="9"
+              cy="9"
+              r="7"
+              fill="none"
+              strokeWidth="1.6"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={
+                progress >= 0 ? circumference * (1 - progress / 100) : circumference * 0.75
+              }
+            />
+          </svg>
+        ) : null}
+        {state === 'requesting' ? (
+          <LoaderCircle size={iconSize} className="animate-spin" />
+        ) : state === 'downloading' ? (
+          <Pause size={iconSize} fill="currentColor" />
+        ) : state === 'paused' ? (
+          <Play size={iconSize} fill="currentColor" className="ml-0.5" />
+        ) : (
+          <Download size={iconSize} />
+        )}
+      </span>
+    </button>
+  )
 }
 
 function WebPagePreview({
@@ -47,8 +126,7 @@ function WebPagePreview({
       {media.has_thumbnail ? (
         <div className={cn('shrink-0 overflow-hidden bg-slate-100', compact ? 'h-28' : 'h-36')}>
           <AuthenticatedImage
-            path={thumbnailPath(message.chat_id, message.id)}
-            thumbnailPath={null}
+            media={messageResourceRef(message.chat_id, message.id, true)}
             inlineSource={media.inline_thumbnail}
             blurred
             accountId={accountId}
@@ -212,33 +290,79 @@ export function MediaPreview({
 }) {
   const { t } = useTranslation()
   const [videoOpen, setVideoOpen] = useState(false)
-  const [videoMounted, setVideoMounted] = useState(false)
   const media = message.media
+  const filename = media?.file_name || `telegram-${message.id}`
+  const taskRef = messageResourceRef(message.chat_id, message.id)
+  const taskKey = downloadTaskKey(accountId, taskRef)
+  const [task, setTask] = useState<DownloadTask | null>(null)
+
+  // Subscribe to the download manager so progress/pause updates flow into the
+  // button without the component owning the download state machine.
+  useEffect(() => {
+    const current = downloadManager.getTask(taskKey)
+    setTask(current ? { ...current } : null)
+    return downloadManager.subscribe((updated) => {
+      if (updated.key === taskKey) setTask({ ...updated })
+    })
+  }, [taskKey])
+
+  const downloadState: 'idle' | 'requesting' | 'downloading' | 'paused' = !task
+    ? 'idle'
+    : task.status === 'downloading'
+      ? 'downloading'
+      : task.status === 'paused'
+        ? 'paused'
+        : task.status === 'queued' || task.status === 'requesting'
+          ? 'requesting'
+          : 'idle'
+  const downloadProgress = task?.progress ?? -1
+
+  const toggleDownload = () => {
+    if (downloadState === 'downloading') {
+      downloadManager.pause(taskKey)
+    } else if (downloadState === 'paused') {
+      downloadManager.resume(taskKey)
+    } else {
+      downloadManager.start(accountId, taskRef, filename)
+    }
+  }
+
   if (!media) return null
   if (!hasMediaPreview(media)) return null
   if (media.poll) return <PollPreview poll={media.poll} />
   if (media.webpage) {
     return <WebPagePreview accountId={accountId} message={message} compact={compact} />
   }
-  const path = media.is_visual_media ? visualMediaPath(message.chat_id, message.id) : null
   const canPreview = isPreviewableMedia(media)
-  const isVideo = media.type === 'video' || media.type === 'video_note'
+  const isVideo =
+    media.type === 'video' ||
+    media.type === 'video_note' ||
+    (media.type === 'document' && media.mime_type?.startsWith('video/'))
+  const isAudio =
+    media.type === 'audio' ||
+    media.type === 'voice' ||
+    (media.type === 'document' && media.mime_type?.startsWith('audio/'))
   const isWebm =
     media.mime_type === 'video/webm' || media.file_name?.toLowerCase().endsWith('.webm')
   const autoLoadFull =
     media.type === 'photo' ||
     (media.type === 'sticker' && Boolean(media.mime_type?.startsWith('image/'))) ||
     isWebm
-  const openVideo = () => {
-    setVideoMounted(true)
-    setVideoOpen(true)
-  }
+  const openVideo = () => setVideoOpen(true)
+  const isDownloadableFile =
+    media.type === 'document' &&
+    !media.mime_type?.startsWith('video/') &&
+    !media.mime_type?.startsWith('audio/')
+  const isDownloadable = media.is_visual_media || isDownloadableFile
   const downloadLabel =
     media.type === 'animation'
       ? t('telegramPreview.downloadAnimation')
       : media.type === 'sticker'
         ? t('telegramPreview.downloadSticker')
-        : t('telegramPreview.downloadImage')
+        : media.type === 'document'
+          ? t('telegramPreview.downloadFile')
+          : t('telegramPreview.downloadImage')
+  if (isAudio) return <AudioPlayer accountId={accountId} message={message} />
   if (media.has_thumbnail) {
     return (
       <>
@@ -273,8 +397,10 @@ export function MediaPreview({
           }
         >
           <AuthenticatedImage
-            path={autoLoadFull && !isVideo ? visualMediaPath(message.chat_id, message.id) : null}
-            thumbnailPath={thumbnailPath(message.chat_id, message.id)}
+            media={
+              autoLoadFull && !isVideo ? messageResourceRef(message.chat_id, message.id) : null
+            }
+            thumbnailMedia={messageResourceRef(message.chat_id, message.id, true)}
             inlineSource={media.inline_thumbnail}
             blurred
             spinnerWhileLoading={autoLoadFull}
@@ -295,30 +421,70 @@ export function MediaPreview({
               </span>
             </span>
           ) : null}
-          {isVideo && mediaDuration(media.duration) ? (
+          {isVideo && (mediaDuration(media.duration) || fileSize(media.size)) ? (
             <span className="pointer-events-none absolute right-2 bottom-2 rounded bg-slate-950/75 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums">
-              {mediaDuration(media.duration)}
+              {[mediaDuration(media.duration), fileSize(media.size)].filter(Boolean).join(' · ')}
             </span>
           ) : null}
-          {path && !compact ? (
-            <button
-              className="absolute right-2 bottom-2 grid size-7 place-items-center rounded bg-slate-900/70 text-white opacity-0 shadow transition group-hover:opacity-100 focus:opacity-100"
-              title={downloadLabel}
-              aria-label={downloadLabel}
-              onClick={(event) => {
+          {isDownloadable && !compact ? (
+            <DownloadButton
+              state={downloadState}
+              progress={downloadProgress}
+              label={downloadLabel}
+              iconSize={13}
+              className={cn(
+                'absolute right-2 bottom-2 size-7 rounded bg-slate-900/70 text-white shadow transition',
+                downloadState === 'idle'
+                  ? 'opacity-0 group-hover:opacity-100 focus:opacity-100'
+                  : 'opacity-100',
+              )}
+              onToggle={(event) => {
                 event.stopPropagation()
-                void downloadFile(path, media.file_name || `telegram-${message.id}.jpg`)
+                toggleDownload()
               }}
-            >
-              <Download size={14} />
-            </button>
+            />
           ) : null}
         </div>
-        {isVideo && videoMounted ? (
+        {isVideo && videoOpen ? (
           <TelegramVideoPreview
             accountId={accountId}
             message={message}
-            open={videoOpen}
+            open
+            onClose={() => setVideoOpen(false)}
+          />
+        ) : null}
+      </>
+    )
+  }
+  if (isVideo) {
+    return (
+      <>
+        <button
+          type="button"
+          className="grid w-full cursor-pointer grid-cols-[34px_minmax(0,1fr)] items-center gap-2 rounded-[5px] border border-slate-200 bg-white/70 p-2 text-left transition hover:border-blue-300 hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500"
+          onClick={openVideo}
+          title={t('telegramPreview.playVideo')}
+          aria-label={t('telegramPreview.playVideo')}
+        >
+          <span className="grid size-8.5 place-items-center rounded bg-blue-50 text-blue-600">
+            <Play size={17} fill="currentColor" />
+          </span>
+          <span className="min-w-0">
+            <strong className="block truncate text-xs text-slate-700">
+              {media.file_name || media.type}
+            </strong>
+            <small className="mt-0.5 block text-xs text-slate-400">
+              {[media.type, mediaDuration(media.duration), fileSize(media.size)]
+                .filter(Boolean)
+                .join(' · ')}
+            </small>
+          </span>
+        </button>
+        {videoOpen ? (
+          <TelegramVideoPreview
+            accountId={accountId}
+            message={message}
+            open
             onClose={() => setVideoOpen(false)}
           />
         ) : null}
@@ -329,7 +495,7 @@ export function MediaPreview({
     <div
       className={cn(
         'grid w-full items-center gap-2 rounded-[5px] border',
-        path ? 'grid-cols-[34px_minmax(0,1fr)_24px]' : 'grid-cols-[34px_minmax(0,1fr)]',
+        isDownloadable ? 'grid-cols-[34px_minmax(0,1fr)_24px]' : 'grid-cols-[34px_minmax(0,1fr)]',
         'border-slate-200 bg-white/70 p-2 text-left',
       )}
     >
@@ -344,15 +510,14 @@ export function MediaPreview({
           {[media.type, fileSize(media.size)].filter(Boolean).join(' · ')}
         </small>
       </span>
-      {path ? (
-        <button
-          className="grid size-6 place-items-center rounded border-0 bg-transparent text-slate-400 hover:bg-blue-50 hover:text-blue-600"
-          title={downloadLabel}
-          aria-label={downloadLabel}
-          onClick={() => void downloadFile(path, media.file_name || `telegram-${message.id}`)}
-        >
-          <Download size={14} />
-        </button>
+      {isDownloadable ? (
+        <DownloadButton
+          state={downloadState}
+          progress={downloadProgress}
+          label={downloadLabel}
+          className="size-6 rounded text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+          onToggle={() => toggleDownload()}
+        />
       ) : null}
     </div>
   )

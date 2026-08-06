@@ -41,7 +41,7 @@ from backend.telegram_accounts import (
 )
 from backend.telegram_chats import TelegramChatService
 from backend.telegram_preview import TelegramPreviewService
-from backend.telegram_media import TelegramMediaService
+from backend.telegram_resource import TelegramResourceService
 from backend.telegram_runtimes import TelegramRuntimeRegistry
 
 
@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
     telegram_chats = TelegramChatService(bot, account_store)
     bot.chat_recorder = telegram_chats.record_chat
     telegram_preview = TelegramPreviewService(bot, account_store)
-    telegram_media = TelegramMediaService(bot, account_store, config)
+    telegram_resource = TelegramResourceService(bot, account_store, config)
     bot.on_user_authenticated = accounts.update_identity
     account_registry = AccountScopeRegistry(
         config_registry,
@@ -109,7 +109,7 @@ async def lifespan(app: FastAPI):
         accounts=accounts,
         telegram_chats=telegram_chats,
         telegram_preview=telegram_preview,
-        telegram_media=telegram_media,
+        telegram_resource=telegram_resource,
         account_registry=account_registry,
     )
     app.state.context = context

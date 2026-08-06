@@ -1,4 +1,4 @@
-import type { TelegramMediaStats } from '../../api/telegramMedia'
+import type { TelegramResourceStats } from '../../api/telegramResource'
 import type { TelegramPreviewMessage } from '../../types'
 import type { Mp4TechnicalInfo } from '../../utils/mp4TechnicalInfo'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -73,7 +73,7 @@ function seconds(value: number) {
 
 function connectionHealth(
   playback: VideoPlaybackStats | null,
-  transport: TelegramMediaStats | null,
+  transport: TelegramResourceStats | null,
   waiting: boolean,
 ) {
   if (!transport?.connected || transport.errors) return 'error'
@@ -166,7 +166,7 @@ export function TelegramVideoStats({
   endpoint: string
   dcId: number
   playback: VideoPlaybackStats | null
-  transport: TelegramMediaStats | null
+  transport: TelegramResourceStats | null
   technical: Mp4TechnicalInfo | null
   waiting: boolean
   onClose: () => void

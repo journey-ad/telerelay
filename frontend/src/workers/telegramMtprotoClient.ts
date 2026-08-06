@@ -26,15 +26,42 @@ const METHOD = {
   initConnection: 0xc1cd5ea9,
   uploadGetFile: 0xbe5335be,
   inputDocumentFileLocation: 0xbad07584,
+  inputPhotoFileLocation: 0x40181ffe,
+  inputPeerPhotoFileLocation: 0x37257e99,
+  inputPeerUser: 0xdde8a54c,
+  inputPeerChat: 0x35a95cb9,
+  inputPeerChannel: 0x27bcbbfc,
 } as const
 
 const REQUEST_TIMEOUT_MS = 15_000
 
-type FileLocation = {
+type PeerRef = {
+  type: 'user' | 'chat' | 'channel'
   id: string
-  access_hash: string
-  file_reference: string
+  access_hash?: string
 }
+
+export type FileLocation =
+  | {
+      location_type: 'document'
+      id: string
+      access_hash: string
+      file_reference: string
+      thumb_size?: string
+    }
+  | {
+      location_type: 'photo'
+      id: string
+      access_hash: string
+      file_reference: string
+      thumb_size?: string
+    }
+  | {
+      location_type: 'peer_photo'
+      peer: PeerRef
+      photo_id: string
+      dc_id: number
+    }
 
 type ClientOptions = {
   apiId: number
@@ -179,18 +206,43 @@ export function decodeBase64Url(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
-function createGetFile(location: FileLocation, offset: number, limit: number) {
-  return new TlWriter()
-    .int(METHOD.uploadGetFile)
-    .int(0)
-    .int(METHOD.inputDocumentFileLocation)
+function writeFileLocation(writer: TlWriter, location: FileLocation): TlWriter {
+  if (location.location_type === 'peer_photo') {
+    // inputPeerPhotoFileLocation: constructor + flags(4) + peer + photo_id(8)
+    // big=false is flags.0 = 0; dc_id only selects the DC host and is not
+    // serialized into the location.
+    writer.int(METHOD.inputPeerPhotoFileLocation).int(0)
+    if (location.peer.type === 'user') {
+      writer
+        .int(METHOD.inputPeerUser)
+        .long(location.peer.id)
+        .long(location.peer.access_hash ?? 0)
+    } else if (location.peer.type === 'chat') {
+      writer.int(METHOD.inputPeerChat).long(location.peer.id)
+    } else {
+      writer
+        .int(METHOD.inputPeerChannel)
+        .long(location.peer.id)
+        .long(location.peer.access_hash ?? 0)
+    }
+    return writer.long(location.photo_id)
+  }
+  const constructor =
+    location.location_type === 'photo'
+      ? METHOD.inputPhotoFileLocation
+      : METHOD.inputDocumentFileLocation
+  return writer
+    .int(constructor)
     .long(location.id)
     .long(location.access_hash)
     .bytes(decodeBase64Url(location.file_reference))
-    .string('')
-    .long(offset)
-    .int(limit)
-    .build()
+    .string(location.thumb_size || '')
+}
+
+function createGetFile(location: FileLocation, offset: number, limit: number) {
+  const writer = new TlWriter().int(METHOD.uploadGetFile).int(0)
+  writeFileLocation(writer, location)
+  return writer.long(offset).int(limit).build()
 }
 
 function createInitializedQuery(apiId: number, apiLayer: number, query: Uint8Array) {

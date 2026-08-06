@@ -148,16 +148,38 @@ class FakeTelegramPreview:
         return generate()
 
 
-class FakeTelegramMedia:
+class FakeTelegramResource:
     def __init__(self):
         self.calls = []
 
-    async def issue_video_ticket(self, **values):
-        self.calls.append(("video_ticket", values))
+    async def issue_dc_credentials(self, **values):
+        self.calls.append(("dc_credentials", values))
         return {
-            "ticket": "video-ticket-123",
+            "api_id": 12345,
+            "api_layer": 166,
+            "dc_id": 4,
+            "dc_address": "kws4-1.web.telegram.org",
+            "dc_port": 443,
+            "auth_key": "cmVzb3VyY2U",
+            "auth_key_id": "123",
+            "server_salt": "-17",
+            "time_offset": 9,
+        }
+
+    async def issue_resource_info(self, **values):
+        self.calls.append(("resource_info", values))
+        return {
+            "ticket": "resource-ticket-123",
             "expires_at": 2_000_000_000,
             "mime_type": "video/mp4",
+        }
+
+    async def issue_avatar_info(self, **values):
+        self.calls.append(("avatar_info", values))
+        return {
+            "ticket": "avatar-ticket-123",
+            "cache_key": "avatar-303-456",
+            "mime_type": "image/jpeg",
         }
 
     async def clear_account(self, account_id):
@@ -303,7 +325,7 @@ class ApiContractTests(unittest.TestCase):
         self.stats_patch.start()
         self.addCleanup(self.stats_patch.stop)
         self.telegram_preview = FakeTelegramPreview()
-        self.telegram_media = FakeTelegramMedia()
+        self.telegram_resource = FakeTelegramResource()
         self.telegram_chats = FakeTelegramChats()
         self.exports = FakeExports()
         self.account_registry = FakeAccountRegistry(self)
@@ -319,7 +341,7 @@ class ApiContractTests(unittest.TestCase):
             account_registry=self.account_registry,
             telegram_chats=self.telegram_chats,
             telegram_preview=self.telegram_preview,
-            telegram_media=self.telegram_media,
+            telegram_resource=self.telegram_resource,
         )
         self.client = TestClient(make_app(self.context))
         self.addCleanup(self.client.close)
@@ -963,23 +985,87 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(media.status_code, 422)
         self.assertEqual(too_long.status_code, 422)
 
-    def test_telegram_video_ticket_contract(self):
+    def test_telegram_dc_credentials_contract(self):
         ticket = self.client.post(
-            "/api/v1/telegram-preview/chats/-1001/messages/12/video-ticket",
+            "/api/v1/telegram-preview/resource-ticket/dc/4",
             headers={"X-TeleRelay-Account-ID": self.account_id},
         )
         self.assertEqual(ticket.status_code, 200, ticket.text)
-        self.assertEqual(ticket.json()["ticket"], "video-ticket-123")
+        self.assertEqual(ticket.json()["auth_key"], "cmVzb3VyY2U")
+        self.assertEqual(ticket.json()["dc_id"], 4)
         self.assertEqual(ticket.headers["cache-control"], "no-store")
         self.assertEqual(
-            self.telegram_media.calls[:1],
+            self.telegram_resource.calls[:1],
             [
                 (
-                    "video_ticket",
+                    "dc_credentials",
+                    {
+                        "account_id": self.account_id,
+                        "dc_id": 4,
+                    },
+                ),
+            ],
+        )
+
+    def test_telegram_resource_info_contract(self):
+        ticket = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages/12/resource-info",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+        )
+        self.assertEqual(ticket.status_code, 200, ticket.text)
+        self.assertEqual(ticket.json()["ticket"], "resource-ticket-123")
+        self.assertEqual(ticket.headers["cache-control"], "no-store")
+        self.assertEqual(
+            self.telegram_resource.calls[:1],
+            [
+                (
+                    "resource_info",
                     {
                         "account_id": self.account_id,
                         "chat_id": -1001,
                         "message_id": 12,
+                        "thumb": False,
+                    },
+                ),
+            ],
+        )
+
+    def test_telegram_resource_info_thumb_contract(self):
+        ticket = self.client.post(
+            "/api/v1/telegram-preview/chats/-1001/messages/12/resource-info?thumb=true",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+        )
+        self.assertEqual(ticket.status_code, 200, ticket.text)
+        self.assertEqual(
+            self.telegram_resource.calls[:1],
+            [
+                (
+                    "resource_info",
+                    {
+                        "account_id": self.account_id,
+                        "chat_id": -1001,
+                        "message_id": 12,
+                        "thumb": True,
+                    },
+                ),
+            ],
+        )
+
+    def test_telegram_avatar_info_contract(self):
+        ticket = self.client.post(
+            "/api/v1/telegram-preview/peers/303/avatar-info",
+            headers={"X-TeleRelay-Account-ID": self.account_id},
+        )
+        self.assertEqual(ticket.status_code, 200, ticket.text)
+        self.assertEqual(ticket.json()["ticket"], "avatar-ticket-123")
+        self.assertEqual(
+            self.telegram_resource.calls[:1],
+            [
+                (
+                    "avatar_info",
+                    {
+                        "account_id": self.account_id,
+                        "peer_id": 303,
                     },
                 ),
             ],

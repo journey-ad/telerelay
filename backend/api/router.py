@@ -12,13 +12,11 @@ from fastapi import (
     File,
     HTTPException,
     Query,
-    Request,
     Response,
     UploadFile,
 )
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import ValidationError
-from starlette.background import BackgroundTask
 
 from backend.api.dependencies import bind_account_scope, get_context, require_auth
 from backend.application import ApplicationContext
@@ -112,14 +110,14 @@ def _telegram_chats(context: ApplicationContext):
     return context.telegram_chats
 
 
-def _telegram_media(context: ApplicationContext):
-    if not context.telegram_media:
+def _telegram_resource(context: ApplicationContext):
+    if not context.telegram_resource:
         raise _error(
             "not_user_mode",
             "Direct Telegram media preview is only available in user mode",
             409,
         )
-    return context.telegram_media
+    return context.telegram_resource
 
 
 def _account_scope(context: ApplicationContext):
@@ -204,7 +202,6 @@ def _preview_error(exc: TelegramPreviewError) -> HTTPException:
         "account_not_found": 404,
         "account_unavailable": 409,
         "chat_not_found": 404,
-        "visual_media_not_found": 404,
         "message_not_found": 404,
         "thumbnail_not_found": 404,
         "invalid_cursor": 422,
@@ -212,31 +209,13 @@ def _preview_error(exc: TelegramPreviewError) -> HTTPException:
         "chat_write_forbidden": 403,
         "bot_commands_unavailable": 502,
         "message_send_failed": 502,
-        "visual_media_download_failed": 502,
-        "video_not_supported": 415,
-        "video_reference_missing": 409,
-        "video_dc_unsupported": 409,
+        "media_not_supported": 415,
+        "resource_reference_missing": 409,
+        "resource_dc_unsupported": 409,
         "telegram_api_credentials_missing": 503,
-        "video_ticket_failed": 502,
+        "resource_ticket_failed": 502,
     }.get(exc.code, 409)
     return _error(exc.code, str(exc), status)
-
-
-def _image_response(
-    content: bytes,
-    media_type: str,
-    request: Request,
-) -> Response:
-    import hashlib
-
-    etag = f'"{hashlib.blake2s(content, digest_size=12).hexdigest()}"'
-    headers = {
-        "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
-        "ETag": etag,
-    }
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers=headers)
-    return Response(content=content, media_type=media_type, headers=headers)
 
 
 @router.get("/telegram-accounts")
@@ -392,80 +371,62 @@ async def telegram_preview_message(
         raise _preview_error(exc) from exc
 
 
-@router.post("/telegram-preview/chats/{chat_id}/messages/{message_id}/video-ticket")
-async def telegram_preview_video_ticket(
-    chat_id: int,
-    message_id: int,
+@router.post("/telegram-preview/resource-ticket/dc/{dc_id}")
+async def telegram_preview_dc_credentials(
+    dc_id: int,
     response: Response,
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     try:
-        ticket = await _telegram_media(context).issue_video_ticket(
+        credentials = await _telegram_resource(context).issue_dc_credentials(
             account_id=_selected_account_id(context),
-            chat_id=chat_id,
-            message_id=message_id,
+            dc_id=dc_id,
         )
         response.headers["Cache-Control"] = "no-store"
         response.headers["Pragma"] = "no-cache"
-        return ticket
+        return credentials
     except TelegramPreviewError as exc:
         raise _preview_error(exc) from exc
 
 
-@router.get("/telegram-preview/peers/{peer_id}/avatar")
-async def telegram_preview_avatar(
-    peer_id: int,
-    request: Request,
+@router.post("/telegram-preview/chats/{chat_id}/messages/{message_id}/resource-info")
+async def telegram_preview_resource_info(
+    chat_id: int,
+    message_id: int,
+    response: Response,
+    thumb: bool = False,
     context: ApplicationContext = Depends(get_context),
-) -> Response:
+) -> dict:
     try:
-        content = await _telegram_preview(context).avatar(
+        info = await _telegram_resource(context).issue_resource_info(
+            account_id=_selected_account_id(context),
+            chat_id=chat_id,
+            message_id=message_id,
+            thumb=thumb,
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        return info
+    except TelegramPreviewError as exc:
+        raise _preview_error(exc) from exc
+
+
+@router.post("/telegram-preview/peers/{peer_id}/avatar-info")
+async def telegram_preview_avatar_info(
+    peer_id: int,
+    response: Response,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        info = await _telegram_resource(context).issue_avatar_info(
             account_id=_selected_account_id(context),
             peer_id=peer_id,
         )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        return info
     except TelegramPreviewError as exc:
         raise _preview_error(exc) from exc
-    return _image_response(content, "image/jpeg", request)
-
-
-@router.get("/telegram-preview/chats/{chat_id}/messages/{message_id}/thumbnail")
-async def telegram_preview_thumbnail(
-    chat_id: int,
-    message_id: int,
-    request: Request,
-    context: ApplicationContext = Depends(get_context),
-) -> Response:
-    try:
-        content, media_type = await _telegram_preview(context).media_thumbnail(
-            account_id=_selected_account_id(context),
-            chat_id=chat_id,
-            message_id=message_id,
-        )
-    except TelegramPreviewError as exc:
-        raise _preview_error(exc) from exc
-    return _image_response(content, media_type, request)
-
-
-@router.get("/telegram-preview/chats/{chat_id}/messages/{message_id}/visual-media")
-async def telegram_preview_visual_media(
-    chat_id: int,
-    message_id: int,
-    context: ApplicationContext = Depends(get_context),
-) -> FileResponse:
-    try:
-        path, media_type, filename = await _telegram_preview(context).download_visual_media(
-            account_id=_selected_account_id(context),
-            chat_id=chat_id,
-            message_id=message_id,
-        )
-    except TelegramPreviewError as exc:
-        raise _preview_error(exc) from exc
-    return FileResponse(
-        path,
-        media_type=media_type,
-        filename=filename,
-        background=BackgroundTask(path.unlink, missing_ok=True),
-    )
 
 
 @router.post("/telegram-accounts", status_code=201)
@@ -538,8 +499,6 @@ async def delete_telegram_account(
     except TelegramAccountError as exc:
         status_code = 409 if exc.code == "last_account" else 404
         raise _error(exc.code, str(exc), status_code) from exc
-    if context.telegram_preview:
-        await context.telegram_preview.clear_account_cache(account_id)
     context.events.publish("telegram-account", {"action": "delete", "id": account_id})
     return ApiMessage(code="telegram_account_deleted")
 

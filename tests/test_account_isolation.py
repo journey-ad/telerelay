@@ -1,5 +1,4 @@
 import json
-import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -85,12 +84,6 @@ class AccountIsolationTests(unittest.TestCase):
             self.data_dir / "stats.db": b"stats",
             self.data_dir / "exports.db": b"exports-db",
             self.data_dir / "telegram_avatars" / "default.jpg": b"avatar",
-            self.data_dir / ".telegram_preview_cache.key": b"k" * 32,
-            self.data_dir
-            / "telegram_preview_cache"
-            / hashlib.sha256(b"default").hexdigest()[:20]
-            / "avatars"
-            / "1.jpg": b"encrypted-avatar",
             self.data_dir / "db" / "messages.sqlite3": b"messages",
             self.data_dir / "exports" / "archive.zip": b"archive",
         }
@@ -113,14 +106,6 @@ class AccountIsolationTests(unittest.TestCase):
         self.assertEqual((target.message_db_dir / "messages.sqlite3").read_bytes(), b"messages")
         self.assertEqual((target.export_dir / "archive.zip").read_bytes(), b"archive")
         self.assertEqual(target.avatar.read_bytes(), b"avatar")
-        self.assertEqual(
-            (target.data_dir / ".telegram_preview_cache.key").read_bytes(),
-            b"k" * 32,
-        )
-        self.assertEqual(
-            (target.data_dir / "telegram_preview_cache" / "avatars" / "1.jpg").read_bytes(),
-            b"encrypted-avatar",
-        )
         self.assertFalse((self.data_dir / "telegram_preview_cache").exists())
 
         restored = TelegramAccountStore(self.data_dir, paths=self.paths)

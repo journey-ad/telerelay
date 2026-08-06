@@ -1,4 +1,4 @@
-const MEDIA_PREFIX = '/telegram-media/'
+const MEDIA_PREFIX = '/telegram-resource/'
 const RANGE_PATTERN = /^bytes=(\d+)-(\d*)$/
 const RANGE_RESPONSE_TIMEOUT_MS = 20_000
 
@@ -63,15 +63,21 @@ self.addEventListener('fetch', (event) => {
           }
         }
       })
-      client.postMessage(
-        {
-          type: 'telegram-range',
-          token,
-          offset: start,
-          limit: Math.min(512 * 1024, requestedEnd - start + 1),
-        },
-        [channel.port2],
-      )
+      try {
+        client.postMessage(
+          {
+            type: 'telegram-range',
+            token,
+            offset: start,
+            limit: Math.min(512 * 1024, requestedEnd - start + 1),
+          },
+          [channel.port2],
+        )
+      } catch (error) {
+        // 页面在 postMessage 前已失效（导航/控制权移交）时，返回受控错误而非网络错误
+        channel.port1.close()
+        resolve(new Response('Media client is unavailable', { status: 502 }))
+      }
       return response
     })(),
   )

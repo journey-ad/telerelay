@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TelegramPreviewMessage } from '../../types'
 import { cn } from '../../utils/cn'
-import { thumbnailPath, visualMediaPath, type ImageGroup } from '../../utils/preview'
+import { type ImageGroup } from '../../utils/preview'
+import { messageResourceRef } from '../../utils/resource'
 import { AuthenticatedImage, preloadAuthenticatedImage } from '../AuthenticatedImage'
 
 const GENERATED_THUMBNAIL_SIZE = 128
@@ -224,7 +225,7 @@ export function ImageViewer({
     const decodingImages: HTMLImageElement[] = []
     for (const item of group.items) {
       if (!item.media?.is_visual_media) continue
-      void preloadAuthenticatedImage(visualMediaPath(item.chat_id, item.id), accountId).then(
+      void preloadAuthenticatedImage(messageResourceRef(item.chat_id, item.id), accountId).then(
         (url) => {
           if (!active || !url) return
           const image = new window.Image()
@@ -260,7 +261,8 @@ export function ImageViewer({
     setIsSettling(false)
   }, [message?.id])
 
-  // 接近旧消息分页边界时预拉取更早的消息（组内 3 组之内）
+  // Prefetch earlier messages when nearing the older-message pagination boundary
+  // (within 3 groups of the edge)
   useEffect(() => {
     if (groupIndex <= 2 && hasNextPage) onLoadEarlier()
   }, [groupIndex, hasNextPage, onLoadEarlier])
@@ -534,11 +536,11 @@ export function ImageViewer({
                     onClick={() => onNavigate(item)}
                   >
                     <AuthenticatedImage
-                      path={null}
-                      thumbnailPath={
+                      media={null}
+                      thumbnailMedia={
                         generatedThumbnails.has(item.id) || item.media?.inline_thumbnail
                           ? null
-                          : thumbnailPath(item.chat_id, item.id)
+                          : messageResourceRef(item.chat_id, item.id, true)
                       }
                       inlineSource={
                         generatedThumbnails.get(item.id) ?? item.media?.inline_thumbnail
@@ -583,7 +585,9 @@ export function ImageViewer({
               }}
             >
               <AuthenticatedImage
-                path={media?.is_visual_media ? visualMediaPath(message.chat_id, message.id) : null}
+                media={
+                  media?.is_visual_media ? messageResourceRef(message.chat_id, message.id) : null
+                }
                 inlineSource={media?.inline_thumbnail}
                 isVideo={isVideo}
                 fit="contain"

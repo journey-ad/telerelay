@@ -112,7 +112,7 @@ class ApplicationContext:
     accounts: TelegramAccountService | None = None
     telegram_chats: TelegramChatService | None = None
     telegram_preview: TelegramPreviewService | None = None
-    telegram_media: object | None = None
+    telegram_resource: object | None = None
     admin_thread: Thread | None = None
     account_registry: AccountScopeRegistry | None = None
     request_account_id: ContextVar[str | None] = field(

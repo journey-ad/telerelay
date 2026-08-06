@@ -1,4 +1,4 @@
-import type { TelegramMediaSession } from '../api/telegramMedia'
+import type { TelegramResourceSession } from '../api/telegramResource'
 
 const READ_CHUNK_SIZE = 512 * 1024
 const HEAD_SCAN_SIZE = 2 * 1024 * 1024
@@ -147,7 +147,7 @@ function trackFrameRate(trak: Box, bytes: Uint8Array) {
   return frameRate > 0 && Number.isFinite(frameRate) ? frameRate : null
 }
 
-async function readRange(session: TelegramMediaSession, offset: number, length: number) {
+async function readRange(session: TelegramResourceSession, offset: number, length: number) {
   const output = new Uint8Array(length)
   let written = 0
   while (written < length) {
@@ -164,7 +164,7 @@ async function readRange(session: TelegramMediaSession, offset: number, length: 
 }
 
 export async function readMp4TechnicalInfo(
-  session: TelegramMediaSession,
+  session: TelegramResourceSession,
 ): Promise<Mp4TechnicalInfo | null> {
   const size = session.size ?? 0
   if (!size || !session.mimeType.toLowerCase().startsWith('video/mp4')) return null

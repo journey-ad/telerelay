@@ -4,7 +4,8 @@ import type { TelegramPreviewDialog } from '../../types'
 import { avatarInitials } from '../../utils/avatar'
 import { cn } from '../../utils/cn'
 import { hashColor } from '../../utils/color'
-import { peerAvatarPath, previewTime, serviceText } from '../../utils/preview'
+import { previewTime, serviceText } from '../../utils/preview'
+import { peerAvatarRef } from '../../utils/resource'
 import { AuthenticatedImage } from '../AuthenticatedImage'
 
 export function ChatGlyph({
@@ -38,7 +39,7 @@ export function Avatar({
   const colors = hashColor(String(peerId ?? title))
   return (
     <AuthenticatedImage
-      path={peerAvatarPath(peerId)}
+      media={peerId ? peerAvatarRef(peerId) : null}
       inlineSource={inlineSource}
       alt={t('telegramPreview.avatarAlt', { title })}
       accountId={accountId}

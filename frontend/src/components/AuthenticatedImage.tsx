@@ -1,9 +1,8 @@
 import { LoaderCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, Dispatch, ReactNode, SetStateAction } from 'react'
-import { ACCOUNT_ID_HEADER } from '../api/client'
-import { authorization } from '../api/credentials'
 import { cn } from '../utils/cn'
+import { loadDirectResourceBlob, type ResourceRef } from '../utils/resource'
 
 const MAX_CACHED_IMAGES = 200
 
@@ -13,12 +12,13 @@ type CacheEntry = {
   refs: number
 }
 
-// LRU 缓存：Map 保持插入顺序，load 命中时 touch 刷新为最新；
-// 超出上限时淘汰最久未使用且无组件引用的条目并 revoke 其 blob URL。
+// LRU cache of blob URLs: Map keeps insertion order, a load hit touches to
+// refresh recency; when over the limit, evict the least recently used entry
+// with no component references and revoke its blob URL.
 const imageCache = new Map<string, CacheEntry>()
 
-function cacheKey(path: string, accountId?: string): string {
-  return `${accountId ?? ''}:${path}`
+function cacheKey(ref: ResourceRef, accountId?: string): string {
+  return `${accountId ?? ''}:${JSON.stringify(ref)}`
 }
 
 function touch(key: string) {
@@ -37,23 +37,17 @@ function evictIfNeeded() {
   }
 }
 
-function load(path: string, accountId?: string): Promise<string | null> {
-  const key = cacheKey(path, accountId)
+function load(ref: ResourceRef, accountId?: string): Promise<string | null> {
+  const key = cacheKey(ref, accountId)
   const cached = imageCache.get(key)
   if (cached) {
     touch(key)
     return cached.promise
   }
+  if (!accountId) return Promise.resolve(null)
 
-  const promise = (async () => {
-    const headers = new Headers()
-    const auth = authorization()
-    if (auth) headers.set('Authorization', auth)
-    if (accountId) headers.set(ACCOUNT_ID_HEADER, accountId)
-    const response = await fetch(path, { headers })
-    if (!response.ok) return null
-    return URL.createObjectURL(await response.blob())
-  })()
+  const promise = loadDirectResourceBlob(accountId, ref)
+    .then((blob) => (blob ? URL.createObjectURL(blob) : null))
     .catch(() => null)
     .then((url) => {
       const entry = imageCache.get(key)
@@ -71,29 +65,26 @@ function load(path: string, accountId?: string): Promise<string | null> {
   return promise
 }
 
-export function preloadAuthenticatedImage(
-  path: string,
-  accountId?: string,
-): Promise<string | null> {
-  return load(path, accountId)
+export function preloadAuthenticatedImage(media: ResourceRef, accountId?: string) {
+  return load(media, accountId)
 }
 
-function getResolvedUrl(path: string, accountId?: string): string | null {
-  const entry = imageCache.get(cacheKey(path, accountId))
+function getResolvedUrl(ref: ResourceRef, accountId?: string): string | null {
+  const entry = imageCache.get(cacheKey(ref, accountId))
   return entry?.url ?? null
 }
 
-function isImageCached(path: string, accountId?: string): boolean {
-  return imageCache.has(cacheKey(path, accountId))
+function isImageCached(ref: ResourceRef, accountId?: string): boolean {
+  return imageCache.has(cacheKey(ref, accountId))
 }
 
-function retain(path: string, accountId?: string) {
-  const entry = imageCache.get(cacheKey(path, accountId))
+function retain(ref: ResourceRef, accountId?: string) {
+  const entry = imageCache.get(cacheKey(ref, accountId))
   if (entry) entry.refs += 1
 }
 
-function release(path: string, accountId?: string) {
-  const entry = imageCache.get(cacheKey(path, accountId))
+function release(ref: ResourceRef, accountId?: string) {
+  const entry = imageCache.get(cacheKey(ref, accountId))
   if (entry) entry.refs = Math.max(0, entry.refs - 1)
 }
 
@@ -110,13 +101,13 @@ function markReady(setter: Dispatch<SetStateAction<Layer>>): () => void {
   return () => setter((prev) => (prev ? { ...prev, ready: true } : prev))
 }
 
-function reload(path: string, accountId?: string) {
-  return load(path, accountId).then((url) => (url ? { src: url, ready: false } : null))
+function reload(ref: ResourceRef, accountId?: string) {
+  return load(ref, accountId).then((url) => (url ? { src: url, ready: false } : null))
 }
 
 export function AuthenticatedImage({
-  path,
-  thumbnailPath,
+  media,
+  thumbnailMedia,
   inlineSource,
   alt,
   className,
@@ -129,8 +120,8 @@ export function AuthenticatedImage({
   fit = 'cover',
   onFullImageLoad,
 }: {
-  path?: string | null
-  thumbnailPath?: string | null
+  media?: ResourceRef | null
+  thumbnailMedia?: ResourceRef | null
   inlineSource?: string | null
   alt: string
   className?: string
@@ -146,17 +137,17 @@ export function AuthenticatedImage({
   const [thumb, setThumb] = useState<Layer>(() =>
     inlineSource
       ? { src: inlineSource, ready: false }
-      : thumbnailPath
+      : thumbnailMedia && accountId
         ? (() => {
-            const cached = getResolvedUrl(thumbnailPath, accountId)
+            const cached = getResolvedUrl(thumbnailMedia, accountId)
             return cached ? { src: cached, ready: false } : null
           })()
         : null,
   )
   const [full, setFull] = useState<Layer>(() =>
-    path
+    media && accountId
       ? (() => {
-          const cached = getResolvedUrl(path, accountId)
+          const cached = getResolvedUrl(media, accountId)
           return cached ? { src: cached, ready: false } : null
         })()
       : null,
@@ -171,7 +162,7 @@ export function AuthenticatedImage({
 
   useEffect(() => {
     const node = containerRef.current
-    if (!node || (!path && !thumbnailPath)) return
+    if (!node || (!media && !thumbnailMedia)) return
     if (!('IntersectionObserver' in window)) {
       setInView(true)
       return
@@ -181,27 +172,27 @@ export function AuthenticatedImage({
     })
     observer.observe(node)
     return () => observer.disconnect()
-  }, [path, thumbnailPath])
+  }, [media, thumbnailMedia])
 
   useEffect(() => {
-    if (path && inView && full?.src) retain(path, accountId)
-    if (thumbnailPath && inView && thumb?.src) retain(thumbnailPath, accountId)
+    if (media && inView && full?.src) retain(media, accountId)
+    if (thumbnailMedia && inView && thumb?.src) retain(thumbnailMedia, accountId)
     return () => {
-      if (path && inView && full?.src) release(path, accountId)
-      if (thumbnailPath && inView && thumb?.src) release(thumbnailPath, accountId)
+      if (media && inView && full?.src) release(media, accountId)
+      if (thumbnailMedia && inView && thumb?.src) release(thumbnailMedia, accountId)
     }
-  }, [path, thumbnailPath, accountId, inView, full?.src, thumb?.src])
+  }, [media, thumbnailMedia, accountId, inView, full?.src, thumb?.src])
 
   useEffect(() => {
-    if (!path) return
-    const cached = getResolvedUrl(path, accountId)
+    if (!media || !accountId) return
+    const cached = getResolvedUrl(media, accountId)
     if (cached) setFull((prev) => (prev?.src === cached ? prev : { src: cached, ready: false }))
-  }, [path, accountId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [media, accountId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let active = true
-    if (thumbnailPath) {
-      const cached = getResolvedUrl(thumbnailPath, accountId)
+    if (thumbnailMedia && accountId) {
+      const cached = getResolvedUrl(thumbnailMedia, accountId)
       if (cached) {
         setThumb((prev) => (prev?.src === cached ? prev : { src: cached, ready: false }))
       } else if (inView) {
@@ -210,7 +201,7 @@ export function AuthenticatedImage({
             prev?.src === inlineSource ? prev : { src: inlineSource, ready: false },
           )
         }
-        void load(thumbnailPath, accountId).then((url) => {
+        void load(thumbnailMedia, accountId).then((url) => {
           if (active && url)
             setThumb((prev) => (prev?.src === url ? prev : { src: url, ready: false }))
         })
@@ -229,20 +220,20 @@ export function AuthenticatedImage({
     return () => {
       active = false
     }
-  }, [inlineSource, thumbnailPath, inView, accountId])
+  }, [inlineSource, thumbnailMedia, inView, accountId])
 
   useEffect(() => {
     let active = true
-    if (path && inView) {
-      if (isImageCached(path, accountId)) {
+    if (media && accountId && inView) {
+      if (isImageCached(media, accountId)) {
         setLoading(false)
-        void load(path, accountId).then((url) => {
+        void load(media, accountId).then((url) => {
           if (active && url)
             setFull((prev) => (prev?.src === url ? prev : { src: url, ready: false }))
         })
       } else {
         setLoading(true)
-        void load(path, accountId).then((url) => {
+        void load(media, accountId).then((url) => {
           if (active) {
             if (url) setFull((prev) => (prev?.src === url ? prev : { src: url, ready: false }))
             setLoading(false)
@@ -255,37 +246,44 @@ export function AuthenticatedImage({
     return () => {
       active = false
     }
-  }, [path, inView, accountId])
+  }, [media, inView, accountId])
 
-  // 重新进入视口时，若当前图已被 LRU 淘汰（blob 已 revoke），重新加载
+  // When the image re-enters the viewport, reload it if the LRU cache already
+  // evicted it (its blob URL was revoked)
   useEffect(() => {
     if (!inView) return
-    if (path && fullRef.current?.src && getResolvedUrl(path, accountId) !== fullRef.current.src) {
+    if (
+      media &&
+      accountId &&
+      fullRef.current?.src &&
+      getResolvedUrl(media, accountId) !== fullRef.current.src
+    ) {
       setFull(null)
       setLoading(true)
-      void reload(path, accountId).then((next) => {
+      void reload(media, accountId).then((next) => {
         if (next) setFull((prev) => (prev?.src === next.src ? prev : next))
         setLoading(false)
       })
     }
     if (
-      thumbnailPath &&
+      thumbnailMedia &&
+      accountId &&
       thumbRef.current?.src &&
-      getResolvedUrl(thumbnailPath, accountId) !== thumbRef.current.src
+      getResolvedUrl(thumbnailMedia, accountId) !== thumbRef.current.src
     ) {
       setThumb(null)
-      void reload(thumbnailPath, accountId).then((next) => {
+      void reload(thumbnailMedia, accountId).then((next) => {
         if (next) setThumb((prev) => (prev?.src === next.src ? prev : next))
       })
     }
-  }, [inView, path, thumbnailPath, accountId])
+  }, [inView, media, thumbnailMedia, accountId])
 
   const showFallback = !(thumb && thumb.ready) && !(full && full.ready)
   const thumbRestored = Boolean(
-    inlineSource || (thumbnailPath && getResolvedUrl(thumbnailPath, accountId)),
+    inlineSource || (thumbnailMedia && accountId && getResolvedUrl(thumbnailMedia, accountId)),
   )
-  const fullRestored = Boolean(path && getResolvedUrl(path, accountId))
-  const showBlur = blurred && (path ? !full : !(thumb?.ready ?? false))
+  const fullRestored = Boolean(media && accountId && getResolvedUrl(media, accountId))
+  const showBlur = blurred && (media ? !full : !(thumb?.ready ?? false))
 
   return (
     <span
