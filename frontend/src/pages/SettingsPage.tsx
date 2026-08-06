@@ -11,14 +11,17 @@ import {
   HardDrive,
   Info,
   KeyRound,
+  QrCode,
   RefreshCw,
   Save,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
   Trash2,
   Upload,
 } from 'lucide-react'
+import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { accountRequest, json, request } from '../api/client'
@@ -80,6 +83,9 @@ export function SettingsPage() {
   const [configTree, setConfigTree] = useState<Record<string, unknown> | null>(null)
   const [configMode, setConfigMode] = useState<'form' | 'json'>('form')
   const [authValue, setAuthValue] = useState('')
+  const [authTab, setAuthTab] = useState<'phone' | 'qr'>('phone')
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const [botTokenInput, setBotTokenInput] = useState('')
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const importRef = useRef<HTMLInputElement>(null)
@@ -92,7 +98,7 @@ export function SettingsPage() {
     queryKey: ['telegram-auth', accountId],
     queryFn: () => accountRequest<TelegramAuth>(accountId, '/api/v1/telegram-auth'),
     refetchInterval: (query) =>
-      ['connecting', 'waiting_phone', 'waiting_code', 'waiting_password'].includes(
+      ['connecting', 'waiting_phone', 'waiting_code', 'waiting_password', 'waiting_qr'].includes(
         query.state.data?.state ?? '',
       )
         ? 1000
@@ -198,6 +204,57 @@ export function SettingsPage() {
     waiting_password: 'settings.password',
   } as const
   const waitingLabel = waitingLabels[auth.data?.state as keyof typeof waitingLabels]
+
+  const qrUrl = auth.data?.qr?.url
+  const qrExpiresAt = auth.data?.qr?.expires_at
+
+  useEffect(() => {
+    if (!qrUrl) {
+      setQrDataUrl(null)
+      return
+    }
+    let alive = true
+    QRCode.toDataURL(qrUrl, { width: 176, margin: 1 })
+      .then((dataUrl) => {
+        if (alive) setQrDataUrl(dataUrl)
+      })
+      .catch(() => {
+        if (alive) setQrDataUrl(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [qrUrl])
+
+  useEffect(() => {
+    if (!qrExpiresAt) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [qrExpiresAt])
+
+  const secondsLeft = qrExpiresAt
+    ? Math.max(0, Math.ceil((Date.parse(qrExpiresAt) - now) / 1000))
+    : 0
+
+  useEffect(() => {
+    if (auth.data?.state === 'waiting_qr') setAuthTab('qr')
+    else if (auth.data?.state === 'waiting_phone') setAuthTab('phone')
+  }, [auth.data?.state])
+
+  async function selectAuthTab(tab: 'phone' | 'qr') {
+    setAuthTab(tab)
+    const state = auth.data?.state
+    if (state !== 'waiting_phone' && state !== 'waiting_qr') return
+    const target = tab === 'qr' ? 'qr' : 'phone'
+    if ((state === 'waiting_qr') === (target === 'qr')) return
+    try {
+      await accountRequest(accountId, '/api/v1/telegram-auth/mode', json('POST', { value: target }))
+      await auth.refetch()
+    } catch {
+      await auth.refetch()
+    }
+  }
   async function startAuth() {
     await accountRequest(accountId, '/api/v1/telegram-auth/start', json('POST'))
     await auth.refetch()
@@ -250,6 +307,7 @@ export function SettingsPage() {
     waiting_phone: 'settings.authState.waitingPhone',
     waiting_code: 'settings.authState.waitingCode',
     waiting_password: 'settings.authState.waitingPassword',
+    waiting_qr: 'settings.authState.waitingQr',
     success: 'settings.authState.success',
     error: 'settings.authState.error',
     not_required: 'settings.authState.notRequired',
@@ -367,7 +425,71 @@ export function SettingsPage() {
                   </p>
                 </div>
               </div>
-              {waitingLabel ? (
+              {auth.data?.state === 'waiting_phone' || auth.data?.state === 'waiting_qr' ? (
+                <div className="mt-4">
+                  <Tabs
+                    value={authTab}
+                    onValueChange={(value) => void selectAuthTab(value as 'phone' | 'qr')}
+                  >
+                    <TabsList className={tabsListClass}>
+                      <TabsTrigger value="phone">
+                        <Smartphone size={14} aria-hidden="true" />
+                        {t('accounts.phone')}
+                      </TabsTrigger>
+                      <TabsTrigger value="qr">
+                        <QrCode size={14} aria-hidden="true" />
+                        {t('accounts.qrCode')}
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="phone">
+                      <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                        <label className={fieldClass}>
+                          <span>{t('accounts.phone')}</span>
+                          <input
+                            value={authValue}
+                            onChange={(event) => setAuthValue(event.target.value)}
+                            type="text"
+                            autoFocus
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' && authValue) void submitAuth()
+                            }}
+                          />
+                        </label>
+                        <Button onClick={() => void submitAuth()} disabled={!authValue}>
+                          {t('common.submit')}
+                        </Button>
+                      </div>
+                    </TabsContent>
+                    <TabsContent value="qr">
+                      <div className="flex flex-col items-center gap-2 py-1">
+                        {qrDataUrl ? (
+                          <img
+                            src={qrDataUrl}
+                            alt={t('accounts.qrCode')}
+                            className="size-44 rounded-[5px] border border-slate-200 bg-white p-1"
+                          />
+                        ) : (
+                          <div className="flex size-44 items-center justify-center rounded-[5px] border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
+                            {secondsLeft > 0 ? t('accounts.connecting') : t('accounts.qrExpired')}
+                          </div>
+                        )}
+                        <p className="text-center text-xs text-slate-500">
+                          {secondsLeft > 0
+                            ? t('accounts.qrExpires', { seconds: secondsLeft })
+                            : t('accounts.qrExpired')}
+                        </p>
+                        <button
+                          type="button"
+                          className="text-xs text-blue-600 outline-none hover:underline"
+                          onClick={() => void selectAuthTab('phone')}
+                        >
+                          {t('accounts.qrSwitchPhone')}
+                        </button>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              ) : waitingLabel ? (
                 <div className="mt-4 grid grid-cols-[1fr_auto] items-end gap-2">
                   <label className={fieldClass}>
                     <span>{t(waitingLabel)}</span>

@@ -2,6 +2,8 @@
 Telegram Client Management Module
 Encapsulates Telethon client, handles connection and session management
 """
+import asyncio
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.parse import urlparse
@@ -11,6 +13,7 @@ from telethon.errors import (
     PasswordHashInvalidError,
     PhoneCodeInvalidError,
     PhoneNumberInvalidError,
+    SessionPasswordNeededError,
 )
 from telethon.tl.types import User
 
@@ -172,29 +175,25 @@ class TelegramClientManager:
                     proxy=proxy
                 )
 
-                # Check session
-                from pathlib import Path
-                session_file = Path(f"{self.session_name}.session")
-                has_session = session_file.exists()
-
                 try:
-                    if has_session:
-                        self.auth_manager.set_state("connecting", "")
+                    await self.client.connect()
+                    if await self.client.is_user_authorized():
+                        self.auth_manager.set_state("connecting")
                         logger.debug(t("log.client.session_detected"))
-
-                    # Auth with callbacks
-                    await self.client.start(
-                        phone=self.auth_manager.phone_callback,
-                        code_callback=self.auth_manager.code_callback,
-                        password=self.auth_manager.password_callback
-                    )
-
-                    me: User = await self.client.get_me()
-                    logger.info(
-                        t("log.client.user_logged_in", name=me.first_name, username=me.username)
-                    )
-                    await self._publish_identity(me)
-                    self.auth_manager.set_state("success")
+                        me: User = await self.client.get_me()
+                        logger.info(
+                            t("log.client.user_logged_in", name=me.first_name, username=me.username)
+                        )
+                        await self._publish_identity(me)
+                        self.auth_manager.set_state("success")
+                    else:
+                        mode = await self.auth_manager.wait_for_login_mode()
+                        if mode == "qr":
+                            if not await self._login_with_qr():
+                                # User switched back to the phone flow.
+                                await self._login_with_phone()
+                        else:
+                            await self._login_with_phone()
 
                 except PhoneNumberInvalidError:
                     logger.error(t("log.client.phone_invalid"))
@@ -224,6 +223,84 @@ class TelegramClientManager:
             if self.auth_manager:
                 self.auth_manager.set_state("error", str(e))
             return False
+
+    async def _login_with_phone(self) -> None:
+        """Authenticate a user through the classic phone + code + password flow."""
+        await self.client.start(
+            phone=self.auth_manager.phone_callback,
+            code_callback=self.auth_manager.code_callback,
+            password=self.auth_manager.password_callback
+        )
+        me: User = await self.client.get_me()
+        logger.info(
+            t("log.client.user_logged_in", name=me.first_name, username=me.username)
+        )
+        await self._publish_identity(me)
+        self.auth_manager.set_state("success")
+
+    async def _login_with_qr(self) -> bool:
+        """Authenticate a user by scanning a Telegram QR code.
+
+        Returns True when the QR login completed, or False when the user
+        switched back to the phone flow before scanning.
+
+        The QR token is a short-lived, single-use login capability. It is
+        only ever published through the console's authenticated auth-state
+        endpoint (``AuthManager.set_qr``) and never through SSE or logs.
+        """
+        qr = await self.client.qr_login()
+        self.auth_manager.set_qr(qr.url, qr.expires.isoformat())
+        # The mode-change waiter stays armed across QR refreshes so a
+        # "switch to phone" POST is never dropped during recreate().
+        change_task = asyncio.create_task(self.auth_manager.wait_for_mode_change())
+        try:
+            while True:
+                wait_task = asyncio.create_task(qr.wait())
+                try:
+                    done, _ = await asyncio.wait(
+                        {wait_task, change_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if wait_task in done:
+                        try:
+                            await wait_task
+                        except SessionPasswordNeededError:
+                            self.auth_manager.clear_qr()
+                            self.auth_manager.set_state("waiting_password")
+                            password = await self.auth_manager.password_callback()
+                            await self.client.sign_in(password=password)
+                            me: User = await self.client.get_me()
+                            logger.info(
+                                t("log.client.user_logged_in", name=me.first_name, username=me.username)
+                            )
+                            await self._publish_identity(me)
+                            self.auth_manager.set_state("success")
+                            return True
+                        except asyncio.TimeoutError:
+                            # QR expired: refresh it and keep waiting.
+                            await qr.recreate()
+                            self.auth_manager.set_qr(qr.url, qr.expires.isoformat())
+                            continue
+                        self.auth_manager.clear_qr()
+                        me: User = await self.client.get_me()
+                        logger.info(
+                            t("log.client.user_logged_in", name=me.first_name, username=me.username)
+                        )
+                        await self._publish_identity(me)
+                        self.auth_manager.set_state("success")
+                        return True
+                    # User switched back to phone; abandon the QR challenge.
+                    self.auth_manager.clear_qr()
+                    self.auth_manager.set_state("waiting_phone")
+                    return False
+                finally:
+                    wait_task.cancel()
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await wait_task
+        finally:
+            change_task.cancel()
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await change_task
     
     async def disconnect(self) -> None:
         """Disconnect"""

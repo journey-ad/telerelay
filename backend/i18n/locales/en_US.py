@@ -178,6 +178,9 @@ TRANSLATIONS = {
             "submit_phone": "submit phone number",
             "submit_code": "submit verification code",
             "submit_password": "submit password",
+            "submit_qr": "submit QR login",
+            "mode_selected": "Login method selected: {mode}",
+            "qr_updated": "QR login token refreshed",
             "status": "status",
         },
 
@@ -553,6 +556,7 @@ TRANSLATIONS = {
             "phone_invalid_error": "Invalid phone number format, please check format (e.g., +8613800138000)",
             "code_invalid_error": "Invalid verification code, please restart authentication",
             "password_invalid_error": "Invalid two-step verification password, please restart authentication",
+            "mode_invalid": "Invalid login method, only \"phone\" or \"qr\" is supported",
         },
 
         # message.config.* - configuration messages

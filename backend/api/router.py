@@ -660,6 +660,14 @@ def _submit_auth(context: ApplicationContext, kind: str, value: str) -> ApiMessa
     return ApiMessage(code=f"{kind}_submitted")
 
 
+@router.post("/telegram-auth/mode", response_model=ApiMessage)
+async def submit_auth_mode(
+    payload: AuthValue,
+    context: ApplicationContext = Depends(get_context),
+) -> ApiMessage:
+    return _submit_auth(context, "login_mode", payload.value)
+
+
 @router.post("/telegram-auth/phone", response_model=ApiMessage)
 async def submit_phone(
     payload: AuthValue,

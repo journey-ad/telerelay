@@ -30,14 +30,31 @@ class AuthManager:
         self._pending_kind: Optional[str] = None
         self._pending_future: Optional[asyncio.Future[str]] = None
         self._on_state_change = on_state_change
+        # Login method selection: "phone" (default, backwards compatible) or
+        # "qr". The frontend picks once; the initial mode wait falls back to
+        # phone on timeout so plain phone logins keep working unchanged.
+        self._login_mode = "phone"
+        self._mode_chosen = False
+        self._mode_future: Optional[asyncio.Future[str]] = None
+        self._mode_change_future: Optional[asyncio.Future[str]] = None
+        self._phone_value: Optional[str] = None
+        # Current QR challenge surfaced to the browser through get_state().
+        self._qr_url = ""
+        self._qr_expires_at = ""
 
     def get_state(self) -> dict:
-        return {
+        state = {
             "state": self._auth_state,
             "error": self._error_message,
             "user_info": self._user_info,
             "waiting_for": self._pending_kind,
         }
+        if self._qr_url:
+            state["qr"] = {
+                "url": self._qr_url,
+                "expires_at": self._qr_expires_at,
+            }
+        return state
 
     def set_state(self, state: str, error: str = "") -> None:
         self._auth_state = state
@@ -71,7 +88,44 @@ class AuthManager:
         if not phone.startswith("+"):
             self.set_state("error", t("message.auth.phone_format"))
             return False
-        return self._submit("phone", phone, "phone")
+        # The phone callback may not be armed yet while the login method is
+        # still being chosen. Buffer the value and treat it as an implicit
+        # selection of the phone flow.
+        self._phone_value = phone
+        if self._pending_kind == "phone" and self._pending_future and not self._pending_future.done():
+            return self._submit("phone", phone, "phone")
+        self.submit_login_mode("phone")
+        return True
+
+    def submit_login_mode(self, mode: str) -> bool:
+        """Select the login method ("phone" or "qr")."""
+        mode = mode.strip().lower()
+        if mode not in ("phone", "qr"):
+            self.set_state("error", t("message.auth.mode_invalid"))
+            return False
+        # The method can only change while no code/password challenge is in
+        # flight: once send_code_request has happened the phone flow can no
+        # longer be replaced by a QR login.
+        if self._pending_kind not in (None, "phone") and mode != self._login_mode:
+            return False
+        self._login_mode = mode
+        self._mode_chosen = True
+        for future in (self._mode_future, self._mode_change_future):
+            if future and not future.done():
+                future.set_result(mode)
+        logger.debug(t("log.auth.mode_selected", mode=mode))
+        return True
+
+    def set_qr(self, url: str, expires_at: str) -> None:
+        """Publish the current QR challenge to the browser."""
+        self._qr_url = url
+        self._qr_expires_at = expires_at
+        self.set_state("waiting_qr")
+        logger.debug(t("log.auth.qr_updated"))
+
+    def clear_qr(self) -> None:
+        self._qr_url = ""
+        self._qr_expires_at = ""
 
     def submit_code(self, code: str) -> bool:
         code = code.strip()
@@ -106,7 +160,42 @@ class AuthManager:
                 self._pending_kind = None
                 self._pending_future = None
 
+    async def wait_for_login_mode(self) -> str:
+        """Return the login method chosen by the browser.
+
+        Waits until the frontend explicitly picks phone or QR; a timeout falls
+        back to phone so the previous phone-only behavior is preserved.
+        """
+        if self._mode_chosen:
+            return self._login_mode
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
+        self._mode_future = future
+        self.set_state("waiting_phone")
+        try:
+            return await asyncio.wait_for(future, timeout=self._input_timeout)
+        except asyncio.TimeoutError:
+            return "phone"
+        finally:
+            if self._mode_future is future:
+                self._mode_future = None
+
+    async def wait_for_mode_change(self) -> str:
+        """Wait until the user switches the login method mid-flow (QR -> phone)."""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[str] = loop.create_future()
+        self._mode_change_future = future
+        try:
+            return await future
+        finally:
+            if self._mode_change_future is future:
+                self._mode_change_future = None
+
     async def phone_callback(self) -> str:
+        value = self._phone_value
+        if value is not None:
+            self._phone_value = None
+            return value
         return await self._wait_for_input("phone", "waiting_phone", "phone")
 
     async def code_callback(self) -> str:
@@ -118,8 +207,18 @@ class AuthManager:
     def reset(self) -> None:
         if self._pending_future and not self._pending_future.done():
             self._pending_future.cancel()
+        for future in (self._mode_future, self._mode_change_future):
+            if future and not future.done():
+                future.cancel()
         self._pending_kind = None
         self._pending_future = None
+        self._mode_future = None
+        self._mode_change_future = None
+        self._login_mode = "phone"
+        self._mode_chosen = False
+        self._phone_value = None
+        self._qr_url = ""
+        self._qr_expires_at = ""
         self._auth_state = "idle"
         self._error_message = ""
         self._user_info = ""

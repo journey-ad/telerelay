@@ -27,7 +27,10 @@ class TelegramClientManagerTests(unittest.IsolatedAsyncioTestCase):
             session_name=self.session_name,
         )
         client = MagicMock()
+        client.connect = AsyncMock()
+        client.is_user_authorized = AsyncMock(return_value=False)
         client.start.side_effect = RuntimeError("phone number banned")
+        auth.submit_login_mode("phone")
         with patch("backend.client.TelegramClient", return_value=client):
             self.assertFalse(await manager.connect())
 

@@ -9,6 +9,7 @@ import {
   LogOut,
   Pencil,
   Plus,
+  QrCode,
   Radio,
   RefreshCw,
   Smartphone,
@@ -16,6 +17,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
+import QRCode from 'qrcode'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
@@ -25,7 +27,19 @@ import { cn } from '../utils/cn'
 import { messageFrom } from '../utils/format'
 import { AccountAvatar } from './AccountAvatar'
 import { clearAuthenticatedImages } from './AuthenticatedImage'
-import { Button, confirm, Dialog, fieldClass, IconButton, PasswordInput } from './ui'
+import {
+  Button,
+  confirm,
+  Dialog,
+  fieldClass,
+  IconButton,
+  PasswordInput,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  tabsListClass,
+} from './ui'
 
 function accountSubtitle(account: TelegramAccount, t: TFunction): string {
   const identity = account.username ? `@${account.username}` : ''
@@ -103,6 +117,9 @@ export function AccountSwitcher({
   const [accountKind, setAccountKind] = useState<'user' | 'bot'>('user')
   const [botToken, setBotToken] = useState('')
   const [authValue, setAuthValue] = useState('')
+  const [authTab, setAuthTab] = useState<'phone' | 'qr'>('phone')
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingLabel, setEditingLabel] = useState('')
   const [flowError, setFlowError] = useState<string | null>(null)
@@ -119,6 +136,10 @@ export function AccountSwitcher({
     queryKey: ['telegram-auth', active?.id ?? 'none'],
     queryFn: () => accountRequest<TelegramAuth>(active?.id ?? '', '/api/v1/telegram-auth'),
     enabled: dialogOpen,
+    refetchInterval: (query) => {
+      const state = (query.state.data as TelegramAuth | undefined)?.state
+      return dialogOpen && state === 'waiting_qr' ? 3000 : false
+    },
   })
   const switching = useMutation({
     mutationFn: (accountId: string) =>
@@ -219,6 +240,43 @@ export function AccountSwitcher({
     }
   }, [auth.data?.state]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const qrUrl = auth.data?.qr?.url
+  const qrExpiresAt = auth.data?.qr?.expires_at
+
+  useEffect(() => {
+    if (!qrUrl) {
+      setQrDataUrl(null)
+      return
+    }
+    let alive = true
+    QRCode.toDataURL(qrUrl, { width: 176, margin: 1 })
+      .then((dataUrl) => {
+        if (alive) setQrDataUrl(dataUrl)
+      })
+      .catch(() => {
+        if (alive) setQrDataUrl(null)
+      })
+    return () => {
+      alive = false
+    }
+  }, [qrUrl])
+
+  useEffect(() => {
+    if (!qrExpiresAt) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [qrExpiresAt])
+
+  const secondsLeft = qrExpiresAt
+    ? Math.max(0, Math.ceil((Date.parse(qrExpiresAt) - now) / 1000))
+    : 0
+
+  useEffect(() => {
+    if (auth.data?.state === 'waiting_qr') setAuthTab('qr')
+    else if (auth.data?.state === 'waiting_phone') setAuthTab('phone')
+  }, [auth.data?.state])
+
   const waitingLabels = {
     waiting_phone: 'accounts.phone',
     waiting_code: 'accounts.code',
@@ -227,7 +285,9 @@ export function AccountSwitcher({
   const waitingLabel = waitingLabels[auth.data?.state as keyof typeof waitingLabels]
   const authenticating = Boolean(
     auth.data?.state &&
-    ['waiting_phone', 'waiting_code', 'waiting_password', 'connecting'].includes(auth.data.state),
+    ['waiting_phone', 'waiting_code', 'waiting_password', 'waiting_qr', 'connecting'].includes(
+      auth.data.state,
+    ),
   )
   const switchingToEnglish = i18n.resolvedLanguage !== 'en-US'
   const languageActionLabel = switchingToEnglish
@@ -238,7 +298,27 @@ export function AccountSwitcher({
     setFlowError(null)
     setAuthValue('')
     setBotToken('')
+    setAuthTab(auth.data?.state === 'waiting_qr' ? 'qr' : 'phone')
     setDialogOpen(true)
+  }
+
+  async function selectAuthTab(tab: 'phone' | 'qr') {
+    setAuthTab(tab)
+    const state = auth.data?.state
+    if (state !== 'waiting_phone' && state !== 'waiting_qr') return
+    const target = tab === 'qr' ? 'qr' : 'phone'
+    if ((state === 'waiting_qr') === (target === 'qr')) return
+    try {
+      await accountRequest(
+        active?.id ?? '',
+        '/api/v1/telegram-auth/mode',
+        json('POST', { value: target }),
+      )
+      setFlowError(null)
+      await auth.refetch()
+    } catch (error) {
+      setFlowError(messageFrom(error))
+    }
   }
 
   async function submitAuth() {
@@ -494,17 +574,87 @@ export function AccountSwitcher({
         {authenticating ? (
           <section>
             <div className="mb-4 flex items-center gap-3 rounded-[5px] border border-blue-100 bg-blue-50 p-3">
-              <Smartphone size={20} className="text-blue-600" />
+              {auth.data?.state === 'waiting_qr' ? (
+                <QrCode size={20} className="text-blue-600" />
+              ) : (
+                <Smartphone size={20} className="text-blue-600" />
+              )}
               <div>
                 <strong className="text-[13px] text-slate-700">
                   {t('accounts.authenticating', { name: active?.label ?? '' })}
                 </strong>
                 <p className="mt-0.5 text-[13px] text-slate-500">
-                  {waitingLabel ? t(waitingLabel) : t('accounts.connecting')}
+                  {waitingLabel
+                    ? t(waitingLabel)
+                    : auth.data?.state === 'waiting_qr'
+                      ? t('accounts.qrHint')
+                      : t('accounts.connecting')}
                 </p>
               </div>
             </div>
-            {waitingLabel ? (
+            {auth.data?.state === 'waiting_phone' || auth.data?.state === 'waiting_qr' ? (
+              <Tabs
+                value={authTab}
+                onValueChange={(value) => void selectAuthTab(value as 'phone' | 'qr')}
+              >
+                <TabsList className={tabsListClass}>
+                  <TabsTrigger value="phone">
+                    <Smartphone size={14} aria-hidden="true" />
+                    {t('accounts.phone')}
+                  </TabsTrigger>
+                  <TabsTrigger value="qr">
+                    <QrCode size={14} aria-hidden="true" />
+                    {t('accounts.qrCode')}
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="phone">
+                  <div className="grid grid-cols-[1fr_auto] items-end gap-2 max-sm:grid-cols-1">
+                    <label className={fieldClass}>
+                      <span>{t('accounts.phone')}</span>
+                      <input
+                        value={authValue}
+                        onChange={(event) => setAuthValue(event.target.value)}
+                        type="text"
+                        autoFocus
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && authValue) void submitAuth()
+                        }}
+                      />
+                    </label>
+                    <Button onClick={() => void submitAuth()} disabled={!authValue}>
+                      {t('common.submit')}
+                    </Button>
+                  </div>
+                </TabsContent>
+                <TabsContent value="qr">
+                  <div className="flex flex-col items-center gap-2 py-1">
+                    {qrDataUrl ? (
+                      <img
+                        src={qrDataUrl}
+                        alt={t('accounts.qrCode')}
+                        className="size-44 rounded-[5px] border border-slate-200 bg-white p-1"
+                      />
+                    ) : (
+                      <div className="flex size-44 items-center justify-center rounded-[5px] border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
+                        {secondsLeft > 0 ? t('accounts.connecting') : t('accounts.qrExpired')}
+                      </div>
+                    )}
+                    <p className="text-center text-xs text-slate-500">
+                      {secondsLeft > 0
+                        ? t('accounts.qrExpires', { seconds: secondsLeft })
+                        : t('accounts.qrExpired')}
+                    </p>
+                    <button
+                      type="button"
+                      className="text-xs text-blue-600 outline-none hover:underline"
+                      onClick={() => void selectAuthTab('phone')}
+                    >
+                      {t('accounts.qrSwitchPhone')}
+                    </button>
+                  </div>
+                </TabsContent>
+              </Tabs>
+            ) : waitingLabel ? (
               <div className="grid grid-cols-[1fr_auto] items-end gap-2 max-sm:grid-cols-1">
                 <label className={fieldClass}>
                   <span>{t(waitingLabel)}</span>

@@ -116,7 +116,12 @@
     "editName": "Rename {{name}}",
     "saveName": "Save account name",
     "cancelEdit": "Cancel renaming",
-    "deleteConfirm": "Delete “{{name}}” and its local login session? Its cache data will also be removed."
+    "deleteConfirm": "Delete “{{name}}” and its local login session? Its cache data will also be removed.",
+    "qrCode": "QR code login",
+    "qrHint": "Scan the QR code with the Telegram mobile app",
+    "qrExpires": "QR code expires in {{seconds}}s",
+    "qrExpired": "QR code expired, refreshing…",
+    "qrSwitchPhone": "Use phone number instead"
   },
   "chatInput": {
     "unknown": "Unknown chat [{{id}}]",
@@ -612,6 +617,7 @@
       "waitingPhone": "Waiting for phone",
       "waitingCode": "Waiting for code",
       "waitingPassword": "Waiting for password",
+      "waitingQr": "Waiting for QR scan",
       "success": "Authenticated",
       "error": "Authentication failed",
       "notRequired": "Not required",

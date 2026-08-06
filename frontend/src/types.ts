@@ -360,6 +360,7 @@ export interface TelegramAuth {
   error?: string
   user_info?: string
   account_id?: string | null
+  qr?: { url: string; expires_at: string } | null
 }
 export interface AppConfig {
   config: Record<string, unknown>

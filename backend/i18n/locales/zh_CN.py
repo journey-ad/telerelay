@@ -178,6 +178,9 @@ TRANSLATIONS = {
             "submit_phone": "提交手机号",
             "submit_code": "提交验证码",
             "submit_password": "提交密码",
+            "submit_qr": "提交二维码登录",
+            "mode_selected": "已选择登录方式: {mode}",
+            "qr_updated": "二维码登录令牌已刷新",
             "status": "状态",
         },
 
@@ -553,6 +556,7 @@ TRANSLATIONS = {
             "phone_invalid_error": "手机号格式无效，请检查格式（如 +8613800138000）",
             "code_invalid_error": "验证码错误，请重新开始认证",
             "password_invalid_error": "两步验证密码错误，请重新开始认证",
+            "mode_invalid": "登录方式无效，仅支持 phone 或 qr",
         },
 
         # message.config.* - 配置消息

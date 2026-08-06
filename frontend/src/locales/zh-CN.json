@@ -97,7 +97,7 @@
     "add": "添加账号",
     "exitConsole": "退出控制台",
     "description": "管理本地 Telegram 账号会话与认证",
-    "phone": "手机号码（含国家区号）",
+    "phone": "手机号码（含区号）",
     "code": "Telegram 登录验证码",
     "password": "两步验证密码",
     "authenticating": "正在认证 {{name}}",
@@ -116,7 +116,12 @@
     "editName": "重命名 {{name}}",
     "saveName": "保存账号名称",
     "cancelEdit": "取消重命名",
-    "deleteConfirm": "确定删除“{{name}}”及其本地登录会话？该账号的缓存数据也会一并清除"
+    "deleteConfirm": "确定删除“{{name}}”及其本地登录会话？该账号的缓存数据也会一并清除",
+    "qrCode": "扫码登录",
+    "qrHint": "使用 Telegram 手机版扫描二维码登录",
+    "qrExpires": "二维码将在 {{seconds}} 秒后过期",
+    "qrExpired": "二维码已过期，正在刷新…",
+    "qrSwitchPhone": "改用手机号登录"
   },
   "chatInput": {
     "unknown": "未知会话 [{{id}}]",
@@ -612,6 +617,7 @@
       "waitingPhone": "等待手机号",
       "waitingCode": "等待验证码",
       "waitingPassword": "等待两步验证密码",
+      "waitingQr": "等待扫码登录",
       "success": "已认证",
       "error": "认证失败",
       "notRequired": "无需认证",
