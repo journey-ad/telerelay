@@ -85,11 +85,7 @@ function ToolButton({
 }
 
 function retryTelegramConnection(failureCount: number, error: Error) {
-  return (
-    failureCount < 5 &&
-    error instanceof ApiError &&
-    error.code === 'telegram_not_connected'
-  )
+  return failureCount < 5 && error instanceof ApiError && error.code === 'telegram_not_connected'
 }
 
 export function TelegramPreviewPage() {

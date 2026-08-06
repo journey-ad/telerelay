@@ -16,7 +16,7 @@ from telethon.tl import alltlobjects, types
 
 from backend.logger import get_logger
 from backend.telegram_accounts import TelegramAccountError
-from backend.telegram_preview import TelegramPreviewError
+from backend.telegram_preview import TelegramPreviewError, resolve_active_account
 
 
 logger = get_logger()
@@ -46,12 +46,7 @@ class TelegramMediaService:
         self.config = config
 
     def _active_account(self, account_id: str | None) -> str:
-        target = account_id or self.account_store.active_account_id
-        try:
-            self.account_store.get_public(target)
-        except TelegramAccountError as exc:
-            raise TelegramPreviewError("account_not_found", "Telegram account does not exist") from exc
-        return target
+        return resolve_active_account(self.account_store, account_id)
 
     def _client(self, account_id: str):
         target = self._active_account(account_id)
@@ -178,6 +173,3 @@ class TelegramMediaService:
             "file_name": file_name,
             "size": size,
         }
-
-    async def clear_account(self, account_id: str) -> None:
-        return None

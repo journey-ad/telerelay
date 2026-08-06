@@ -37,7 +37,11 @@ self.addEventListener('fetch', (event) => {
       const match = range ? RANGE_PATTERN.exec(range) : null
       const start = match ? Number(match[1]) : 0
       const requestedEnd = match && match[2] ? Number(match[2]) : start + 512 * 1024 - 1
-      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || requestedEnd < start) {
+      if (
+        !Number.isSafeInteger(start) ||
+        !Number.isSafeInteger(requestedEnd) ||
+        requestedEnd < start
+      ) {
         return new Response('Invalid byte range', { status: 416 })
       }
       const channel = new MessageChannel()
@@ -60,7 +64,12 @@ self.addEventListener('fetch', (event) => {
         }
       })
       client.postMessage(
-        { type: 'telegram-range', token, offset: start, limit: Math.min(512 * 1024, requestedEnd - start + 1) },
+        {
+          type: 'telegram-range',
+          token,
+          offset: start,
+          limit: Math.min(512 * 1024, requestedEnd - start + 1),
+        },
         [channel.port2],
       )
       return response

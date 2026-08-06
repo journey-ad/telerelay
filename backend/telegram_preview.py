@@ -168,6 +168,23 @@ def _stripped_thumbnail(content: bytes | None) -> str | None:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def resolve_active_account(account_store: Any, account_id: str | None) -> str:
+    """Resolve an explicit account id or the store's active account.
+
+    Shared by the preview and browser-direct media services so account
+    resolution behaves identically everywhere.
+    """
+    target = account_id or account_store.active_account_id
+    try:
+        account_store.get_public(target)
+    except TelegramAccountError as exc:
+        raise TelegramPreviewError(
+            "account_not_found",
+            "Telegram account does not exist",
+        ) from exc
+    return target
+
+
 class TelegramPreviewService:
     """Expose Telegram data without read acknowledgements and send plain text."""
 
@@ -193,15 +210,7 @@ class TelegramPreviewService:
         self._last_cache_prune: dict[Path, float] = {}
 
     def _active_account(self, account_id: str | None = None) -> str:
-        target = account_id or self.account_store.active_account_id
-        try:
-            self.account_store.get_public(target)
-        except TelegramAccountError as exc:
-            raise TelegramPreviewError(
-                "account_not_found",
-                "Telegram account does not exist",
-            ) from exc
-        return target
+        return resolve_active_account(self.account_store, account_id)
 
     def _runtime_and_client(self, account_id: str | None = None):
         """Resolve the live runtime and its Telethon client for an account."""
@@ -287,7 +296,6 @@ class TelegramPreviewService:
         cursor: str | None,
     ) -> dict[str, Any]:
         active_id = self._active_account(account_id)
-        dialogs = None
         for attempt in range(2):
             client = await self._client(active_id)
             options: dict[str, Any] = {
@@ -314,11 +322,6 @@ class TelegramPreviewService:
                         "telegram_not_connected",
                         "The requested Telegram account is not connected",
                     ) from exc
-        if dialogs is None:
-            raise TelegramPreviewError(
-                "telegram_not_connected",
-                "The requested Telegram account is not connected",
-            )
         has_more = len(dialogs) > limit
         visible = dialogs[:limit]
         items = [await self._dialog_data(dialog) for dialog in visible]

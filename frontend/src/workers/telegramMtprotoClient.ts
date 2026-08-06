@@ -173,7 +173,7 @@ export class TlReader {
   }
 }
 
-function decodeBase64Url(value: string): Uint8Array {
+export function decodeBase64Url(value: string): Uint8Array {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
   const binary = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='))
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))

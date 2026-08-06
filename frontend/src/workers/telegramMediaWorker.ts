@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { TelegramMtprotoClient, randomSessionId } from './telegramMtprotoClient'
+import { TelegramMtprotoClient, decodeBase64Url, randomSessionId } from './telegramMtprotoClient'
 
 type Ticket = {
   ticket: string
@@ -77,12 +77,6 @@ function postError(id: number | null, error: unknown) {
   errors += 1
   lastError = message
   scope.postMessage({ type: 'error', id, message })
-}
-
-function decodeBase64Url(value: string): Uint8Array {
-  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
-  const binary = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='))
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
 function totalSize() {
@@ -238,11 +232,12 @@ async function read(value: ReadMessage) {
   if (!client || !ticket || !active) throw new Error('Video worker is not ready')
   const purpose = value.purpose ?? 'playback'
   if (purpose === 'playback') rangeRequests += 1
+  const startOffset = Math.max(0, value.offset)
   const requestedLimit = Math.min(TELEGRAM_CHUNK_SIZE, Math.max(1, value.limit))
   const output = new Uint8Array(requestedLimit)
   let written = 0
   while (written < requestedLimit) {
-    const currentOffset = value.offset + written
+    const currentOffset = startOffset + written
     if (currentOffset < initialChunk.length) {
       const available = Math.min(initialChunk.length - currentOffset, requestedLimit - written)
       output.set(initialChunk.subarray(currentOffset, currentOffset + available), written)
@@ -260,8 +255,8 @@ async function read(value: ReadMessage) {
   }
   const bytes = output.slice(0, written)
   bytesServed += bytes.length
-  scope.postMessage({ type: 'chunk', id: value.id, offset: value.offset, bytes }, [bytes.buffer])
-  if (purpose === 'playback') preloadChunks(value.offset + written)
+  scope.postMessage({ type: 'chunk', id: value.id, offset: startOffset, bytes }, [bytes.buffer])
+  if (purpose === 'playback') preloadChunks(startOffset + written)
 }
 
 function postStats(id: number) {

@@ -540,8 +540,6 @@ async def delete_telegram_account(
         raise _error(exc.code, str(exc), status_code) from exc
     if context.telegram_preview:
         await context.telegram_preview.clear_account_cache(account_id)
-    if context.telegram_media:
-        await context.telegram_media.clear_account(account_id)
     context.events.publish("telegram-account", {"action": "delete", "id": account_id})
     return ApiMessage(code="telegram_account_deleted")
 
