@@ -867,10 +867,28 @@ async def delete_button_rule(
 @router.get("/stats")
 async def stats(
     date_limit: StatsDateLimit = "30day",
+    granularity: Literal["day", "hour"] = "day",
+    rule_name: str | None = None,
     context: ApplicationContext = Depends(get_context),
 ) -> dict:
     database = _active_stats(context)
     report_days = STATS_DATE_LIMIT_DAYS[date_limit]
+    if granularity == "hour":
+        report_hours = None if report_days is None else report_days * 24 * 2
+        details, button_details, hourly, media_types, automation_hourly = await asyncio.gather(
+            asyncio.to_thread(database.get_rule_stats_detail),
+            asyncio.to_thread(database.get_button_action_stats),
+            asyncio.to_thread(database.get_hourly_stats, report_hours, rule_name),
+            asyncio.to_thread(database.get_media_type_stats, report_days, rule_name),
+            asyncio.to_thread(database.get_button_action_hourly, report_hours, rule_name),
+        )
+        return {
+            "rules": details,
+            "button_rules": button_details,
+            "hourly": hourly,
+            "media_types": media_types,
+            "automation_hourly": automation_hourly,
+        }
     details, button_details, daily = await asyncio.gather(
         asyncio.to_thread(database.get_rule_stats_detail),
         asyncio.to_thread(database.get_button_action_stats),

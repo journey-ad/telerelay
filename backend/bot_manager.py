@@ -660,11 +660,18 @@ class BotManager:
     def _queue_outcome(
         self, item: ForwardQueueItem, status: str, error: Exception | None
     ) -> None:
+        current_item = item
+        item_exists = False
         if self.forward_queue_store:
             try:
-                item = self.forward_queue_store.get_item(item.id)
+                current_item = self.forward_queue_store.get_item(item.id)
+                item_exists = True
             except KeyError:
                 pass
+        if status == "failed" and item_exists:
+            increment_failed = getattr(self.stats_db, "increment_failed", None)
+            if callable(increment_failed):
+                increment_failed(current_item.rule_name)
         self._publish_event(
             "forward",
             self._forward_event_payload(

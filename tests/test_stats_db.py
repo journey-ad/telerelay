@@ -85,6 +85,25 @@ class StatsDBTests(unittest.TestCase):
             [{"rule_name": "其他", "triggered": 0}],
         )
 
+    def test_hourly_stats_and_media_distribution_can_be_filtered(self):
+        self.database.increment_forwarded("news")
+        self.database.increment_filtered("news")
+        self.database.increment_failed("news")
+        self.database.increment_button_action("automation")
+        self.database.insert_history(rule_name="news", content="text", media_type="text")
+        self.database.insert_history(rule_name="news", content="photo", media_type="photo")
+
+        hourly = self.database.get_hourly_stats(24, "news")
+        self.assertEqual(len(hourly), 1)
+        self.assertEqual(hourly[0]["forwarded"], 1)
+        self.assertEqual(hourly[0]["filtered"], 1)
+        self.assertEqual(hourly[0]["failed"], 1)
+        self.assertEqual(
+            self.database.get_media_type_stats(1, "news"),
+            [{"media_type": "photo", "count": 1}, {"media_type": "text", "count": 1}],
+        )
+        self.assertEqual(self.database.get_button_action_hourly(24, "automation")[0]["triggered"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

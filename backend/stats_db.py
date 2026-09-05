@@ -91,6 +91,18 @@ class StatsDB:
                     )
                 """)
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_ds_date ON daily_stats(date)")
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS hourly_stats (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        rule_name TEXT NOT NULL,
+                        hour TEXT NOT NULL,
+                        forwarded_count INTEGER NOT NULL DEFAULT 0,
+                        filtered_count INTEGER NOT NULL DEFAULT 0,
+                        failed_count INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE(rule_name, hour)
+                    )
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_hs_hour ON hourly_stats(hour)")
 
                 # Button action stats table
                 conn.execute("""
@@ -99,6 +111,18 @@ class StatsDB:
                         trigger_count INTEGER NOT NULL DEFAULT 0
                     )
                 """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS button_action_hourly (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        rule_name TEXT NOT NULL,
+                        hour TEXT NOT NULL,
+                        trigger_count INTEGER NOT NULL DEFAULT 0,
+                        UNIQUE(rule_name, hour)
+                    )
+                """)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_bah_hour ON button_action_hourly(hour)"
+                )
 
                 conn.commit()
             finally:
@@ -137,6 +161,36 @@ class StatsDB:
             finally:
                 conn.close()
 
+    @staticmethod
+    def _increment_hourly(
+        conn: sqlite3.Connection,
+        rule_name: str,
+        column: str,
+        amount: int = 1,
+    ) -> None:
+        if column not in {"forwarded_count", "filtered_count", "failed_count"}:
+            raise ValueError(f"Unsupported hourly stats column: {column}")
+        hour = datetime.now().strftime("%Y-%m-%d %H:00")
+        conn.execute(
+            f"""
+            INSERT INTO hourly_stats (rule_name, hour, {column})
+            VALUES (?, ?, ?)
+            ON CONFLICT(rule_name, hour) DO UPDATE SET
+                {column} = {column} + excluded.{column}
+            """,
+            (rule_name, hour, int(amount)),
+        )
+
+    def increment_failed(self, rule_name: str) -> None:
+        """Record one forwarding task that reached its final failed state."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                self._increment_hourly(conn, rule_name, "failed_count")
+                conn.commit()
+            finally:
+                conn.close()
+
     # -- Button action stats --
 
     def increment_button_action(self, rule_name: str) -> None:
@@ -150,6 +204,13 @@ class StatsDB:
                     ON CONFLICT(rule_name) DO UPDATE SET
                         trigger_count = trigger_count + 1
                 """, (rule_name,))
+                hour = datetime.now().strftime("%Y-%m-%d %H:00")
+                conn.execute("""
+                    INSERT INTO button_action_hourly (rule_name, hour, trigger_count)
+                    VALUES (?, ?, 1)
+                    ON CONFLICT(rule_name, hour) DO UPDATE SET
+                        trigger_count = trigger_count + 1
+                """, (rule_name, hour))
                 conn.commit()
             finally:
                 conn.close()
@@ -196,6 +257,10 @@ class StatsDB:
                     "UPDATE button_action_stats SET rule_name = ? WHERE rule_name = ?",
                     (new_name, old_name)
                 )
+                conn.execute(
+                    "UPDATE button_action_hourly SET rule_name = ? WHERE rule_name = ?",
+                    (new_name, old_name),
+                )
                 conn.commit()
             finally:
                 conn.close()
@@ -208,6 +273,10 @@ class StatsDB:
                 conn.execute(
                     "DELETE FROM button_action_stats WHERE rule_name = ?",
                     (rule_name,)
+                )
+                conn.execute(
+                    "DELETE FROM button_action_hourly WHERE rule_name = ?",
+                    (rule_name,),
                 )
                 conn.commit()
             finally:
@@ -224,6 +293,7 @@ class StatsDB:
                     ON CONFLICT(rule_name) DO UPDATE SET
                         forwarded_count = forwarded_count + 1
                 """, (rule_name,))
+                self._increment_hourly(conn, rule_name, "forwarded_count")
                 conn.commit()
             finally:
                 conn.close()
@@ -239,6 +309,7 @@ class StatsDB:
                     ON CONFLICT(rule_name) DO UPDATE SET
                         filtered_count = filtered_count + 1
                 """, (rule_name,))
+                self._increment_hourly(conn, rule_name, "filtered_count")
                 conn.commit()
             finally:
                 conn.close()
@@ -264,6 +335,20 @@ class StatsDB:
                     conn.execute(
                         "UPDATE button_action_stats SET trigger_count = 0"
                     )
+                if rule_name:
+                    conn.execute(
+                        "UPDATE hourly_stats SET forwarded_count = 0, filtered_count = 0, failed_count = 0 WHERE rule_name = ?",
+                        (rule_name,),
+                    )
+                    conn.execute(
+                        "UPDATE button_action_hourly SET trigger_count = 0 WHERE rule_name = ?",
+                        (rule_name,),
+                    )
+                else:
+                    conn.execute(
+                        "UPDATE hourly_stats SET forwarded_count = 0, filtered_count = 0, failed_count = 0"
+                    )
+                    conn.execute("UPDATE button_action_hourly SET trigger_count = 0")
                 conn.commit()
             finally:
                 conn.close()
@@ -285,6 +370,14 @@ class StatsDB:
                     "UPDATE daily_stats SET rule_name = ? WHERE rule_name = ?",
                     (new_name, old_name)
                 )
+                conn.execute(
+                    "UPDATE hourly_stats SET rule_name = ? WHERE rule_name = ?",
+                    (new_name, old_name),
+                )
+                conn.execute(
+                    "UPDATE button_action_hourly SET rule_name = ? WHERE rule_name = ?",
+                    (new_name, old_name),
+                )
                 conn.commit()
             finally:
                 conn.close()
@@ -305,6 +398,14 @@ class StatsDB:
                 conn.execute(
                     "DELETE FROM daily_stats WHERE rule_name = ?",
                     (rule_name,)
+                )
+                conn.execute(
+                    "DELETE FROM hourly_stats WHERE rule_name = ?",
+                    (rule_name,),
+                )
+                conn.execute(
+                    "DELETE FROM button_action_hourly WHERE rule_name = ?",
+                    (rule_name,),
                 )
                 conn.commit()
             finally:
@@ -538,6 +639,108 @@ class StatsDB:
                     {"date": row[0], "forwarded": row[1], "filtered": row[2]}
                     for row in cursor.fetchall()
                 ]
+            finally:
+                conn.close()
+
+    def get_hourly_stats(
+        self, hours: Optional[int] = 720, rule_name: str | None = None
+    ) -> List[dict]:
+        """Return hourly forwarding statistics, optionally scoped to one rule."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                clauses = []
+                params: list[object] = []
+                if hours is not None:
+                    cutoff = datetime.now() - timedelta(hours=max(1, int(hours)))
+                    clauses.append("hour >= ?")
+                    params.append(cutoff.strftime("%Y-%m-%d %H:00"))
+                if rule_name:
+                    clauses.append("rule_name = ?")
+                    params.append(rule_name)
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                rows = conn.execute(
+                    f"""
+                    SELECT hour,
+                           SUM(forwarded_count),
+                           SUM(filtered_count),
+                           SUM(failed_count)
+                    FROM hourly_stats {where}
+                    GROUP BY hour
+                    ORDER BY hour ASC
+                    """,
+                    params,
+                ).fetchall()
+                return [
+                    {
+                        "hour": row[0],
+                        "forwarded": row[1] or 0,
+                        "filtered": row[2] or 0,
+                        "failed": row[3] or 0,
+                    }
+                    for row in rows
+                ]
+            finally:
+                conn.close()
+
+    def get_media_type_stats(
+        self, days: Optional[int] = 30, rule_name: str | None = None
+    ) -> List[dict]:
+        """Return forwarded message counts grouped by media type."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                clauses = []
+                params: list[object] = []
+                if days is not None:
+                    cutoff = datetime.now() - timedelta(days=max(1, int(days)))
+                    clauses.append("forwarded_at >= ?")
+                    params.append(cutoff.strftime("%Y-%m-%d %H:%M:%S"))
+                if rule_name:
+                    clauses.append("rule_name = ?")
+                    params.append(rule_name)
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                rows = conn.execute(
+                    f"""
+                    SELECT COALESCE(NULLIF(media_type, ''), 'text') AS media_type,
+                           COUNT(*)
+                    FROM forwarded_messages {where}
+                    GROUP BY media_type
+                    ORDER BY COUNT(*) DESC, media_type ASC
+                    """,
+                    params,
+                ).fetchall()
+                return [{"media_type": row[0], "count": row[1]} for row in rows]
+            finally:
+                conn.close()
+
+    def get_button_action_hourly(
+        self, hours: Optional[int] = 720, rule_name: str | None = None
+    ) -> List[dict]:
+        """Return hourly automation trigger counts."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                clauses = []
+                params: list[object] = []
+                if hours is not None:
+                    cutoff = datetime.now() - timedelta(hours=max(1, int(hours)))
+                    clauses.append("hour >= ?")
+                    params.append(cutoff.strftime("%Y-%m-%d %H:00"))
+                if rule_name:
+                    clauses.append("rule_name = ?")
+                    params.append(rule_name)
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                rows = conn.execute(
+                    f"""
+                    SELECT hour, SUM(trigger_count)
+                    FROM button_action_hourly {where}
+                    GROUP BY hour
+                    ORDER BY hour ASC
+                    """,
+                    params,
+                ).fetchall()
+                return [{"hour": row[0], "triggered": row[1] or 0} for row in rows]
             finally:
                 conn.close()
 

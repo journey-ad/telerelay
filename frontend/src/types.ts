@@ -275,9 +275,12 @@ export interface SubscriberList {
 }
 
 export interface Stats {
-  daily: Array<{ date: string; forwarded: number; filtered: number; total?: number }>
+  daily?: Array<{ date: string; forwarded: number; filtered: number; total?: number }>
   rules: Array<{ rule_name: string; total: number; forwarded: number; filtered?: number }>
   button_rules?: Array<{ rule_name: string; triggered: number }>
+  hourly?: Array<{ hour: string; forwarded: number; filtered: number; failed: number }>
+  media_types?: Array<{ media_type: string; count: number }>
+  automation_hourly?: Array<{ hour: string; triggered: number }>
 }
 
 export interface HistoryItem {

@@ -8,6 +8,7 @@ import {
   Filter,
   Gauge,
   ListChecks,
+  MousePointerClick,
   Minus,
   Pause,
   Play,
@@ -34,7 +35,15 @@ import {
   YAxis,
 } from 'recharts'
 import { accountRequest, json, request } from '../api/client'
-import { Button, EmptyState, IconButton, PageHeader, Panel, confirm } from '../components/ui'
+import {
+  Button,
+  EmptyState,
+  IconButton,
+  PageHeader,
+  Panel,
+  Select,
+  confirm,
+} from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
 import { useAccountScope } from '../hooks/useAccountScope'
 import type { BotStatus, ForwardQueueItem, RelayEvent, Stats, TelegramAccount } from '../types'
@@ -42,8 +51,15 @@ import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 
 type ReportPeriod = '7day' | '14day' | '30day' | 'all'
-type DailyStat = Stats['daily'][number] & { total: number }
-type DailyIntensityStat = DailyStat & { endDate?: string }
+type TrendStat = {
+  date: string
+  forwarded: number
+  filtered: number
+  failed: number
+  total: number
+}
+type TrendIntensityStat = TrendStat & { endDate?: string }
+type HourlyStat = NonNullable<Stats['hourly']>[number]
 
 const periodOptions = [
   { value: '7day', labelKey: 'dashboard.periods.sevenDays' },
@@ -57,6 +73,7 @@ const metricTones = {
   amber: 'bg-amber-50 text-amber-600',
   cyan: 'bg-cyan-50 text-cyan-600',
   green: 'bg-emerald-50 text-emerald-600',
+  rose: 'bg-rose-50 text-rose-600',
 }
 const chartTooltipStyle = {
   border: '1px solid #dbe6f4',
@@ -261,57 +278,59 @@ function localDateKey(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
-function fillDailySeries(source: Stats['daily'], days: number): DailyStat[] {
-  const byDate = new Map(source.map((item) => [item.date, item]))
+function fillHourlySeries(source: HourlyStat[], hours: number): TrendStat[] {
+  const byHour = new Map(source.map((item) => [item.hour, item]))
   const today = new Date()
-  today.setHours(12, 0, 0, 0)
+  today.setMinutes(0, 0, 0)
 
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date(today)
-    date.setDate(today.getDate() - (days - index - 1))
-    const key = localDateKey(date)
-    const item = byDate.get(key)
+  return Array.from({ length: hours }, (_, index) => {
+    const date = new Date(today.getTime() - (hours - index - 1) * 3_600_000)
+    const key = `${localDateKey(date)} ${String(date.getHours()).padStart(2, '0')}:00`
+    const item = byHour.get(key)
     const forwarded = item?.forwarded ?? 0
     const filtered = item?.filtered ?? 0
-    return { date: key, forwarded, filtered, total: forwarded + filtered }
+    const failed = item?.failed ?? 0
+    return { date: key, forwarded, filtered, failed, total: forwarded + filtered + failed }
   })
 }
 
-function allTimeDays(source: Stats['daily']): number {
+function allTimeHours(source: HourlyStat[]): number {
   if (!source.length) return 1
-  const first = new Date(`${source[0].date}T12:00:00`)
+  const first = new Date(`${source[0].hour.replace(' ', 'T')}:00`)
   const today = new Date()
-  today.setHours(12, 0, 0, 0)
-  return Math.max(1, Math.round((today.getTime() - first.getTime()) / 86_400_000) + 1)
+  today.setMinutes(0, 0, 0)
+  return Math.max(1, Math.round((today.getTime() - first.getTime()) / 3_600_000) + 1)
 }
 
-function aggregateDaily(items: DailyStat[]) {
+function aggregateTrend(items: TrendStat[]) {
   return items.reduce(
     (total, item) => ({
       forwarded: total.forwarded + item.forwarded,
       filtered: total.filtered + item.filtered,
+      failed: total.failed + item.failed,
       total: total.total + item.total,
     }),
-    { forwarded: 0, filtered: 0, total: 0 },
+    { forwarded: 0, filtered: 0, failed: 0, total: 0 },
   )
 }
 
-function sampleDailyIntensity(
-  items: DailyStat[],
+function sampleHourlyIntensity(
+  items: TrendStat[],
   limit = intensitySampleLimit,
-): DailyIntensityStat[] {
+): TrendIntensityStat[] {
   if (items.length <= limit) return items
 
   return Array.from({ length: limit }, (_, index) => {
     const start = Math.floor((index * items.length) / limit)
     const end = Math.floor(((index + 1) * items.length) / limit)
     const bucket = items.slice(start, end)
-    const totals = aggregateDaily(bucket)
+    const totals = aggregateTrend(bucket)
     return {
       date: bucket[0].date,
       endDate: bucket[bucket.length - 1].date,
       forwarded: Math.round(totals.forwarded / bucket.length),
       filtered: Math.round(totals.filtered / bucket.length),
+      failed: Math.round(totals.failed / bucket.length),
       total: Math.round(totals.total / bucket.length),
     }
   })
@@ -327,10 +346,12 @@ function formatPercent(value: number): string {
 }
 
 function formatReportDate(value: string, locale: string): string {
-  return new Date(`${value}T00:00:00`).toLocaleDateString(locale, {
+  const date = new Date(value.includes(' ') ? value.replace(' ', 'T') : `${value}T00:00:00`)
+  return date.toLocaleString(locale, {
     month: 'short',
     day: 'numeric',
     weekday: 'short',
+    ...(value.includes(' ') ? { hour: 'numeric', minute: '2-digit' } : {}),
   })
 }
 
@@ -362,6 +383,7 @@ export function DashboardPage() {
   const accountId = useAccountScope()
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('14day')
   const [queuePreviewOpen, setQueuePreviewOpen] = useState(false)
+  const [trendRule, setTrendRule] = useState('all')
   const reportDays = reportPeriod === 'all' ? null : periodDays[reportPeriod]
   const allTime = reportDays === null
   const statusQuery = useQuery({
@@ -379,8 +401,12 @@ export function DashboardPage() {
     refetchInterval: queuePreviewOpen ? 5_000 : false,
   })
   const statsQuery = useQuery({
-    queryKey: ['stats', accountId, reportPeriod],
-    queryFn: () => accountRequest<Stats>(accountId, `/api/v1/stats?date_limit=${reportPeriod}`),
+    queryKey: ['stats', accountId, reportPeriod, trendRule],
+    queryFn: () => {
+      const params = new URLSearchParams({ date_limit: reportPeriod, granularity: 'hour' })
+      if (trendRule !== 'all') params.set('rule_name', trendRule)
+      return accountRequest<Stats>(accountId, `/api/v1/stats?${params}`)
+    },
     refetchInterval: 15_000,
   })
   const eventHistoryQuery = useQuery({
@@ -450,49 +476,67 @@ export function DashboardPage() {
     .filter(([key]) => key === 'pending' || key === 'processing')
     .reduce((sum, [, value]) => sum + value, 0)
   const report = useMemo(() => {
-    const source = statsQuery.data?.daily ?? []
-    const durationDays = reportDays ?? allTimeDays(source)
-    const series = fillDailySeries(source, allTime ? durationDays : reportDays * 2)
-    const currentDaily = allTime ? series : series.slice(-reportDays)
-    const previousDaily = allTime ? [] : series.slice(0, reportDays)
-    const current = aggregateDaily(currentDaily)
-    const previous = aggregateDaily(previousDaily)
-    const peak = currentDaily.reduce<DailyStat | null>(
+    const source = statsQuery.data?.hourly ?? []
+    const durationHours = reportDays ? reportDays * 24 : allTimeHours(source)
+    const series = fillHourlySeries(source, allTime ? durationHours : reportDays * 24 * 2)
+    const currentHourly = allTime ? series : series.slice(-reportDays * 24)
+    const previousHourly = allTime ? [] : series.slice(0, reportDays * 24)
+    const current = aggregateTrend(currentHourly)
+    const previous = aggregateTrend(previousHourly)
+    const peak = currentHourly.reduce<TrendStat | null>(
       (best, item) => (item.total > 0 && (!best || item.total > best.total) ? item : best),
       null,
     )
-    const activeDays = currentDaily.filter((item) => item.total > 0).length
-    const intensityDaily = sampleDailyIntensity(
+    const activeHours = currentHourly.filter((item) => item.total > 0).length
+    const intensityHourly = sampleHourlyIntensity(
       allTime
-        ? fillDailySeries(source, Math.max(durationDays, intensitySampleLimit))
-        : currentDaily,
+        ? fillHourlySeries(source, Math.max(durationHours, intensitySampleLimit))
+        : currentHourly,
     )
-    const maxIntensityTotal = Math.max(...intensityDaily.map((item) => item.total), 1)
+    const maxIntensityTotal = Math.max(...intensityHourly.map((item) => item.total), 1)
 
     return {
       current,
       previous,
-      currentDaily,
-      intensityDaily,
+      currentHourly,
+      intensityHourly,
       peak,
-      activeDays,
+      activeHours,
       maxIntensityTotal,
-      durationDays,
+      durationHours,
       change: allTime ? undefined : percentChange(current.total, previous.total),
       forwardedChange: allTime ? undefined : percentChange(current.forwarded, previous.forwarded),
       filteredChange: allTime ? undefined : percentChange(current.filtered, previous.filtered),
       forwardRate: current.total ? (current.forwarded / current.total) * 100 : 0,
-      dailyAverage: current.total / durationDays,
+      dailyAverage: current.total / Math.max(durationHours / 24, 1 / 24),
     }
-  }, [allTime, reportDays, statsQuery.data?.daily])
+  }, [allTime, reportDays, statsQuery.data?.hourly])
   const rankedRules = useMemo(
     () => [...(statsQuery.data?.rules ?? [])].sort((left, right) => right.total - left.total),
     [statsQuery.data?.rules],
   )
+  const ruleOptions = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...(statsQuery.data?.rules ?? []).map((item) => item.rule_name),
+          ...(statsQuery.data?.button_rules ?? []).map((item) => item.rule_name),
+        ]),
+      ].sort(),
+    [statsQuery.data?.button_rules, statsQuery.data?.rules],
+  )
+  const automationHourly = statsQuery.data?.automation_hourly ?? []
+  const automationTriggers = useMemo(() => {
+    const visible = allTime ? automationHourly : automationHourly.slice(-reportDays * 24)
+    return visible.reduce((sum, item) => sum + item.triggered, 0)
+  }, [allTime, automationHourly, reportDays])
   const maxRuleTotal = Math.max(...rankedRules.map((rule) => rule.total), 1)
+  const mediaTypes = statsQuery.data?.media_types ?? []
+  const maxMediaCount = Math.max(...mediaTypes.map((item) => item.count), 1)
   const flowComposition = [
     { name: t('dashboard.forwarded'), value: report.current.forwarded, color: '#2563eb' },
     { name: t('dashboard.filtered'), value: report.current.filtered, color: '#f59e0b' },
+    { name: t('dashboard.failed'), value: report.current.failed, color: '#e11d48' },
   ]
   const metrics = [
     {
@@ -511,6 +555,24 @@ export function DashboardPage() {
       trend: report.filteredChange,
       hint: allTime ? t('dashboard.allTimeTotal') : undefined,
       tone: 'amber',
+      queueAction: false,
+    },
+    {
+      label: t('dashboard.periodFailed'),
+      value: report.current.failed,
+      icon: Activity,
+      trend: undefined,
+      hint: allTime ? t('dashboard.allTimeTotal') : undefined,
+      tone: 'rose',
+      queueAction: false,
+    },
+    {
+      label: t('dashboard.automationTriggerCount'),
+      value: automationTriggers,
+      icon: MousePointerClick,
+      trend: undefined,
+      hint: allTime ? t('dashboard.allTimeTotal') : undefined,
+      tone: 'rose',
       queueAction: false,
     },
     {
@@ -541,7 +603,7 @@ export function DashboardPage() {
         description={t('dashboard.description')}
       />
 
-      <div className="mb-3 grid grid-cols-4 gap-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
+      <div className="mb-3 grid grid-cols-4 gap-3 max-xl:grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
         {metrics.map(({ label, value, icon: Icon, trend, hint, tone, queueAction }) => (
           <article
             className={cn(
@@ -739,33 +801,44 @@ export function DashboardPage() {
       <div
         className={cn(
           'mb-3 grid grid-cols-[minmax(0,1.7fr)_minmax(280px,0.8fr)] gap-3',
-          'max-lg:grid-cols-1',
+          'max-xl:grid-cols-1',
         )}
       >
         <Panel
           title={t('dashboard.trafficTrend')}
           meta={
-            <div
-              className="flex rounded-[5px] bg-slate-100 p-0.5"
-              role="group"
-              aria-label={t('dashboard.reportPeriod')}
-            >
-              {periodOptions.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={cn(
-                    'h-6.5 min-w-10 rounded border-0 px-2 text-xs font-semibold',
-                    option.value === reportPeriod
-                      ? 'bg-white text-blue-700 shadow-sm'
-                      : 'bg-transparent text-slate-400 hover:text-slate-600',
-                  )}
-                  aria-pressed={option.value === reportPeriod}
-                  onClick={() => setReportPeriod(option.value)}
-                >
-                  {t(option.labelKey)}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center justify-end gap-2 max-sm:justify-start">
+              <Select
+                value={trendRule}
+                onValueChange={setTrendRule}
+                className="h-7 w-40 text-xs"
+                options={[
+                  { value: 'all', label: t('dashboard.allRules') },
+                  ...ruleOptions.map((rule) => ({ value: rule, label: rule })),
+                ]}
+              />
+              <div
+                className="flex rounded-[5px] bg-slate-100 p-0.5"
+                role="group"
+                aria-label={t('dashboard.reportPeriod')}
+              >
+                {periodOptions.map((option) => (
+                  <button
+                    type="button"
+                    key={option.value}
+                    className={cn(
+                      'h-6.5 min-w-10 rounded border-0 px-2 text-xs font-semibold',
+                      option.value === reportPeriod
+                        ? 'bg-white text-blue-700 shadow-sm'
+                        : 'bg-transparent text-slate-400 hover:text-slate-600',
+                    )}
+                    aria-pressed={option.value === reportPeriod}
+                    onClick={() => setReportPeriod(option.value)}
+                  >
+                    {t(option.labelKey)}
+                  </button>
+                ))}
+              </div>
             </div>
           }
         >
@@ -773,7 +846,7 @@ export function DashboardPage() {
             <div className="h-68">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
-                  data={report.currentDaily}
+                  data={report.currentHourly}
                   margin={{ top: 12, right: 8, left: -18, bottom: 0 }}
                 >
                   <defs>
@@ -824,6 +897,16 @@ export function DashboardPage() {
                     strokeWidth={1.5}
                     fill="url(#dashboard-filtered-fill)"
                   />
+                  <Area
+                    type="monotone"
+                    dataKey="failed"
+                    name={t('dashboard.failed')}
+                    stackId="flow"
+                    stroke="#e11d48"
+                    strokeWidth={1.5}
+                    fill="#e11d48"
+                    fillOpacity={0.12}
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -840,6 +923,9 @@ export function DashboardPage() {
             </span>
             <span className="flex items-center gap-1.5 before:h-0.5 before:w-4 before:bg-amber-500">
               {t('dashboard.filtered')}
+            </span>
+            <span className="flex items-center gap-1.5 before:h-0.5 before:w-4 before:bg-rose-600">
+              {t('dashboard.failed')}
             </span>
             <span className="ml-auto text-slate-400 max-sm:ml-0">
               {t('dashboard.currentPeriodCount', { value: formatNumber(report.current.total) })}
@@ -920,13 +1006,13 @@ export function DashboardPage() {
                 <CalendarDays size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-xs text-slate-400">{t('dashboard.activeDays')}</small>
+                <small className="text-xs text-slate-400">{t('dashboard.activeHours')}</small>
                 <strong className="mt-0.5 text-xs text-slate-700">
                   {t('dashboard.periodCoverage')}
                 </strong>
               </span>
               <b className="text-sm text-slate-700">
-                {report.activeDays}/{report.durationDays}
+                {report.activeHours}/{report.durationHours}
               </b>
             </div>
           </div>
@@ -937,13 +1023,13 @@ export function DashboardPage() {
             <div
               className={cn(
                 'grid h-7 grid-flow-col items-stretch overflow-hidden',
-                report.intensityDaily.length > 40
+                report.intensityHourly.length > 40
                   ? 'auto-cols-[minmax(3px,1fr)] gap-px'
                   : 'auto-cols-fr gap-1',
               )}
               data-testid="daily-intensity"
             >
-              {report.intensityDaily.map((item) => (
+              {report.intensityHourly.map((item) => (
                 <span
                   key={`${item.date}-${item.endDate ?? item.date}`}
                   title={t(
@@ -972,12 +1058,7 @@ export function DashboardPage() {
         </Panel>
       </div>
 
-      <div
-        className={cn(
-          'mb-3 grid grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)] gap-3',
-          'max-lg:grid-cols-1',
-        )}
-      >
+      <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
         <Panel
           title={t('dashboard.trafficComposition')}
           meta={
@@ -1020,7 +1101,7 @@ export function DashboardPage() {
                     className="flex items-center justify-between py-3 first:pt-0"
                     key={item.name}
                   >
-                    <span className="flex items-center gap-2 text-[13px] text-slate-500">
+                    <span className="flex min-w-0 items-center gap-2 text-[13px] text-slate-500">
                       <i className="size-2 rounded-sm" style={{ backgroundColor: item.color }} />
                       {item.name}
                     </span>
@@ -1045,14 +1126,47 @@ export function DashboardPage() {
         </Panel>
 
         <Panel
+          title={t('dashboard.mediaDistribution')}
+          meta={
+            <span>
+              {t('dashboard.currentPeriodCount', {
+                value: mediaTypes.reduce((sum, item) => sum + item.count, 0),
+              })}
+            </span>
+          }
+        >
+          {mediaTypes.length ? (
+            <div className="space-y-3">
+              {mediaTypes.map((item) => (
+                <div key={item.media_type}>
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="text-slate-500">{item.media_type}</span>
+                    <strong className="text-slate-700">{formatNumber(item.count)}</strong>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-sm bg-slate-100">
+                    <i
+                      className="block h-full bg-cyan-500"
+                      style={{ width: `${(item.count / maxMediaCount) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState icon={Activity} title={t('dashboard.noMediaDistribution')} />
+          )}
+        </Panel>
+
+        <Panel
           title={t('dashboard.nodeControl')}
+          className="flex flex-col lg:col-span-2 2xl:col-span-1"
           meta={
             <span className={status.is_running ? 'text-emerald-600' : ''}>
               {t(status.is_running ? 'dashboard.running' : 'dashboard.stopped')}
             </span>
           }
         >
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-4 max-sm:grid-cols-1">
+          <div className="grid flex-1 grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
             <div
               className={cn(
                 'flex items-center gap-3 rounded-[5px] border',
@@ -1069,11 +1183,13 @@ export function DashboardPage() {
               >
                 {status.is_running ? <Play size={22} fill="currentColor" /> : <Pause size={22} />}
               </span>
-              <div>
+              <div className="min-w-0">
                 <strong className="mb-1 block text-[13px] text-slate-700">
                   {t(status.is_running ? 'dashboard.relayRunning' : 'dashboard.relayStopped')}
                 </strong>
-                <p className="m-0 text-[13px] leading-4 text-slate-500">{telegramStatusLabel}</p>
+                <p className="m-0 break-words text-[13px] leading-4 text-slate-500">
+                  {telegramStatusLabel}
+                </p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1147,7 +1263,7 @@ export function DashboardPage() {
       <div
         className={cn(
           'grid grid-cols-[minmax(0,1.4fr)_minmax(300px,0.6fr)] gap-3',
-          'max-lg:grid-cols-1',
+          'max-xl:grid-cols-1',
         )}
       >
         <Panel

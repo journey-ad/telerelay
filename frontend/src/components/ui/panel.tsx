@@ -54,9 +54,17 @@ export function Panel({
       )}
     >
       {title || meta ? (
-        <header className="mb-4.5 flex items-center justify-between gap-4">
-          {title ? <h2 className="m-0 text-[15px] font-bold text-slate-700">{title}</h2> : <span />}
-          {meta ? <div className="text-[13px] text-slate-400">{meta}</div> : null}
+        <header className="mb-4.5 flex min-w-0 items-center justify-between gap-4 max-sm:flex-col max-sm:items-start max-sm:gap-2">
+          {title ? (
+            <h2 className="m-0 min-w-0 text-[15px] font-bold text-slate-700">{title}</h2>
+          ) : (
+            <span />
+          )}
+          {meta ? (
+            <div className="min-w-0 max-w-full text-[13px] text-slate-400 max-sm:w-full">
+              {meta}
+            </div>
+          ) : null}
         </header>
       ) : null}
       {children}

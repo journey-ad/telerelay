@@ -641,6 +641,28 @@ class ApiContractTests(unittest.TestCase):
         self.assertTrue(all(response.status_code == 200 for response in responses.values()))
         self.assertEqual(invalid.status_code, 422)
 
+    def test_hourly_stats_accepts_rule_filter(self):
+        database = SimpleNamespace(
+            get_rule_stats_detail=lambda: [{"rule_name": "news", "total": 1}],
+            get_button_action_stats=lambda: [],
+            get_hourly_stats=lambda hours, rule: [
+                {"hour": "2026-09-05 10:00", "forwarded": 1, "filtered": 0, "failed": 0}
+            ],
+            get_media_type_stats=lambda days, rule: [{"media_type": "text", "count": 1}],
+            get_button_action_hourly=lambda hours, rule: [{"hour": "2026-09-05 10:00", "triggered": 2}],
+        )
+
+        with patch("backend.api.router._active_stats", return_value=database):
+            response = self.client.get(
+                "/api/v1/stats",
+                params={"date_limit": "7day", "granularity": "hour", "rule_name": "news"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["hourly"][0]["failed"], 0)
+        self.assertEqual(response.json()["media_types"][0]["media_type"], "text")
+        self.assertEqual(response.json()["automation_hourly"][0]["triggered"], 2)
+
     def test_telegram_account_create_list_and_activate_contracts(self):
         initial = self.client.get("/api/v1/telegram-accounts")
         self.assertEqual(initial.status_code, 200)
