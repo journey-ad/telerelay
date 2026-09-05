@@ -1,4 +1,5 @@
 import tempfile
+import sqlite3
 import unittest
 from pathlib import Path
 
@@ -103,6 +104,115 @@ class StatsDBTests(unittest.TestCase):
             [{"media_type": "photo", "count": 1}, {"media_type": "text", "count": 1}],
         )
         self.assertEqual(self.database.get_button_action_hourly(24, "automation")[0]["triggered"], 1)
+
+    def test_legacy_daily_stats_are_backfilled_into_hourly_stats(self):
+        legacy_path = Path(self.temp_dir.name) / "legacy.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE daily_stats (
+                    rule_name TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    forwarded_count INTEGER DEFAULT 0,
+                    filtered_count INTEGER DEFAULT 0
+                )
+                """
+            )
+            connection.executemany(
+                "INSERT INTO daily_stats VALUES (?, ?, ?, ?)",
+                [("legacy", "2026-08-01", 10, 4), ("legacy", "2026-08-02", 3, 2)],
+            )
+
+        database = StatsDB(legacy_path)
+
+        self.assertEqual(
+            database.get_hourly_stats(None, "legacy"),
+            [
+                {
+                    "hour": "2026-08-01 00:00",
+                    "forwarded": 10,
+                    "filtered": 4,
+                    "failed": 0,
+                },
+                {
+                    "hour": "2026-08-02 00:00",
+                    "forwarded": 3,
+                    "filtered": 2,
+                    "failed": 0,
+                },
+            ],
+        )
+
+        with database._get_conn() as connection:
+            connection.execute(
+                "DELETE FROM hourly_stats WHERE rule_name = ? AND hour = ?",
+                ("legacy", "2026-08-03 00:00"),
+            )
+            connection.execute(
+                """
+                INSERT INTO hourly_stats
+                    (rule_name, hour, forwarded_count, filtered_count, failed_count)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(rule_name, hour) DO UPDATE SET
+                    forwarded_count = forwarded_count + excluded.forwarded_count,
+                    filtered_count = filtered_count + excluded.filtered_count
+                """,
+                ("legacy", "2026-08-03 12:00", 2, 1, 0),
+            )
+            connection.execute(
+                "INSERT INTO daily_stats VALUES (?, ?, ?, ?)",
+                ("legacy", "2026-08-03", 5, 4),
+            )
+
+        with database._get_conn() as connection:
+            database._backfill_hourly_from_daily(connection)
+            database._backfill_hourly_from_daily(connection)
+        self.assertEqual(
+            next(
+                item
+                for item in database.get_hourly_stats(None, "legacy")
+                if item["hour"] == "2026-08-03 00:00"
+            ),
+            {
+                "hour": "2026-08-03 00:00",
+                "forwarded": 3,
+                "filtered": 3,
+                "failed": 0,
+            },
+        )
+
+    def test_legacy_button_action_totals_are_backfilled_into_hourly_stats(self):
+        legacy_path = Path(self.temp_dir.name) / "legacy-buttons.db"
+        with sqlite3.connect(legacy_path) as connection:
+            connection.execute(
+                "CREATE TABLE button_action_stats (rule_name TEXT PRIMARY KEY, trigger_count INTEGER NOT NULL)"
+            )
+            connection.execute(
+                "INSERT INTO button_action_stats VALUES (?, ?)",
+                ("legacy-button", 5),
+            )
+
+        database = StatsDB(legacy_path)
+        self.assertEqual(
+            database.get_button_action_hourly(None, "legacy-button")[0]["triggered"],
+            5,
+        )
+
+        with database._get_conn() as connection:
+            connection.execute(
+                "UPDATE button_action_stats SET trigger_count = 8 WHERE rule_name = ?",
+                ("legacy-button",),
+            )
+            database._backfill_button_action_hourly(connection)
+            database._backfill_button_action_hourly(connection)
+
+        self.assertEqual(
+            sum(
+                item["triggered"]
+                for item in database.get_button_action_hourly(None, "legacy-button")
+            ),
+            8,
+        )
 
 
 if __name__ == "__main__":

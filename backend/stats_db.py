@@ -124,9 +124,75 @@ class StatsDB:
                     "CREATE INDEX IF NOT EXISTS idx_bah_hour ON button_action_hourly(hour)"
                 )
 
+                self._backfill_hourly_from_daily(conn)
+                self._backfill_button_action_hourly(conn)
+
                 conn.commit()
             finally:
                 conn.close()
+
+    @staticmethod
+    def _backfill_hourly_from_daily(conn: sqlite3.Connection) -> None:
+        """Backfill legacy daily counters into a deterministic hourly bucket."""
+        conn.execute("""
+            INSERT INTO hourly_stats (
+                rule_name, hour, forwarded_count, filtered_count, failed_count
+            )
+            SELECT
+                daily.rule_name,
+                daily.date || ' 00:00',
+                CASE
+                    WHEN daily.forwarded_count - COALESCE(hourly.forwarded_count, 0) > 0
+                    THEN daily.forwarded_count - COALESCE(hourly.forwarded_count, 0)
+                    ELSE 0
+                END,
+                CASE
+                    WHEN daily.filtered_count - COALESCE(hourly.filtered_count, 0) > 0
+                    THEN daily.filtered_count - COALESCE(hourly.filtered_count, 0)
+                    ELSE 0
+                END,
+                0
+            FROM daily_stats AS daily
+            LEFT JOIN (
+                SELECT
+                    rule_name,
+                    substr(hour, 1, 10) AS date,
+                    SUM(forwarded_count) AS forwarded_count,
+                    SUM(filtered_count) AS filtered_count
+                FROM hourly_stats
+                GROUP BY rule_name, substr(hour, 1, 10)
+            ) AS hourly
+              ON hourly.rule_name = daily.rule_name
+             AND hourly.date = daily.date
+            WHERE daily.forwarded_count - COALESCE(hourly.forwarded_count, 0) > 0
+               OR daily.filtered_count - COALESCE(hourly.filtered_count, 0) > 0
+            ON CONFLICT(rule_name, hour) DO UPDATE SET
+                forwarded_count = hourly_stats.forwarded_count + excluded.forwarded_count,
+                filtered_count = hourly_stats.filtered_count + excluded.filtered_count
+        """)
+
+    @staticmethod
+    def _backfill_button_action_hourly(conn: sqlite3.Connection) -> None:
+        """Backfill legacy cumulative automation counts into hourly data."""
+        conn.execute("""
+            INSERT INTO button_action_hourly (rule_name, hour, trigger_count)
+            SELECT
+                totals.rule_name,
+                COALESCE(existing.first_hour, strftime('%Y-%m-%d %H:00', 'now', 'localtime')),
+                totals.trigger_count - COALESCE(existing.hourly_count, 0)
+            FROM button_action_stats AS totals
+            LEFT JOIN (
+                SELECT
+                    rule_name,
+                    MIN(hour) AS first_hour,
+                    SUM(trigger_count) AS hourly_count
+                FROM button_action_hourly
+                GROUP BY rule_name
+            ) AS existing ON existing.rule_name = totals.rule_name
+            WHERE totals.trigger_count - COALESCE(existing.hourly_count, 0) > 0
+            ON CONFLICT(rule_name, hour) DO UPDATE SET
+                trigger_count = button_action_hourly.trigger_count + excluded.trigger_count
+        """)
 
     # -- Rule stats --
 
