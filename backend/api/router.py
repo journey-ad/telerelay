@@ -896,20 +896,11 @@ async def stats(
             "automation_hourly": automation_hourly,
         }
     daily_days = None if report_days is None else report_days * 2
-    try:
-        daily_task = asyncio.to_thread(database.get_daily_stats, daily_days, rule_name)
-        daily = await daily_task
-    except TypeError:
-        daily = await asyncio.to_thread(database.get_daily_stats, daily_days)
-    automation_daily_method = getattr(database, "get_button_action_daily", None)
-    automation_daily = (
-        await asyncio.to_thread(automation_daily_method, report_days, rule_name)
-        if callable(automation_daily_method)
-        else []
-    )
-    details, button_details = await asyncio.gather(
+    details, button_details, daily, automation_daily = await asyncio.gather(
         asyncio.to_thread(database.get_rule_stats_detail),
         asyncio.to_thread(database.get_button_action_stats),
+        asyncio.to_thread(database.get_daily_stats, daily_days, rule_name),
+        asyncio.to_thread(database.get_button_action_daily, report_days, rule_name),
     )
     return {
         "rules": details,

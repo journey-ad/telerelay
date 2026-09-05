@@ -819,11 +819,12 @@ class ForwardQueue:
             return
         self.store.clear_pause_if_expired(now)
 
-        blocked_rules = {
-            fingerprint
-            for fingerprint, available_at in self._rule_next_at.items()
-            if available_at > now
-        }
+        blocked_rules: set[str] = set()
+        for fingerprint, available_at in list(self._rule_next_at.items()):
+            if available_at > now:
+                blocked_rules.add(fingerprint)
+            else:
+                del self._rule_next_at[fingerprint]
         item = self.store.claim_next(
             now,
             blocked_rule_fingerprints=blocked_rules,

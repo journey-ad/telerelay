@@ -621,8 +621,9 @@ class ApiContractTests(unittest.TestCase):
         calls = []
         database = SimpleNamespace(
             get_rule_stats_detail=list,
-            get_daily_stats=lambda days: calls.append(days) or [{"days": days}],
+            get_daily_stats=lambda days, rule: calls.append(days) or [{"days": days}],
             get_button_action_stats=lambda: [{"rule_name": "button", "triggered": 3}],
+            get_button_action_daily=lambda days, rule: [],
         )
 
         with patch("backend.stats_db.get_stats_db", return_value=database):
