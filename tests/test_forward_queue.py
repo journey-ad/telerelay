@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from telethon.errors import FloodWaitError
+from telethon.errors import ChatForwardsRestrictedError, FloodWaitError
 
 from backend.bot_manager import BotManager
 from backend.forward_queue import ForwardQueue, ForwardQueueStore
@@ -1079,6 +1079,32 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             forwarder.client.send_file.call_args.kwargs["caption"],
             "",
         )
+
+    async def test_restricted_forward_does_not_download_when_force_forward_disabled(self):
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.rule = SimpleNamespace(
+            target_chats=["target"],
+            force_forward=False,
+            hide_sender=False,
+            hide_media_caption=False,
+            add_source_info=False,
+            delay=0,
+        )
+        forwarder.downloader = SimpleNamespace(download=AsyncMock())
+        forwarder._forward_normal = AsyncMock(side_effect=ChatForwardsRestrictedError(request=None))
+        forwarder._send_files = AsyncMock()
+        forwarder._log_result = lambda *args: None
+
+        with self.assertRaises(ChatForwardsRestrictedError):
+            await forwarder._do_forward(
+                [SimpleNamespace()],
+                SimpleNamespace(),
+                need_download=False,
+                is_noforwards=False,
+            )
+
+        forwarder.downloader.download.assert_not_awaited()
+        forwarder._send_files.assert_not_awaited()
 
 
 if __name__ == "__main__":

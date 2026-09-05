@@ -203,6 +203,14 @@ class MessageForwarder:
                         await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
 
                 except ChatForwardsRestrictedError:
+                    # Only an explicitly enabled force-forward rule may turn a
+                    # restricted forward into a download + upload operation.
+                    # With force-forward disabled, preserve the restriction and
+                    # let the durable queue handle the failed delivery instead
+                    # of silently uploading protected media.
+                    if not self.rule.force_forward:
+                        raise
+
                     # Forwarding restricted, fallback to download and resend
                     logger.debug(t("log.forward.restricted_fallback"))
                     if not downloaded_files:
