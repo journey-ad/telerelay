@@ -59,7 +59,7 @@ import type {
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 
-type ReportPeriod = '7day' | '14day' | '30day' | 'all'
+type ReportPeriod = '1day' | '7day' | '14day' | '30day' | 'all'
 type TrendStat = {
   date: string
   forwarded: number
@@ -71,12 +71,13 @@ type TrendIntensityStat = TrendStat & { endDate?: string }
 type HourlyStat = NonNullable<Stats['hourly']>[number]
 
 const periodOptions = [
+  { value: '1day', labelKey: 'dashboard.periods.oneDay' },
   { value: '7day', labelKey: 'dashboard.periods.sevenDays' },
   { value: '14day', labelKey: 'dashboard.periods.fourteenDays' },
   { value: '30day', labelKey: 'dashboard.periods.thirtyDays' },
   { value: 'all', labelKey: 'dashboard.periods.all' },
 ] as const satisfies ReadonlyArray<{ value: ReportPeriod; labelKey: string }>
-const periodDays = { '7day': 7, '14day': 14, '30day': 30 } as const
+const periodDays = { '1day': 1, '7day': 7, '14day': 14, '30day': 30 } as const
 const metricTones = {
   blue: 'bg-blue-50 text-blue-600',
   amber: 'bg-amber-50 text-amber-600',
@@ -315,6 +316,29 @@ function fillHourlySeries(source: HourlyStat[], hours: number): TrendStat[] {
   })
 }
 
+function fillDailySeries(source: NonNullable<Stats['daily']>, days: number): TrendStat[] {
+  const byDate = new Map(source.map((item) => [item.date, item]))
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Array.from({ length: days }, (_, index) => {
+    const date = new Date(today.getTime() - (days - index - 1) * 86_400_000)
+    const key = localDateKey(date)
+    const item = byDate.get(key)
+    const forwarded = item?.forwarded ?? 0
+    const filtered = item?.filtered ?? 0
+    const failed = item?.failed ?? 0
+    return { date: key, forwarded, filtered, failed, total: forwarded + filtered + failed }
+  })
+}
+
+function allTimeDays(source: NonNullable<Stats['daily']>): number {
+  if (!source.length) return 1
+  const first = new Date(`${source[0].date}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.max(1, Math.round((today.getTime() - first.getTime()) / 86_400_000) + 1)
+}
+
 function allTimeHours(source: HourlyStat[]): number {
   if (!source.length) return 1
   const first = new Date(`${source[0].hour.replace(' ', 'T')}:00`)
@@ -425,7 +449,10 @@ export function DashboardPage() {
   const statsQuery = useQuery({
     queryKey: ['stats', accountId, reportPeriod, trendRule],
     queryFn: () => {
-      const params = new URLSearchParams({ date_limit: reportPeriod, granularity: 'hour' })
+      const params = new URLSearchParams({
+        date_limit: reportPeriod,
+        granularity: reportPeriod === '1day' ? 'hour' : 'day',
+      })
       if (trendRule !== 'all') params.set('rule_name', trendRule)
       return accountRequest<Stats>(accountId, `/api/v1/stats?${params}`)
     },
@@ -499,41 +526,51 @@ export function DashboardPage() {
   const queueTotal = queueQuery.data?.total ?? activeQueue
   const queuePages = Math.max(1, Math.ceil(queueTotal / queuePreviewLimit))
   const report = useMemo(() => {
-    const source = statsQuery.data?.hourly ?? []
-    const durationHours = reportDays ? reportDays * 24 : allTimeHours(source)
-    const series = fillHourlySeries(source, allTime ? durationHours : reportDays * 24 * 2)
-    const currentHourly = allTime ? series : series.slice(-reportDays * 24)
-    const previousHourly = allTime ? [] : series.slice(0, reportDays * 24)
-    const current = aggregateTrend(currentHourly)
-    const previous = aggregateTrend(previousHourly)
-    const peak = currentHourly.reduce<TrendStat | null>(
+    const isHourly = reportPeriod === '1day'
+    const hourlySource = statsQuery.data?.hourly ?? []
+    const dailySource = statsQuery.data?.daily ?? []
+    const durationUnits = isHourly
+      ? reportDays
+        ? reportDays * 24
+        : allTimeHours(hourlySource)
+      : reportDays
+        ? reportDays
+        : allTimeDays(dailySource)
+    const series = isHourly
+      ? fillHourlySeries(hourlySource, allTime ? durationUnits : durationUnits * 2)
+      : fillDailySeries(dailySource, allTime ? durationUnits : durationUnits * 2)
+    const currentSeries = allTime ? series : series.slice(-durationUnits)
+    const previousSeries = allTime ? [] : series.slice(0, durationUnits)
+    const current = aggregateTrend(currentSeries)
+    const previous = aggregateTrend(previousSeries)
+    const peak = currentSeries.reduce<TrendStat | null>(
       (best, item) => (item.total > 0 && (!best || item.total > best.total) ? item : best),
       null,
     )
-    const activeHours = currentHourly.filter((item) => item.total > 0).length
-    const intensityHourly = sampleHourlyIntensity(
-      allTime
-        ? fillHourlySeries(source, Math.max(durationHours, intensitySampleLimit))
-        : currentHourly,
+    const activePeriods = currentSeries.filter((item) => item.total > 0).length
+    const intensitySeries = sampleHourlyIntensity(
+      allTime ? (series.length > intensitySampleLimit ? series : currentSeries) : currentSeries,
     )
-    const maxIntensityTotal = Math.max(...intensityHourly.map((item) => item.total), 1)
+    const maxIntensityTotal = Math.max(...intensitySeries.map((item) => item.total), 1)
 
     return {
       current,
       previous,
-      currentHourly,
-      intensityHourly,
+      currentHourly: currentSeries,
+      intensityHourly: intensitySeries,
       peak,
-      activeHours,
+      activeHours: activePeriods,
       maxIntensityTotal,
-      durationHours,
+      durationHours: isHourly ? durationUnits : durationUnits * 24,
+      durationUnits,
+      isHourly,
       change: allTime ? undefined : percentChange(current.total, previous.total),
       forwardedChange: allTime ? undefined : percentChange(current.forwarded, previous.forwarded),
       filteredChange: allTime ? undefined : percentChange(current.filtered, previous.filtered),
       forwardRate: current.total ? (current.forwarded / current.total) * 100 : 0,
-      dailyAverage: current.total / Math.max(durationHours / 24, 1 / 24),
+      dailyAverage: current.total / Math.max(isHourly ? durationUnits / 24 : durationUnits, 1 / 24),
     }
-  }, [allTime, reportDays, statsQuery.data?.hourly])
+  }, [allTime, reportDays, reportPeriod, statsQuery.data?.daily, statsQuery.data?.hourly])
   const rankedRules = useMemo(
     () => [...(statsQuery.data?.rules ?? [])].sort((left, right) => right.total - left.total),
     [statsQuery.data?.rules],
@@ -549,10 +586,18 @@ export function DashboardPage() {
     [statsQuery.data?.button_rules, statsQuery.data?.rules],
   )
   const automationHourly = statsQuery.data?.automation_hourly ?? []
+  const automationDaily = statsQuery.data?.automation_daily ?? []
   const automationTriggers = useMemo(() => {
-    const visible = allTime ? automationHourly : automationHourly.slice(-reportDays * 24)
+    const visible =
+      reportPeriod === '1day'
+        ? allTime
+          ? automationHourly
+          : automationHourly.slice(-((reportDays ?? 1) * 24))
+        : allTime
+          ? automationDaily
+          : automationDaily.slice(-(reportDays ?? 1))
     return visible.reduce((sum, item) => sum + item.triggered, 0)
-  }, [allTime, automationHourly, reportDays])
+  }, [allTime, automationDaily, automationHourly, reportDays, reportPeriod])
   const maxRuleTotal = Math.max(...rankedRules.map((rule) => rule.total), 1)
   const mediaTypes = statsQuery.data?.media_types ?? []
   const maxMediaCount = Math.max(...mediaTypes.map((item) => item.count), 1)
@@ -1080,19 +1125,21 @@ export function DashboardPage() {
                 <CalendarDays size={16} />
               </span>
               <span className="flex flex-col">
-                <small className="text-xs text-slate-400">{t('dashboard.activeHours')}</small>
+                <small className="text-xs text-slate-400">
+                  {t(report.isHourly ? 'dashboard.activeHours' : 'dashboard.activeDays')}
+                </small>
                 <strong className="mt-0.5 text-xs text-slate-700">
                   {t('dashboard.periodCoverage')}
                 </strong>
               </span>
               <b className="text-sm text-slate-700">
-                {report.activeHours}/{report.durationHours}
+                {report.activeHours}/{report.durationUnits}
               </b>
             </div>
           </div>
           <div className="mt-3 border-t border-slate-100 pt-3">
             <div className="mb-2 flex justify-between text-xs text-slate-400">
-              <span>{t('dashboard.dailyIntensity')}</span>
+              <span>{t('dashboard.periodIntensity')}</span>
             </div>
             <div
               className={cn(

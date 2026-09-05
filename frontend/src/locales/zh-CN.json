@@ -255,6 +255,7 @@
     "telegramDisconnected": "Telegram 未连接",
     "telegramAccountsConnected": "Telegram 账号：{{connected}}/{{total}} 在线",
     "periods": {
+      "oneDay": "1 天",
       "sevenDays": "7 天",
       "fourteenDays": "14 天",
       "thirtyDays": "30 天",
@@ -288,8 +289,9 @@
     "processingSpeed": "消息处理速度",
     "peakDate": "峰值日期",
     "activeHours": "活跃小时",
+    "activeDays": "活跃天数",
     "periodCoverage": "周期覆盖率",
-    "dailyIntensity": "每小时流量强度",
+    "periodIntensity": "周期流量强度",
     "dayTraffic": "{{date}}：{{count}} 条",
     "rangeAverageTraffic": "{{date}}：平均 {{count}} 条",
     "mediaDistribution": "消息类型分布",

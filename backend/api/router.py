@@ -53,8 +53,9 @@ router = APIRouter(
     dependencies=[Depends(require_auth), Depends(bind_account_scope)],
 )
 
-StatsDateLimit = Literal["7day", "14day", "30day", "all"]
+StatsDateLimit = Literal["1day", "7day", "14day", "30day", "all"]
 STATS_DATE_LIMIT_DAYS: dict[StatsDateLimit, int | None] = {
+    "1day": 1,
     "7day": 7,
     "14day": 14,
     "30day": 30,
@@ -894,15 +895,28 @@ async def stats(
             "media_types": media_types,
             "automation_hourly": automation_hourly,
         }
-    details, button_details, daily = await asyncio.gather(
+    daily_days = None if report_days is None else report_days * 2
+    try:
+        daily_task = asyncio.to_thread(database.get_daily_stats, daily_days, rule_name)
+        daily = await daily_task
+    except TypeError:
+        daily = await asyncio.to_thread(database.get_daily_stats, daily_days)
+    automation_daily_method = getattr(database, "get_button_action_daily", None)
+    automation_daily = (
+        await asyncio.to_thread(automation_daily_method, report_days, rule_name)
+        if callable(automation_daily_method)
+        else []
+    )
+    details, button_details = await asyncio.gather(
         asyncio.to_thread(database.get_rule_stats_detail),
         asyncio.to_thread(database.get_button_action_stats),
-        asyncio.to_thread(
-            database.get_daily_stats,
-            None if report_days is None else report_days * 2,
-        ),
     )
-    return {"rules": details, "button_rules": button_details, "daily": daily}
+    return {
+        "rules": details,
+        "button_rules": button_details,
+        "daily": daily,
+        "automation_daily": automation_daily,
+    }
 
 
 @router.get("/history")

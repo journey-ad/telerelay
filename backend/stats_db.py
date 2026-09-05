@@ -674,7 +674,9 @@ class StatsDB:
             finally:
                 conn.close()
 
-    def get_daily_stats(self, days: Optional[int] = 30) -> List[dict]:
+    def get_daily_stats(
+        self, days: Optional[int] = 30, rule_name: str | None = None
+    ) -> List[dict]:
         """
         Get daily aggregated stats for the last N days, or all recorded days.
 
@@ -685,24 +687,44 @@ class StatsDB:
             conn = self._get_conn()
             try:
                 query = """
-                    SELECT date,
-                           SUM(forwarded_count) as forwarded,
-                           SUM(filtered_count) as filtered
-                    FROM daily_stats
+                    SELECT daily.date,
+                           SUM(daily.forwarded_count) as forwarded,
+                           SUM(daily.filtered_count) as filtered,
+                           COALESCE(SUM(hourly.failed), 0) as failed
+                    FROM daily_stats AS daily
+                    LEFT JOIN (
+                        SELECT rule_name, substr(hour, 1, 10) AS date,
+                               SUM(failed_count) AS failed
+                        FROM hourly_stats
+                        GROUP BY rule_name, substr(hour, 1, 10)
+                    ) AS hourly
+                      ON hourly.rule_name = daily.rule_name
+                     AND hourly.date = daily.date
                 """
-                parameters = ()
+                clauses = []
+                parameters: list[object] = []
                 if days is not None:
-                    query += " WHERE date >= ?"
-                    parameters = (
-                        (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d"),
+                    clauses.append("daily.date >= ?")
+                    parameters.append(
+                        (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
                     )
+                if rule_name:
+                    clauses.append("daily.rule_name = ?")
+                    parameters.append(rule_name)
+                if clauses:
+                    query += " WHERE " + " AND ".join(clauses)
                 query += """
-                    GROUP BY date
-                    ORDER BY date ASC
+                    GROUP BY daily.date
+                    ORDER BY daily.date ASC
                 """
                 cursor = conn.execute(query, parameters)
                 return [
-                    {"date": row[0], "forwarded": row[1], "filtered": row[2]}
+                    {
+                        "date": row[0],
+                        "forwarded": row[1] or 0,
+                        "filtered": row[2] or 0,
+                        "failed": row[3] or 0,
+                    }
                     for row in cursor.fetchall()
                 ]
             finally:
@@ -807,6 +829,36 @@ class StatsDB:
                     params,
                 ).fetchall()
                 return [{"hour": row[0], "triggered": row[1] or 0} for row in rows]
+            finally:
+                conn.close()
+
+    def get_button_action_daily(
+        self, days: Optional[int] = 30, rule_name: str | None = None
+    ) -> List[dict]:
+        """Return daily automation trigger counts."""
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                clauses = []
+                params: list[object] = []
+                if days is not None:
+                    cutoff = datetime.now() - timedelta(days=max(1, int(days)))
+                    clauses.append("hour >= ?")
+                    params.append(cutoff.strftime("%Y-%m-%d 00:00"))
+                if rule_name:
+                    clauses.append("rule_name = ?")
+                    params.append(rule_name)
+                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+                rows = conn.execute(
+                    f"""
+                    SELECT substr(hour, 1, 10) AS date, SUM(trigger_count)
+                    FROM button_action_hourly {where}
+                    GROUP BY date
+                    ORDER BY date ASC
+                    """,
+                    params,
+                ).fetchall()
+                return [{"date": row[0], "triggered": row[1] or 0} for row in rows]
             finally:
                 conn.close()
 

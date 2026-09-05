@@ -255,6 +255,7 @@
     "telegramDisconnected": "Telegram disconnected",
     "telegramAccountsConnected": "Telegram accounts: {{connected}}/{{total}} online",
     "periods": {
+      "oneDay": "1d",
       "sevenDays": "7d",
       "fourteenDays": "14d",
       "thirtyDays": "30d",
@@ -288,8 +289,9 @@
     "processingSpeed": "Message processing speed",
     "peakDate": "Peak date",
     "activeHours": "Active hours",
+    "activeDays": "Active days",
     "periodCoverage": "Period coverage",
-    "dailyIntensity": "Hourly traffic intensity",
+    "periodIntensity": "Period intensity",
     "dayTraffic": "{{date}}: {{count}} messages",
     "rangeAverageTraffic": "{{date}}: {{count}} messages on average",
     "mediaDistribution": "Message type distribution",
