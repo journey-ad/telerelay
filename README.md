@@ -20,7 +20,7 @@ An intelligent Telegram message relay tool with smart filtering based on regex p
 - Persistent SQLite queue with retry, FloodWait handling, and restart recovery
 - User session and Bot Token modes
 - Parallel multi-account runtimes in User mode
-- Exact, contains, and regex callback-button automation
+- Separately configured callback-button and Bot `start` link automation with exact, contains, and regex matching
 - JSON, CSV, SQLite, and offline HTML exports
 - Hourly, daily, and weekly incremental export tasks
 - Live runtime status and logs over SSE

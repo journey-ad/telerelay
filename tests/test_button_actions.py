@@ -9,6 +9,8 @@ from telethon.tl.types import (
     KeyboardButtonCallback,
     KeyboardButtonRow,
     KeyboardButtonUrl,
+    MessageEntityTextUrl,
+    MessageEntityUrl,
     ReplyInlineMarkup,
 )
 
@@ -17,7 +19,9 @@ from backend.button_actions import (
     ButtonActionRule,
     button_text_matches,
     chat_matches,
+    iter_bot_start_links,
     iter_callback_buttons,
+    parse_bot_start_link,
 )
 from backend.config import Config
 from backend.schemas import ButtonActionRulePayload
@@ -25,10 +29,13 @@ from backend.services import RuleService, ServiceError
 
 
 class FakeMessage:
-    def __init__(self, message_id, buttons, chat=None):
+    def __init__(self, message_id, buttons=(), chat=None, text="", entities=()):
         self.id = message_id
         self.chat = chat
         self.reply_markup = ReplyInlineMarkup(rows=[KeyboardButtonRow(buttons=buttons)])
+        self.text = text
+        self.raw_text = text
+        self.entities = list(entities)
         self.clicked_data = []
 
     async def click(self, *, data):
@@ -64,6 +71,55 @@ class ButtonActionMatchingTests(unittest.TestCase):
         self.assertTrue(chat_matches(event, [-100123]))
         self.assertTrue(chat_matches(event, ["@example_bot"]))
         self.assertFalse(chat_matches(event, ["@different_bot"]))
+
+    def test_parses_only_valid_telegram_bot_start_links(self):
+        self.assertEqual(
+            parse_bot_start_link("https://t.me/RewardsBot?start=promo_42"),
+            parse_bot_start_link("tg://resolve?domain=RewardsBot&start=promo_42"),
+        )
+        self.assertIsNone(parse_bot_start_link("https://example.com/RewardsBot?start=x"))
+        self.assertIsNone(parse_bot_start_link("https://t.me/person?start=x"))
+        self.assertIsNone(parse_bot_start_link("https://t.me/RewardsBot?start=bad%20value"))
+        self.assertIsNone(parse_bot_start_link("https://t.me/RewardsBot?startgroup=x"))
+
+    def test_extracts_url_button_text_url_and_plain_url_without_duplicates(self):
+        text = "🎁 领取 或 https://t.me/OtherBot?start=second"
+        message = FakeMessage(
+            2,
+            [KeyboardButtonUrl(text="立即领取", url="https://t.me/RewardsBot?start=first")],
+            text=text,
+            entities=[
+                MessageEntityTextUrl(
+                    offset=3,
+                    length=2,
+                    url="https://t.me/RewardsBot?start=first",
+                ),
+            ],
+        )
+
+        links = list(iter_bot_start_links(message))
+
+        self.assertEqual(
+            [(label, link.username, link.start_param) for label, link in links],
+            [
+                ("立即领取", "RewardsBot", "first"),
+                ("https://t.me/OtherBot?start=second", "OtherBot", "second"),
+            ],
+        )
+
+    def test_extracts_message_entity_url_using_utf16_offsets(self):
+        url = "https://t.me/RewardsBot?start=emoji"
+        text = f"🎁 {url}"
+        message = FakeMessage(
+            3,
+            text=text,
+            entities=[MessageEntityUrl(offset=3, length=len(url))],
+        )
+
+        self.assertEqual(
+            [(label, link.start_param) for label, link in iter_bot_start_links(message)],
+            [(url, "emoji")],
+        )
 
 
 class ButtonActionEngineTests(unittest.IsolatedAsyncioTestCase):
@@ -224,6 +280,168 @@ class ButtonActionEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results.count(("确认", ["确认"])), 1)
         self.assertEqual(message.clicked_data, [b"confirm"])
 
+    async def test_starts_bot_from_matching_deep_link_once(self):
+        message = FakeMessage(
+            8,
+            [
+                KeyboardButtonUrl(
+                    text="领取奖励",
+                    url="https://t.me/RewardsBot?start=campaign_42",
+                )
+            ],
+            chat=SimpleNamespace(username="source_channel"),
+        )
+        client = AsyncMock()
+        event = SimpleNamespace(
+            chat_id=-1001,
+            chat=message.chat,
+            message=message,
+            client=client,
+        )
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="领取",
+                    enabled=True,
+                    action_type="bot_start",
+                    source_chats=[-1001],
+                    button_texts=["领取"],
+                    match_mode="contains",
+                )
+            ]
+        )
+
+        self.assertEqual(await engine.handle(event), ("领取", ["领取奖励"]))
+        self.assertIsNone(await engine.handle(event))
+        client.assert_awaited_once()
+        request = client.await_args.args[0]
+        self.assertEqual(request.bot, "RewardsBot")
+        self.assertEqual(request.peer, "RewardsBot")
+        self.assertEqual(request.start_param, "campaign_42")
+
+    async def test_regular_url_button_is_not_executed(self):
+        message = FakeMessage(
+            9,
+            [KeyboardButtonUrl(text="领取奖励", url="https://example.com/reward")],
+            chat=SimpleNamespace(username="source_channel"),
+        )
+        client = AsyncMock()
+        event = SimpleNamespace(chat_id=-1001, chat=message.chat, message=message, client=client)
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="领取",
+                    enabled=True,
+                    action_type="bot_start",
+                    source_chats=[-1001],
+                    button_texts=["领取"],
+                    match_mode="contains",
+                )
+            ]
+        )
+
+        self.assertIsNone(await engine.handle(event))
+        client.assert_not_awaited()
+
+    async def test_hidden_link_can_match_its_start_parameter(self):
+        message = FakeMessage(
+            10,
+            text="打开活动",
+            entities=[
+                MessageEntityTextUrl(
+                    offset=0,
+                    length=4,
+                    url="https://t.me/RewardsBot?start=campaign_42",
+                )
+            ],
+            chat=SimpleNamespace(username="source_channel"),
+        )
+        client = AsyncMock()
+        event = SimpleNamespace(
+            chat_id=-1001,
+            chat=message.chat,
+            message=message,
+            client=client,
+        )
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="指定活动",
+                    enabled=True,
+                    action_type="bot_start",
+                    source_chats=[-1001],
+                    button_texts=["start=campaign_42"],
+                    match_mode="exact",
+                )
+            ]
+        )
+
+        self.assertEqual(await engine.handle(event), ("指定活动", ["打开活动"]))
+        request = client.await_args.args[0]
+        self.assertEqual(request.start_param, "campaign_42")
+
+    async def test_callback_rule_does_not_start_matching_link(self):
+        message = FakeMessage(
+            11,
+            [
+                KeyboardButtonUrl(
+                    text="领取奖励",
+                    url="https://t.me/RewardsBot?start=campaign_42",
+                )
+            ],
+            chat=SimpleNamespace(username="source_channel"),
+        )
+        client = AsyncMock()
+        event = SimpleNamespace(
+            chat_id=-1001,
+            chat=message.chat,
+            message=message,
+            client=client,
+        )
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="只点按钮",
+                    enabled=True,
+                    action_type="callback",
+                    source_chats=[-1001],
+                    button_texts=["领取奖励"],
+                )
+            ]
+        )
+
+        self.assertIsNone(await engine.handle(event))
+        client.assert_not_awaited()
+
+    async def test_bot_start_rule_does_not_click_matching_callback(self):
+        message = FakeMessage(
+            12,
+            [KeyboardButtonCallback(text="领取奖励", data=b"claim")],
+            chat=SimpleNamespace(username="source_channel"),
+        )
+        client = AsyncMock()
+        event = SimpleNamespace(
+            chat_id=-1001,
+            chat=message.chat,
+            message=message,
+            client=client,
+        )
+        engine = ButtonActionEngine(
+            [
+                ButtonActionRule(
+                    name="只启动链接",
+                    enabled=True,
+                    action_type="bot_start",
+                    source_chats=[-1001],
+                    button_texts=["领取奖励"],
+                )
+            ]
+        )
+
+        self.assertIsNone(await engine.handle(event))
+        self.assertEqual(message.clicked_data, [])
+        client.assert_not_awaited()
+
 
 class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
     async def test_rule_service_saves_multiple_patterns_and_regex_mode(self):
@@ -239,6 +457,7 @@ class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
                 ButtonActionRulePayload(
                     name="签到",
                     enabled=True,
+                    action_type="bot_start",
                     source_chats=["@example_bot", -100123],
                     button_texts=["^确认.*$", "立即签到"],
                     match_mode="regex",
@@ -250,6 +469,7 @@ class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["name"], "签到")
             rules = config.get_button_action_rules()
             self.assertEqual(len(rules), 1)
+            self.assertEqual(rules[0].action_type, "bot_start")
             self.assertEqual(rules[0].source_chats, ["@example_bot", -100123])
             self.assertEqual(rules[0].button_texts, ["^确认.*$", "立即签到"])
             self.assertEqual(rules[0].match_mode, "regex")
@@ -266,6 +486,8 @@ class ButtonActionConfigTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertFalse(rule.click_all_matches)
+        self.assertEqual(rule.action_type, "callback")
+        self.assertEqual(rule.to_dict()["action_type"], "callback")
         self.assertFalse(rule.to_dict()["click_all_matches"])
 
     async def test_rule_service_rejects_invalid_regex(self):

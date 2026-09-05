@@ -1277,6 +1277,29 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"]["code"], "invalid_regex")
 
+    def test_button_rule_action_type_is_persisted_and_validated(self):
+        payload = {
+            "name": "campaign start",
+            "enabled": True,
+            "action_type": "bot_start",
+            "source_chats": ["@campaigns"],
+            "button_texts": ["start=campaign_42"],
+            "match_mode": "exact",
+        }
+
+        created = self.client.post("/api/v1/button-rules", json=payload)
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["action_type"], "bot_start")
+        self.assertEqual(
+            self.client.get("/api/v1/button-rules").json()[0]["action_type"],
+            "bot_start",
+        )
+        invalid = self.client.post(
+            "/api/v1/button-rules",
+            json={**payload, "name": "invalid type", "action_type": "url"},
+        )
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+
     def test_regex_validation_reports_invalid_patterns(self):
         response = self.client.post(
             "/api/v1/utils/validate-regex",

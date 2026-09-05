@@ -65,10 +65,10 @@ TRANSLATIONS = {
         },
 
         "button_action": {
-            "user_mode_required": "消息附加按钮处理仅支持 Telegram User 模式，已跳过全部规则",
-            "registered": "✓ 注册按钮规则 - 规则={rules}, 会话={chats}",
-            "clicked": "✓ 按钮处理成功 - 规则={rule}, 按钮=[{buttons}], 数量={count}, 消息={chat_id}/{message_id}, 内容={content}",
-            "failed": "按钮处理失败 - 消息: {chat_id}/{message_id}, 错误: {error}",
+            "user_mode_required": "消息交互自动化仅支持 Telegram User 模式，已跳过全部规则",
+            "registered": "✓ 注册交互规则 - 规则={rules}, 会话={chats}",
+            "clicked": "✓ 交互处理成功 - 规则={rule}, 匹配项=[{buttons}], 数量={count}, 消息={chat_id}/{message_id}, 内容={content}",
+            "failed": "交互处理失败 - 消息: {chat_id}/{message_id}, 错误: {error}",
         },
 
         # log.client.* - client.py 的日志
@@ -457,7 +457,7 @@ TRANSLATIONS = {
         # ui.markdown.* - Markdown 文本
         "markdown": {
             "ignore_warning": "⚠️ 优先级高于过滤规则，匹配则直接忽略",
-            "button_action_guide": "仅在 **Telegram User 模式**下生效。收到指定会话的消息后，默认点击第一个符合规则的回调按钮；可按规则启用点击所有匹配按钮。每条消息最多处理一次。URL、支付、手机号、位置和 Mini App 按钮不会被点击。",
+            "button_action_guide": "仅在 **Telegram User 模式**下生效。每条规则需选择回调按钮或 Bot `start` 链接类型，默认执行第一个匹配项；也可启用执行全部匹配项。每条消息最多处理一次。普通 URL、支付、手机号、位置和 Mini App 按钮不会被点击。",
             "auth_guide": """### Telegram User 模式认证
 
 **首次使用或会话过期时，请按以下步骤操作：**

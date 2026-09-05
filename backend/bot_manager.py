@@ -884,7 +884,7 @@ class BotManager:
         return f"{title} ({chat_id})/{message_id}"
 
     async def _button_action_handler(self, event) -> None:
-        """Click callback buttons selected by an independent rule."""
+        """Run message actions selected by an independent rule."""
         from backend.utils import get_media_description
 
         if not self.button_action_engine:

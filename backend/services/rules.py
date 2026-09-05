@@ -144,7 +144,7 @@ class RuleService:
         if payload.enabled and not payload.source_chats:
             raise ServiceError("button_source_required", "Enabled button rules need a source chat")
         if payload.enabled and not payload.button_texts:
-            raise ServiceError("button_text_required", "Enabled button rules need button text")
+            raise ServiceError("button_text_required", "Enabled interaction rules need match text")
         if payload.match_mode == "regex":
             _ensure_valid_regex(payload.button_texts)
         return ButtonActionRule.from_dict(payload.model_dump())

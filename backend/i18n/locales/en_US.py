@@ -65,10 +65,10 @@ TRANSLATIONS = {
         },
 
         "button_action": {
-            "user_mode_required": "Message button handling requires Telegram User mode; all rules were skipped",
-            "registered": "✓ Button rules registered - rules={rules}, chats={chats}",
-            "clicked": "✓ Button handled - rule={rule}, buttons=[{buttons}], count={count}, message={chat_id}/{message_id}, content={content}",
-            "failed": "Button handling failed - Message: {chat_id}/{message_id}, Error: {error}",
+            "user_mode_required": "Message interaction automation requires Telegram User mode; all rules were skipped",
+            "registered": "✓ Interaction rules registered - rules={rules}, chats={chats}",
+            "clicked": "✓ Interaction handled - rule={rule}, matches=[{buttons}], count={count}, message={chat_id}/{message_id}, content={content}",
+            "failed": "Interaction handling failed - Message: {chat_id}/{message_id}, Error: {error}",
         },
 
         # log.client.* - client.py logs
@@ -457,7 +457,7 @@ TRANSLATIONS = {
         # ui.markdown.* - markdown text
         "markdown": {
             "ignore_warning": "⚠️ Higher priority than filter rules, matched messages will be ignored directly",
-            "button_action_guide": "Available only in **Telegram User mode**. The first matching callback button is clicked by default; each rule can instead click all matching buttons. Each message is handled at most once. URL, payment, phone, location, and Mini App buttons are never clicked.",
+            "button_action_guide": "Available only in **Telegram User mode**. Each rule targets either callback buttons or Bot `start` links and runs the first match by default; it can instead run all matches. Each message is handled at most once. Regular URL, payment, phone, location, and Mini App buttons are never clicked.",
             "auth_guide": """### Telegram User Mode Authentication
 
 **For first-time use or when session expires, follow these steps:**

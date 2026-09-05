@@ -20,7 +20,7 @@
 - SQLite 持久化队列，支持重试、FloodWait 和重启恢复
 - User Session 与 Bot Token 两种模式
 - User 模式下多账号并行运行
-- 精确、包含、正则匹配回调按钮自动化
+- 回调按钮和 Bot `start` 链接分类型配置，支持精确、包含和正则匹配
 - JSON、CSV、SQLite、离线 HTML 导出
 - 按小时、天、周执行增量导出
 - SSE 实时推送运行状态和日志

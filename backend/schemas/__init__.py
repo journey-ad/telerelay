@@ -88,6 +88,7 @@ class ForwardingRulePayload(StrictModel):
 class ButtonActionRulePayload(StrictModel):
     name: str = Field(min_length=1, max_length=100)
     enabled: bool = False
+    action_type: Literal["callback", "bot_start"] = "callback"
     source_chats: list[ChatRef] = Field(default_factory=list)
     button_texts: list[str] = Field(default_factory=list)
     match_mode: Literal["exact", "contains", "regex"] = "exact"
@@ -147,6 +148,7 @@ class ConfigForwardingRule(ConfigModel):
 class ConfigButtonActionRule(ConfigModel):
     name: str = Field(default="", min_length=1, max_length=100)
     enabled: bool = False
+    action_type: Literal["callback", "bot_start"] = "callback"
     source_chats: list[ChatRef] = Field(
         default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
     )

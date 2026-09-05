@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bot, Edit3, MousePointerClick, Plus, Search, Trash2 } from 'lucide-react'
+import { Bot, Edit3, Link2, MousePointerClick, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { accountRequest, json } from '../api/client'
@@ -28,6 +28,7 @@ import { lines } from '../utils/parse'
 const blankRule = (): ButtonRule => ({
   name: '',
   enabled: false,
+  action_type: 'callback',
   source_chats: [],
   button_texts: [],
   match_mode: 'exact',
@@ -80,7 +81,7 @@ export function AutomationsPage() {
     setOpen(true)
   }
   function edit(index: number) {
-    const value = structuredClone(query.data?.[index] ?? blankRule())
+    const value = { ...blankRule(), ...structuredClone(query.data?.[index] ?? {}) }
     setEditing(index)
     setForm(value)
     setButtons(value.button_texts.join('\n'))
@@ -235,15 +236,26 @@ export function AutomationsPage() {
                       <span
                         className={cn(
                           'grid size-8 shrink-0 place-items-center rounded',
-                          'bg-blue-50 text-blue-600',
+                          rule.action_type === 'bot_start'
+                            ? 'bg-emerald-50 text-emerald-600'
+                            : 'bg-blue-50 text-blue-600',
                         )}
                       >
-                        <MousePointerClick size={17} />
+                        {rule.action_type === 'bot_start' ? (
+                          <Link2 size={17} />
+                        ) : (
+                          <MousePointerClick size={17} />
+                        )}
                       </span>
                       <span className="flex min-w-0 flex-col">
                         <strong className="text-xs text-slate-700">{rule.name}</strong>
                         <small className="mt-1 text-xs text-slate-400">
-                          {t('common.delaySeconds', { seconds: rule.delay })}
+                          {t(
+                            rule.action_type === 'bot_start'
+                              ? 'automations.botStartType'
+                              : 'automations.callbackType',
+                          )}{' '}
+                          | {t('common.delaySeconds', { seconds: rule.delay })}
                         </small>
                       </span>
                     </div>
@@ -267,9 +279,7 @@ export function AutomationsPage() {
                       }
                     </Badge>
                     <small className="mt-1 block text-xs text-slate-400">
-                      {t(
-                        rule.click_all_matches ? 'automations.clickAll' : 'automations.clickFirst',
-                      )}
+                      {t(rule.click_all_matches ? 'automations.runAll' : 'automations.runFirst')}
                     </small>
                   </td>
                   <td>
@@ -333,6 +343,39 @@ export function AutomationsPage() {
             />
           </div>
           <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
+            <fieldset className="col-span-2 max-md:col-span-1">
+              <legend className="mb-1.5 text-xs font-semibold text-slate-600">
+                {t('automations.actionType')}
+              </legend>
+              <div className="grid grid-cols-2 gap-1 rounded-md border border-slate-200 bg-slate-50 p-1">
+                {(
+                  [
+                    ['callback', MousePointerClick, t('automations.callbackType')],
+                    ['bot_start', Link2, t('automations.botStartType')],
+                  ] as const
+                ).map(([value, Icon, label]) => {
+                  const selected = form.action_type === value
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={selected}
+                      className={cn(
+                        'flex min-h-10 items-center justify-center gap-2 rounded-[5px] border px-3',
+                        'text-[13px] font-semibold transition',
+                        selected
+                          ? 'border-slate-200 bg-white text-slate-800 shadow-sm'
+                          : 'border-transparent text-slate-500 hover:text-slate-700',
+                      )}
+                      onClick={() => setForm((current) => ({ ...current, action_type: value }))}
+                    >
+                      <Icon size={16} aria-hidden />
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </fieldset>
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>{t('automations.name')}</span>
               <input
@@ -351,21 +394,39 @@ export function AutomationsPage() {
             {form.match_mode === 'regex' ? (
               <RegexField
                 className="col-span-2 max-md:col-span-1"
-                label={t('automations.buttonPattern')}
+                label={t(
+                  form.action_type === 'bot_start'
+                    ? 'automations.startPattern'
+                    : 'automations.buttonPattern',
+                )}
                 value={buttons}
                 onChange={setButtons}
                 validation={regexValidation}
                 rows={5}
-                placeholder={t('automations.regexPlaceholder')}
+                placeholder={t(
+                  form.action_type === 'bot_start'
+                    ? 'automations.startRegexPlaceholder'
+                    : 'automations.regexPlaceholder',
+                )}
               />
             ) : (
               <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-                <span>{t('automations.buttonPattern')}</span>
+                <span>
+                  {t(
+                    form.action_type === 'bot_start'
+                      ? 'automations.startPattern'
+                      : 'automations.buttonPattern',
+                  )}
+                </span>
                 <textarea
                   value={buttons}
                   onChange={(event) => setButtons(event.target.value)}
                   rows={5}
-                  placeholder={t('automations.textPlaceholder')}
+                  placeholder={t(
+                    form.action_type === 'bot_start'
+                      ? 'automations.startTextPlaceholder'
+                      : 'automations.textPlaceholder',
+                  )}
                 />
               </label>
             )}
@@ -407,7 +468,7 @@ export function AutomationsPage() {
               onCheckedChange={(click_all_matches) =>
                 setForm((current) => ({ ...current, click_all_matches }))
               }
-              label={t('automations.clickAll')}
+              label={t('automations.runAll')}
             />
           </div>
           {save.error ? (

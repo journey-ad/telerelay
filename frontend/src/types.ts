@@ -238,6 +238,7 @@ export interface ForwardingRule {
 export interface ButtonRule {
   name: string
   enabled: boolean
+  action_type: 'callback' | 'bot_start'
   source_chats: ChatRef[]
   button_texts: string[]
   match_mode: 'exact' | 'contains' | 'regex'
