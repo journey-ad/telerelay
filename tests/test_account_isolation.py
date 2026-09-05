@@ -8,6 +8,7 @@ from backend.account_paths import AccountPathRegistry
 from backend.account_migration import AccountMigration
 from backend.application import AccountScopeRegistry
 from backend.config import AccountConfigRegistry, Config
+from backend.forward_queue import ForwardQueueStore
 from backend.stats_db import AccountStatsRegistry
 from backend.telegram_accounts import TelegramAccountError, TelegramAccountStore
 from backend.telegram_runtimes import TelegramRuntimeRegistry
@@ -226,6 +227,30 @@ class AccountIsolationTests(unittest.TestCase):
         self.assertEqual(second_exports.list_runs(), [])
         self.assertEqual(first_exports.store.db_path, self.data_dir / "101" / "exports.db")
         self.assertEqual(second_exports.store.db_path, self.data_dir / "202" / "exports.db")
+
+    def test_queue_preview_reads_persisted_items_when_runtime_is_stopped(self):
+        store = TelegramAccountStore(self.data_dir, paths=self.paths)
+        account = store.finalize_identity(
+            store.active_account_id,
+            {"telegram_user_id": 123},
+        )
+        queue_store = ForwardQueueStore(self.paths.for_account(account.id).queue_db)
+        queue_store.enqueue(
+            rule_data={"name": "persisted", "target_chats": [456]},
+            source_chat_id=-100,
+            source_message_id=1,
+            sender_id=2,
+            grouped_id=None,
+        )
+        runtimes = TelegramRuntimeRegistry(
+            Config(env_file=str(self.root / "missing.env"), config_file=str(self.root / "config.yaml")),
+            store,
+            bot_factory=FakeRuntime,
+            paths=self.paths,
+        )
+        page = runtimes.list_queue_items(account_id=account.id)
+        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["items"][0]["rule_name"], "persisted")
 
     def test_account_configs_record_session_type(self):
         template_path = self.config_dir / "template.yaml"

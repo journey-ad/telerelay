@@ -13,10 +13,18 @@ function entityHref(
   raw: string,
   url?: string | null,
 ): string | null {
-  if (url) return url
+  const safeHttpUrl = (value: string): string | null => {
+    try {
+      const parsed = new URL(value)
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null
+    } catch {
+      return null
+    }
+  }
+  if (url) return safeHttpUrl(url)
   switch (type) {
     case 'url':
-      return raw
+      return safeHttpUrl(raw)
     case 'email':
       return `mailto:${raw}`
     case 'phone':

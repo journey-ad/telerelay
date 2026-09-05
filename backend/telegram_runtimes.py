@@ -360,13 +360,13 @@ class TelegramRuntimeRegistry:
             active_id = account_id or self.account_store.active_account_id
             self.account_store.get_public(active_id)
             runtime = self._runtimes.get(active_id)
-            runtimes = [(active_id, runtime)] if runtime is not None else []
+            runtimes = [(active_id, runtime)]
         items = []
         total = 0
         for account_id, runtime in runtimes:
             store = getattr(runtime, "forward_queue_store", None)
             if not store:
-                continue
+                store = ForwardQueueStore(self.queue_db_path(account_id))
             account = accounts.get(account_id, {})
             label = str(account.get("label") or account_id)
             page_items, page_total = store.list_active_page(limit, offset)

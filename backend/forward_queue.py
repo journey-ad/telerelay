@@ -27,6 +27,10 @@ from backend.logger import get_logger
 logger = get_logger()
 
 
+class QueueItemCancelled(Exception):
+    """Raised when a queue item is cancelled while it is being processed."""
+
+
 def rule_fingerprint(rule_data: dict[str, Any]) -> str:
     """Return a stable identity for the rule snapshot stored with a task."""
     payload = json.dumps(rule_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -135,7 +139,8 @@ class ForwardQueueStore:
                     last_error TEXT,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
-                    completed_at REAL
+                    completed_at REAL,
+                    cancel_requested INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS idx_forward_queue_ready
                     ON forward_queue(status, available_at, id);
@@ -176,6 +181,10 @@ class ForwardQueueStore:
                 conn.execute("ALTER TABLE forward_queue ADD COLUMN media_files TEXT NOT NULL DEFAULT '[]'")
             if "media_size" not in columns:
                 conn.execute("ALTER TABLE forward_queue ADD COLUMN media_size INTEGER NOT NULL DEFAULT 0")
+            if "cancel_requested" not in columns:
+                conn.execute(
+                    "ALTER TABLE forward_queue ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0"
+                )
         try:
             self.db_path.chmod(0o600)
         except OSError:
@@ -224,20 +233,42 @@ class ForwardQueueStore:
     def delete_item(self, item_id: int) -> bool:
         """Remove an unfinished queue item.
 
-        Completed and failed items remain available for retention and history,
-        while pending/processing items are the operational queue shown in the
-        dashboard.  The conditional delete also makes this operation safe to
-        repeat when a consumer changes the item state concurrently.
+        Pending items are removed immediately. Processing items are marked for
+        cancellation so the active sender can stop before its next target.
+        Completed and failed items remain available for retention and history.
         """
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
                 """
                 DELETE FROM forward_queue
-                WHERE id = ? AND status IN ('pending', 'processing')
+                WHERE id = ? AND status = 'pending'
                 """,
                 (int(item_id),),
             )
+            if cursor.rowcount == 1:
+                return True
+            cursor = conn.execute(
+                """
+                UPDATE forward_queue
+                SET cancel_requested = 1, updated_at = ?
+                WHERE id = ? AND status = 'processing' AND cancel_requested = 0
+                """,
+                (time.time(), int(item_id)),
+            )
             return cursor.rowcount == 1
+
+    def is_cancel_requested(self, item_id: int) -> bool:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                "SELECT cancel_requested FROM forward_queue WHERE id = ?",
+                (int(item_id),),
+            ).fetchone()
+            return bool(row and row[0])
+
+    def remove_item(self, item_id: int) -> None:
+        """Remove a cancelled processing item after its worker exits."""
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM forward_queue WHERE id = ?", (int(item_id),))
 
     def list_active(self, limit: int = 50) -> list[ForwardQueueItem]:
         return self.list_active_page(limit, 0)[0]
@@ -248,12 +279,12 @@ class ForwardQueueStore:
             bounded_limit = max(1, min(int(limit), 100))
             bounded_offset = max(0, int(offset))
             total = conn.execute(
-                "SELECT COUNT(*) FROM forward_queue WHERE status IN ('pending', 'processing')"
+                "SELECT COUNT(*) FROM forward_queue WHERE status = 'pending' OR (status = 'processing' AND cancel_requested = 0)"
             ).fetchone()[0]
             rows = conn.execute(
                 """
                 SELECT * FROM forward_queue
-                WHERE status IN ('pending', 'processing')
+                WHERE status = 'pending' OR (status = 'processing' AND cancel_requested = 0)
                 ORDER BY CASE status WHEN 'processing' THEN 0 ELSE 1 END,
                          available_at ASC, id ASC
                 LIMIT ? OFFSET ?
@@ -490,6 +521,9 @@ class ForwardQueueStore:
         """Make jobs left in ``processing`` available after a crash/restart."""
         now = time.time()
         with self._lock, self._connect() as conn:
+            conn.execute(
+                "DELETE FROM forward_queue WHERE status = 'processing' AND cancel_requested = 1"
+            )
             cursor = conn.execute(
                 """
                 UPDATE forward_queue
@@ -513,6 +547,7 @@ class ForwardQueueStore:
             conn.execute("BEGIN IMMEDIATE")
             clauses = [
                 "status = 'pending'",
+                "cancel_requested = 0",
                 "available_at <= ?",
                 "(group_settle_until IS NULL OR group_settle_until <= ?)",
             ]
@@ -679,7 +714,12 @@ class ForwardQueueStore:
     def counts(self) -> dict[str, int]:
         with self._lock, self._connect() as conn:
             rows = conn.execute(
-                "SELECT status, COUNT(*) AS count FROM forward_queue GROUP BY status"
+                """
+                SELECT status, COUNT(*) AS count
+                FROM forward_queue
+                WHERE status != 'processing' OR cancel_requested = 0
+                GROUP BY status
+                """
             ).fetchall()
             return {row["status"]: row["count"] for row in rows}
 
@@ -689,7 +729,8 @@ class ForwardQueueStore:
             row = conn.execute(
                 """
                 SELECT COUNT(*) FROM forward_queue
-                WHERE status IN ('pending', 'processing')
+                WHERE status = 'pending'
+                   OR (status = 'processing' AND cancel_requested = 0)
                 """
             ).fetchone()
             return int(row[0])
@@ -846,6 +887,9 @@ class ForwardQueue:
             self.store.requeue_processing()
             raise
         except FloodWaitError as exc:
+            if self.store.is_cancel_requested(item.id):
+                self.store.remove_item(item.id)
+                return
             seconds = max(1.0, float(getattr(exc, "seconds", 1))) + self.flood_wait_buffer
             paused = self.store.pause_for(seconds, str(exc))
             self.store.reschedule(item.id, available_at=paused, error=str(exc))
@@ -857,7 +901,12 @@ class ForwardQueue:
                 )
             )
             self._notify_outcome(item, "delayed", exc)
+        except QueueItemCancelled:
+            self.store.remove_item(item.id)
         except Exception as exc:
+            if self.store.is_cancel_requested(item.id):
+                self.store.remove_item(item.id)
+                return
             failure_count = item.failure_count + 1
             if failure_count >= self.max_retries:
                 self.store.mark_failed(item.id, str(exc), increment_failure=True)

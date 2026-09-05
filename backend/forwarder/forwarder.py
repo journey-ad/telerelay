@@ -18,6 +18,7 @@ from telethon.tl.types import (
 from backend.constants import FORWARD_PREVIEW_LENGTH
 from backend.dedup import DeduplicateCache
 from backend.filters import MessageFilter, get_media_type
+from backend.forward_queue import QueueItemCancelled
 from backend.i18n import t
 from backend.logger import get_logger
 from backend.rule import ForwardingRule
@@ -84,6 +85,7 @@ class MessageForwarder:
         start_target_index: int = 0,
         messages_override: Optional[List[Message]] = None,
         on_target_success: Optional[Callable[[int], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> bool:
         """Forward a message, resuming from a durable target checkpoint.
 
@@ -139,6 +141,7 @@ class MessageForwarder:
                     start_target_index,
                     on_target_success,
                     target_labels,
+                    cancel_check,
                 )
         else:
             await self._do_forward(
@@ -149,6 +152,7 @@ class MessageForwarder:
                 start_target_index,
                 on_target_success,
                 target_labels,
+                cancel_check,
             )
         return True
 
@@ -161,6 +165,7 @@ class MessageForwarder:
         start_target_index: int = 0,
         on_target_success: Optional[Callable[[int], None]] = None,
         target_labels: Optional[List[str]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         """Execute forwarding with optional download, cleanup guaranteed by try/finally"""
         targets = self.rule.target_chats
@@ -169,6 +174,8 @@ class MessageForwarder:
         sent_count = 0
         skipped_count = 0
         try:
+            if cancel_check and cancel_check():
+                raise QueueItemCancelled()
             if start_target_index >= len(targets):
                 self._log_result(
                     message,
@@ -188,6 +195,8 @@ class MessageForwarder:
             source_data = self._get_source_data(message) if self.rule.hide_sender else None
             source_text = self._build_source_text(message) if not self.rule.hide_sender else ""
             for i in range(max(0, start_target_index), len(targets)):
+                if cancel_check and cancel_check():
+                    raise QueueItemCancelled()
                 target = targets[i]
                 if getattr(self, "suppressed_check", None) and self.suppressed_check(target):
                     # Opted-out subscribers are skipped silently; the durable

@@ -387,6 +387,10 @@ class StatsDB:
             try:
                 if rule_name:
                     conn.execute(
+                        "DELETE FROM daily_stats WHERE rule_name = ?",
+                        (rule_name,),
+                    )
+                    conn.execute(
                         "UPDATE rule_stats SET forwarded_count = 0, filtered_count = 0 WHERE rule_name = ?",
                         (rule_name,)
                     )
@@ -395,6 +399,7 @@ class StatsDB:
                         (rule_name,)
                     )
                 else:
+                    conn.execute("DELETE FROM daily_stats")
                     conn.execute(
                         "UPDATE rule_stats SET forwarded_count = 0, filtered_count = 0"
                     )
@@ -686,38 +691,55 @@ class StatsDB:
         with self._lock:
             conn = self._get_conn()
             try:
-                query = """
-                    SELECT daily.date,
-                           SUM(daily.forwarded_count) as forwarded,
-                           SUM(daily.filtered_count) as filtered,
-                           COALESCE(SUM(hourly.failed), 0) as failed
-                    FROM daily_stats AS daily
-                    LEFT JOIN (
-                        SELECT rule_name, substr(hour, 1, 10) AS date,
+                daily_clauses = []
+                daily_parameters: list[object] = []
+                hourly_clauses = []
+                hourly_parameters: list[object] = []
+                if days is not None:
+                    cutoff_dt = datetime.now() - timedelta(days=days)
+                    cutoff = cutoff_dt.strftime("%Y-%m-%d")
+                    daily_clauses.append("date >= ?")
+                    daily_parameters.append(cutoff)
+                    hourly_clauses.append("hour >= ?")
+                    hourly_parameters.append(cutoff_dt.strftime("%Y-%m-%d 00:00"))
+                if rule_name:
+                    daily_clauses.append("rule_name = ?")
+                    daily_parameters.append(rule_name)
+                    hourly_clauses.append("rule_name = ?")
+                    hourly_parameters.append(rule_name)
+                daily_where = f"WHERE {' AND '.join(daily_clauses)}" if daily_clauses else ""
+                hourly_where = f"WHERE {' AND '.join(hourly_clauses)}" if hourly_clauses else ""
+                cursor = conn.execute(
+                    f"""
+                    WITH daily AS (
+                        SELECT date,
+                               SUM(forwarded_count) AS forwarded,
+                               SUM(filtered_count) AS filtered
+                        FROM daily_stats {daily_where}
+                        GROUP BY date
+                    ), failed AS (
+                        SELECT substr(hour, 1, 10) AS date,
                                SUM(failed_count) AS failed
                         FROM hourly_stats
-                        GROUP BY rule_name, substr(hour, 1, 10)
-                    ) AS hourly
-                      ON hourly.rule_name = daily.rule_name
-                     AND hourly.date = daily.date
-                """
-                clauses = []
-                parameters: list[object] = []
-                if days is not None:
-                    clauses.append("daily.date >= ?")
-                    parameters.append(
-                        (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+                        {hourly_where}
+                        {'AND' if hourly_where else 'WHERE'} failed_count != 0
+                        GROUP BY substr(hour, 1, 10)
+                    ), dates AS (
+                        SELECT date FROM daily
+                        UNION
+                        SELECT date FROM failed
                     )
-                if rule_name:
-                    clauses.append("daily.rule_name = ?")
-                    parameters.append(rule_name)
-                if clauses:
-                    query += " WHERE " + " AND ".join(clauses)
-                query += """
-                    GROUP BY daily.date
-                    ORDER BY daily.date ASC
-                """
-                cursor = conn.execute(query, parameters)
+                    SELECT dates.date,
+                           COALESCE(daily.forwarded, 0),
+                           COALESCE(daily.filtered, 0),
+                           COALESCE(failed.failed, 0)
+                    FROM dates
+                    LEFT JOIN daily ON daily.date = dates.date
+                    LEFT JOIN failed ON failed.date = dates.date
+                    ORDER BY dates.date ASC
+                    """,
+                    daily_parameters + hourly_parameters,
+                )
                 return [
                     {
                         "date": row[0],

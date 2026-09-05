@@ -152,6 +152,7 @@ class ForwardQueueStoreTests(unittest.TestCase):
 
             self.assertTrue(store.delete_item(pending.id))
             self.assertTrue(store.delete_item(processing.id))
+            self.assertTrue(store.is_cancel_requested(processing.id))
             self.assertFalse(store.delete_item(completed.id))
             self.assertFalse(store.delete_item(failed.id))
             self.assertFalse(store.delete_item(999999))

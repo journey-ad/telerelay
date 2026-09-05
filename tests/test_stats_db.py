@@ -62,6 +62,13 @@ class StatsDBTests(unittest.TestCase):
         recent = self.database.get_daily_stats(365)
 
         self.assertEqual([item["date"] for item in all_time], ["2020-01-01", "2026-07-30"])
+        self.assertEqual(
+            all_time,
+            [
+                {"date": "2020-01-01", "forwarded": 2, "filtered": 1, "failed": 0},
+                {"date": "2026-07-30", "forwarded": 4, "filtered": 3, "failed": 0},
+            ],
+        )
         self.assertEqual([item["date"] for item in recent], ["2026-07-30"])
 
     def test_button_action_stats_increment_rename_reset_and_delete(self):
@@ -104,6 +111,17 @@ class StatsDBTests(unittest.TestCase):
             [{"media_type": "photo", "count": 1}, {"media_type": "text", "count": 1}],
         )
         self.assertEqual(self.database.get_button_action_hourly(24, "automation")[0]["triggered"], 1)
+
+    def test_daily_stats_include_failure_only_days_and_reset_clears_daily_data(self):
+        self.database.increment_failed("failed-only")
+        self.assertEqual(
+            self.database.get_daily_stats(None)[0]["failed"],
+            1,
+        )
+
+        self.database.increment_daily("failed-only", is_forwarded=True)
+        self.database.reset_stats()
+        self.assertEqual(self.database.get_daily_stats(None), [])
 
     def test_legacy_daily_stats_are_backfilled_into_hourly_stats(self):
         legacy_path = Path(self.temp_dir.name) / "legacy.db"

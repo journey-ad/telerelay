@@ -654,6 +654,7 @@ class BotManager:
             on_target_success=lambda index: self.forward_queue_store.update_target_index(
                 item.id, index
             ),
+            cancel_check=lambda: self.forward_queue_store.is_cancel_requested(item.id),
         )
         return max(0.0, float(forwarder.rule.delay))
 
@@ -737,7 +738,6 @@ class BotManager:
             "target_count": len(targets),
             "available_at": item.available_at,
             "last_error": item.last_error,
-            "created_at": item.created_at,
             "updated_at": item.updated_at,
             "content_preview": item.content_preview,
             "media_files": list(item.media_files),
