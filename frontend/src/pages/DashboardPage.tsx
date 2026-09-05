@@ -901,7 +901,6 @@ export function DashboardPage() {
                     type="monotone"
                     dataKey="failed"
                     name={t('dashboard.failed')}
-                    stackId="flow"
                     stroke="#e11d48"
                     strokeWidth={1.5}
                     fill="#e11d48"
