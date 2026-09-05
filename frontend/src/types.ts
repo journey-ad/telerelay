@@ -437,4 +437,20 @@ export interface ForwardQueueItem {
   last_error?: string | null
   created_at: number
   updated_at: number
+  content_preview: string
+  media_files: Array<{
+    message_id: number
+    name?: string | null
+    media_type?: string | null
+    mime_type?: string | null
+    size?: number
+  }>
+  media_size: number
+}
+
+export interface ForwardQueuePage {
+  items: ForwardQueueItem[]
+  total: number
+  limit: number
+  offset: number
 }

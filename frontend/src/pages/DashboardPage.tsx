@@ -5,6 +5,8 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   CalendarDays,
+  ChevronLeft,
+  ChevronRight,
   Filter,
   Gauge,
   ListChecks,
@@ -46,7 +48,14 @@ import {
 } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
 import { useAccountScope } from '../hooks/useAccountScope'
-import type { BotStatus, ForwardQueueItem, RelayEvent, Stats, TelegramAccount } from '../types'
+import type {
+  BotStatus,
+  ForwardQueueItem,
+  ForwardQueuePage,
+  RelayEvent,
+  Stats,
+  TelegramAccount,
+} from '../types'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 
@@ -267,6 +276,18 @@ function queueSource(item: ForwardQueueItem): string {
   return `${chat}/${item.source_message_id}`
 }
 
+function formatBytes(value: number): string {
+  if (!value) return '—'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = value
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`
+}
+
 function shouldStoreDashboardEvent(event: RelayEvent): boolean {
   return dashboardEventTypes.has(event.type)
 }
@@ -383,6 +404,7 @@ export function DashboardPage() {
   const accountId = useAccountScope()
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('14day')
   const [queuePreviewOpen, setQueuePreviewOpen] = useState(false)
+  const [queuePage, setQueuePage] = useState(0)
   const [trendRule, setTrendRule] = useState('all')
   const reportDays = reportPeriod === 'all' ? null : periodDays[reportPeriod]
   const allTime = reportDays === null
@@ -391,11 +413,11 @@ export function DashboardPage() {
     queryFn: () => accountRequest<BotStatus>(accountId, '/api/v1/bot/status'),
   })
   const queueQuery = useQuery({
-    queryKey: ['forward-queue-items', accountId],
+    queryKey: ['forward-queue-items', accountId, queuePage],
     queryFn: () =>
-      accountRequest<ForwardQueueItem[]>(
+      accountRequest<ForwardQueuePage>(
         accountId,
-        `/api/v1/queue/items?limit=${queuePreviewLimit}`,
+        `/api/v1/queue/items?limit=${queuePreviewLimit}&offset=${queuePage * queuePreviewLimit}`,
       ),
     enabled: queuePreviewOpen,
     refetchInterval: queuePreviewOpen ? 5_000 : false,
@@ -444,10 +466,9 @@ export function DashboardPage() {
   const deleteQueueItem = useMutation({
     mutationFn: (itemId: number) =>
       accountRequest(accountId, `/api/v1/queue/items/${itemId}`, json('DELETE')),
-    onSuccess: (_data, itemId) => {
-      client.setQueryData<ForwardQueueItem[]>(['forward-queue-items', accountId], (items) =>
-        items?.filter((item) => item.id !== itemId),
-      )
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['forward-queue-items', accountId] })
+      if (queueItems.length === 1 && queuePage > 0) setQueuePage((page) => page - 1)
       void client.invalidateQueries({ queryKey: ['bot-status'] })
     },
   })
@@ -471,10 +492,12 @@ export function DashboardPage() {
         })
       : t(status.is_connected ? 'dashboard.telegramConnected' : 'dashboard.telegramDisconnected')
   const runtimeStats = status.stats ?? {}
-  const queueItems = queueQuery.data ?? []
+  const queueItems = queueQuery.data?.items ?? []
   const activeQueue = Object.entries(status.queue?.counts ?? {})
     .filter(([key]) => key === 'pending' || key === 'processing')
     .reduce((sum, [, value]) => sum + value, 0)
+  const queueTotal = queueQuery.data?.total ?? activeQueue
+  const queuePages = Math.max(1, Math.ceil(queueTotal / queuePreviewLimit))
   const report = useMemo(() => {
     const source = statsQuery.data?.hourly ?? []
     const durationHours = reportDays ? reportDays * 24 : allTimeHours(source)
@@ -675,7 +698,7 @@ export function DashboardPage() {
             <p className="mb-3 text-right text-xs text-slate-400">
               {t('dashboard.queuePreview.meta', {
                 shown: queueItems.length,
-                total: activeQueue,
+                total: queueTotal,
               })}
             </p>
             {queueQuery.isPending ? (
@@ -691,10 +714,12 @@ export function DashboardPage() {
             ) : queueItems.length ? (
               <div className="overflow-x-auto">
                 <div className="min-w-225">
-                  <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)_70px] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
+                  <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_minmax(180px,1.2fr)_minmax(150px,1fr)_100px_110px_70px_minmax(160px,1fr)_70px] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
                     <span>{t('dashboard.queuePreview.columns.account')}</span>
                     <span>{t('dashboard.queuePreview.columns.rule')}</span>
                     <span>{t('dashboard.queuePreview.columns.source')}</span>
+                    <span>{t('dashboard.queuePreview.columns.content')}</span>
+                    <span>{t('dashboard.queuePreview.columns.files')}</span>
                     <span>{t('dashboard.queuePreview.columns.status')}</span>
                     <span>{t('dashboard.queuePreview.columns.progress')}</span>
                     <span className="text-right">
@@ -709,7 +734,7 @@ export function DashboardPage() {
                     const state = queueState(item)
                     return (
                       <div
-                        className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)_70px] items-center gap-3 border-b border-slate-100 py-3 last:border-0"
+                        className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_minmax(180px,1.2fr)_minmax(150px,1fr)_100px_110px_70px_minmax(160px,1fr)_70px] items-center gap-3 border-b border-slate-100 py-3 last:border-0"
                         key={`${item.account_id}-${item.id}`}
                       >
                         <div className="min-w-0">
@@ -726,6 +751,33 @@ export function DashboardPage() {
                         <span className="font-mono text-xs text-slate-500">
                           {queueSource(item)}
                         </span>
+                        <span
+                          className="truncate text-xs text-slate-600"
+                          title={item.content_preview}
+                        >
+                          {item.content_preview || '—'}
+                        </span>
+                        <div className="min-w-0 text-xs text-slate-500">
+                          {item.media_files.length ? (
+                            <>
+                              <span
+                                className="block truncate"
+                                title={item.media_files
+                                  .map((file) => file.name || file.media_type || 'file')
+                                  .join(', ')}
+                              >
+                                {item.media_files
+                                  .map((file) => file.name || file.media_type || 'file')
+                                  .join(', ')}
+                              </span>
+                              <small className="block text-slate-400">
+                                {formatBytes(item.media_size)}
+                              </small>
+                            </>
+                          ) : (
+                            '—'
+                          )}
+                        </div>
                         <span
                           className={cn(
                             'w-fit rounded px-2 py-1 text-xs font-semibold',
@@ -794,6 +846,29 @@ export function DashboardPage() {
                 detail={t('dashboard.queuePreview.emptyDetail')}
               />
             )}
+            {queueTotal > 0 ? (
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+                <small className="text-xs text-slate-400">
+                  {t('dashboard.queuePreview.page', { current: queuePage + 1, total: queuePages })}
+                </small>
+                <div className="flex items-center gap-1">
+                  <IconButton
+                    type="button"
+                    label={t('dashboard.queuePreview.previous')}
+                    icon={ChevronLeft}
+                    disabled={queuePage === 0}
+                    onClick={() => setQueuePage((page) => Math.max(0, page - 1))}
+                  />
+                  <IconButton
+                    type="button"
+                    label={t('dashboard.queuePreview.next')}
+                    icon={ChevronRight}
+                    disabled={queuePage >= queuePages - 1}
+                    onClick={() => setQueuePage((page) => Math.min(queuePages - 1, page + 1))}
+                  />
+                </div>
+              </div>
+            ) : null}
           </div>
         </Panel>
       ) : null}

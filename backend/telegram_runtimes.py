@@ -353,7 +353,8 @@ class TelegramRuntimeRegistry:
         self,
         limit: int = 50,
         account_id: str | None = None,
-    ) -> list[dict[str, Any]]:
+        offset: int = 0,
+    ) -> dict[str, Any]:
         accounts = {account["id"]: account for account in self.account_store.list_public()}
         with self._state_lock:
             active_id = account_id or self.account_store.active_account_id
@@ -361,13 +362,16 @@ class TelegramRuntimeRegistry:
             runtime = self._runtimes.get(active_id)
             runtimes = [(active_id, runtime)] if runtime is not None else []
         items = []
+        total = 0
         for account_id, runtime in runtimes:
             store = getattr(runtime, "forward_queue_store", None)
             if not store:
                 continue
             account = accounts.get(account_id, {})
             label = str(account.get("label") or account_id)
-            for item in store.list_active(limit):
+            page_items, page_total = store.list_active_page(limit, offset)
+            total += page_total
+            for item in page_items:
                 items.append(BotManager._queue_item_data(item, account_id, label))
         items.sort(
             key=lambda item: (
@@ -376,7 +380,12 @@ class TelegramRuntimeRegistry:
                 item["id"],
             )
         )
-        return items[: max(1, min(int(limit), 100))]
+        return {
+            "items": items[: max(1, min(int(limit), 100))],
+            "total": total,
+            "limit": max(1, min(int(limit), 100)),
+            "offset": max(0, int(offset)),
+        }
 
     def delete_queue_item(
         self,

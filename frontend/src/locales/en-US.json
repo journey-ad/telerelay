@@ -325,6 +325,8 @@
         "account": "Account",
         "rule": "Rule",
         "source": "Source message",
+        "content": "Content preview",
+        "files": "Files",
         "status": "Status",
         "progress": "Target progress",
         "retries": "Failures",
@@ -339,7 +341,10 @@
       "targetProgress": "{{current}} / {{total}} targets",
       "delete": "Delete",
       "deleteTitle": "Delete queued task",
-      "deleteConfirm": "Remove the forwarding task for rule “{{rule}}” from the queue?"
+      "deleteConfirm": "Remove the forwarding task for rule “{{rule}}” from the queue?",
+      "page": "Page {{current}} / {{total}}",
+      "previous": "Previous page",
+      "next": "Next page"
     },
     "ruleRanking": "Rule performance ranking",
     "ruleRankingMeta": "{{count}} rules · cumulative data",

@@ -46,6 +46,18 @@ def parse_member_ids(raw: Optional[str]) -> list[int]:
     return []
 
 
+def parse_media_files(raw: Optional[str]) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [item for item in parsed if isinstance(item, dict)]
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+    return []
+
+
 @dataclass(frozen=True)
 class ForwardQueueItem:
     id: int
@@ -68,6 +80,9 @@ class ForwardQueueItem:
     last_error: Optional[str]
     created_at: float
     updated_at: float
+    content_preview: str
+    media_files: tuple[dict[str, Any], ...]
+    media_size: int
 
 
 class ForwardQueueStore:
@@ -155,6 +170,12 @@ class ForwardQueueStore:
                 conn.execute(
                     "ALTER TABLE forward_queue ADD COLUMN source_chat_name TEXT"
                 )
+            if "content_preview" not in columns:
+                conn.execute("ALTER TABLE forward_queue ADD COLUMN content_preview TEXT NOT NULL DEFAULT ''")
+            if "media_files" not in columns:
+                conn.execute("ALTER TABLE forward_queue ADD COLUMN media_files TEXT NOT NULL DEFAULT '[]'")
+            if "media_size" not in columns:
+                conn.execute("ALTER TABLE forward_queue ADD COLUMN media_size INTEGER NOT NULL DEFAULT 0")
         try:
             self.db_path.chmod(0o600)
         except OSError:
@@ -163,6 +184,7 @@ class ForwardQueueStore:
     @staticmethod
     def _row_to_item(row: sqlite3.Row) -> ForwardQueueItem:
         member_ids = parse_member_ids(row["group_member_ids"])
+        media_files = parse_media_files(row["media_files"])
         return ForwardQueueItem(
             id=row["id"],
             dedup_key=row["dedup_key"],
@@ -184,6 +206,9 @@ class ForwardQueueStore:
             last_error=row["last_error"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            content_preview=row["content_preview"] or "",
+            media_files=tuple(media_files),
+            media_size=int(row["media_size"] or 0),
         )
 
     def _get(self, conn: sqlite3.Connection, item_id: int) -> ForwardQueueItem:
@@ -215,19 +240,27 @@ class ForwardQueueStore:
             return cursor.rowcount == 1
 
     def list_active(self, limit: int = 50) -> list[ForwardQueueItem]:
-        """Return a bounded operational view of unfinished queue items."""
+        return self.list_active_page(limit, 0)[0]
+
+    def list_active_page(self, limit: int = 50, offset: int = 0) -> tuple[list[ForwardQueueItem], int]:
+        """Return a page and total count of unfinished queue items."""
         with self._lock, self._connect() as conn:
+            bounded_limit = max(1, min(int(limit), 100))
+            bounded_offset = max(0, int(offset))
+            total = conn.execute(
+                "SELECT COUNT(*) FROM forward_queue WHERE status IN ('pending', 'processing')"
+            ).fetchone()[0]
             rows = conn.execute(
                 """
                 SELECT * FROM forward_queue
                 WHERE status IN ('pending', 'processing')
                 ORDER BY CASE status WHEN 'processing' THEN 0 ELSE 1 END,
                          available_at ASC, id ASC
-                LIMIT ?
+                LIMIT ? OFFSET ?
                 """,
-                (max(1, min(int(limit), 100)),),
+                (bounded_limit, bounded_offset),
             ).fetchall()
-            return [self._row_to_item(row) for row in rows]
+            return [self._row_to_item(row) for row in rows], int(total)
 
     def enqueue(
         self,
@@ -239,6 +272,9 @@ class ForwardQueueStore:
         grouped_id: Optional[int | str],
         source_chat_name: Optional[str] = None,
         settle_seconds: float = 1.0,
+        content_preview: str = "",
+        media_files: Optional[list[dict[str, Any]]] = None,
+        media_size: int = 0,
     ) -> tuple[ForwardQueueItem, bool]:
         """Insert a message, merging subsequent updates from the same album.
 
@@ -259,6 +295,8 @@ class ForwardQueueStore:
         settle_until = now + settle if group_text is not None else None
         encoded_rule = json.dumps(rule_data, ensure_ascii=False, sort_keys=True)
         members_json = json.dumps([int(source_message_id)]) if group_text is not None else None
+        normalized_media = [item for item in (media_files or []) if isinstance(item, dict)]
+        media_json = json.dumps(normalized_media, ensure_ascii=False)
 
         with self._lock, self._connect() as conn:
             cursor = conn.execute(
@@ -266,9 +304,9 @@ class ForwardQueueStore:
                 INSERT OR IGNORE INTO forward_queue
                 (dedup_key, rule_name, rule_data, rule_fingerprint, source_chat_id,
                  source_chat_name, source_message_id, sender_id, grouped_id,
-                 group_member_ids, group_settle_until, status,
+                 group_member_ids, group_settle_until, content_preview, media_files, media_size, status,
                  available_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
                 """,
                 (
                     dedup_key,
@@ -282,6 +320,9 @@ class ForwardQueueStore:
                     group_text,
                     members_json,
                     settle_until,
+                    str(content_preview or "")[:500],
+                    media_json,
+                    max(0, int(media_size or 0)),
                     available_at,
                     now,
                     now,
@@ -292,7 +333,7 @@ class ForwardQueueStore:
             if not inserted and group_text is not None:
                 # Album updates arrive separately; wait for the group to settle.
                 existing = conn.execute(
-                    "SELECT id, status, group_member_ids FROM forward_queue WHERE dedup_key = ?",
+                    "SELECT id, status, group_member_ids, media_files, media_size, content_preview FROM forward_queue WHERE dedup_key = ?",
                     (dedup_key,),
                 ).fetchone()
                 if existing is not None:
@@ -301,6 +342,12 @@ class ForwardQueueStore:
                     if existing["status"] in ("pending", "processing") and not already_member:
                         # Normal case: fold the member in and extend the settle window.
                         members = sorted(set(existing_members + [int(source_message_id)]))
+                        merged_media = parse_media_files(existing["media_files"])
+                        seen_media = {item.get("message_id") for item in merged_media}
+                        for media in normalized_media:
+                            if media.get("message_id") not in seen_media:
+                                merged_media.append(media)
+                        merged_size = sum(int(item.get("size") or 0) for item in merged_media)
                         conn.execute(
                             """
                             UPDATE forward_queue
@@ -313,6 +360,8 @@ class ForwardQueueStore:
                                     THEN MAX(COALESCE(group_settle_until, 0), ?)
                                     ELSE group_settle_until END,
                                 group_member_ids = ?,
+                                content_preview = CASE WHEN content_preview = '' THEN ? ELSE content_preview END,
+                                media_files = ?, media_size = ?,
                                 updated_at = ?
                             WHERE dedup_key = ? AND next_target_index = 0
                             """,
@@ -323,6 +372,7 @@ class ForwardQueueStore:
                                 available_at,
                                 settle_until,
                                 json.dumps(members),
+                                str(content_preview or "")[:500], json.dumps(merged_media, ensure_ascii=False), merged_size,
                                 now,
                                 dedup_key,
                             ),
@@ -332,7 +382,7 @@ class ForwardQueueStore:
                         # stragglers as a fresh queue task (same settle window).
                         late_row = conn.execute(
                             """
-                            SELECT id, dedup_key, status, group_member_ids
+                            SELECT id, dedup_key, status, group_member_ids, media_files
                             FROM forward_queue
                             WHERE grouped_id = ? AND dedup_key LIKE ?
                             ORDER BY id DESC LIMIT 1
@@ -345,11 +395,18 @@ class ForwardQueueStore:
                                 set(parse_member_ids(late_row["group_member_ids"])
                                     + [int(source_message_id)])
                             )
+                            late_media = parse_media_files(late_row["media_files"])
+                            late_seen = {item.get("message_id") for item in late_media}
+                            for media in normalized_media:
+                                if media.get("message_id") not in late_seen:
+                                    late_media.append(media)
                             conn.execute(
                                 """
                                 UPDATE forward_queue
                                 SET source_message_id = MIN(source_message_id, ?),
                                     group_member_ids = ?,
+                                    content_preview = CASE WHEN content_preview = '' THEN ? ELSE content_preview END,
+                                    media_files = ?, media_size = ?,
                                     available_at = CASE WHEN status = 'pending'
                                         THEN MAX(available_at, ?) ELSE available_at END,
                                     group_settle_until = CASE WHEN status = 'pending'
@@ -361,6 +418,8 @@ class ForwardQueueStore:
                                 (
                                     int(source_message_id),
                                     json.dumps(late_members),
+                                    str(content_preview or "")[:500], json.dumps(late_media, ensure_ascii=False),
+                                    sum(int(item.get("size") or 0) for item in late_media),
                                     available_at,
                                     settle_until,
                                     now,
@@ -376,9 +435,9 @@ class ForwardQueueStore:
                                 (dedup_key, rule_name, rule_data, rule_fingerprint,
                                  source_chat_id, source_chat_name, source_message_id,
                                  sender_id, grouped_id, group_member_ids,
-                                 group_settle_until, status, available_at,
+                                 group_settle_until, content_preview, media_files, media_size, status, available_at,
                                  created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
                                 """,
                                 (
                                     target_key,
@@ -392,6 +451,7 @@ class ForwardQueueStore:
                                     group_text,
                                     json.dumps([int(source_message_id)]),
                                     settle_until,
+                                    str(content_preview or "")[:500], media_json, max(0, int(media_size or 0)),
                                     available_at,
                                     now,
                                     now,

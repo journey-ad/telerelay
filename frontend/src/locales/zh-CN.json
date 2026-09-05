@@ -325,6 +325,8 @@
         "account": "账号",
         "rule": "规则",
         "source": "来源消息",
+        "content": "内容摘要",
+        "files": "文件",
         "status": "状态",
         "progress": "目标进度",
         "retries": "失败次数",
@@ -339,7 +341,10 @@
       "targetProgress": "{{current}} / {{total}} 个目标",
       "delete": "删除",
       "deleteTitle": "删除积压任务",
-      "deleteConfirm": "确定要从队列中移除规则“{{rule}}”的转发任务吗？"
+      "deleteConfirm": "确定要从队列中移除规则“{{rule}}”的转发任务吗？",
+      "page": "第 {{current}} / {{total}} 页",
+      "previous": "上一页",
+      "next": "下一页"
     },
     "ruleRanking": "规则表现排行",
     "ruleRankingMeta": "{{count}} 条规则 · 累计数据",

@@ -528,12 +528,17 @@ async def bot_status(context: ApplicationContext = Depends(get_context)) -> dict
 @router.get("/queue/items")
 async def queue_items(
     limit: int = Query(50, ge=1, le=100),
+    offset: int | None = Query(None, ge=0),
     context: ApplicationContext = Depends(get_context),
-) -> list[dict]:
+) -> Any:
     scope = _account_scope(context)
+    if offset is None:
+        if scope:
+            return await asyncio.to_thread(context.bot.list_queue_items, limit, scope.account_id)
+        return await asyncio.to_thread(context.bot.list_queue_items, limit)
     if scope:
-        return await asyncio.to_thread(context.bot.list_queue_items, limit, scope.account_id)
-    return await asyncio.to_thread(context.bot.list_queue_items, limit)
+        return await asyncio.to_thread(context.bot.list_queue_items, limit, scope.account_id, offset)
+    return await asyncio.to_thread(context.bot.list_queue_items, limit, offset=offset)
 
 
 @router.delete("/queue/items/{item_id}", response_model=ApiMessage)

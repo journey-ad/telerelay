@@ -15,7 +15,7 @@ from backend.constants import (
     BOT_RESTART_DELAY,
     BOT_STOP_TIMEOUT,
 )
-from backend.filters import MessageFilter
+from backend.filters import MessageFilter, get_file_size, get_media_type
 from backend.forward_queue import (
     ForwardQueue,
     ForwardQueueItem,
@@ -679,15 +679,16 @@ class BotManager:
             ),
         )
 
-    def list_queue_items(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_queue_items(self, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         store = self.forward_queue_store
         if not store:
-            return []
+            return {"items": [], "total": 0, "limit": limit, "offset": offset}
         account_id = self.account_id or "default"
-        return [
+        items, total = store.list_active_page(limit, offset)
+        return {"items": [
             self._queue_item_data(item, account_id, account_id)
-            for item in store.list_active(limit)
-        ]
+            for item in items
+        ], "total": total, "limit": max(1, min(int(limit), 100)), "offset": max(0, int(offset))}
 
     def delete_queue_item(self, item_id: int) -> bool:
         """Remove one pending or processing task from this account's queue."""
@@ -738,6 +739,9 @@ class BotManager:
             "last_error": item.last_error,
             "created_at": item.created_at,
             "updated_at": item.updated_at,
+            "content_preview": item.content_preview,
+            "media_files": list(item.media_files),
+            "media_size": item.media_size,
         }
 
     def _publish_event(self, event_type: str, payload: dict[str, Any]) -> None:
@@ -793,6 +797,17 @@ class BotManager:
         raw_text = message.text or get_media_description(message)
         raw_text = raw_text.replace('\n', ' ')
         message_preview = f"{raw_text[:50]}..." if len(raw_text) > 50 else raw_text
+        file_size = get_file_size(message)
+        media_files = []
+        if file_size or getattr(message, "media", None):
+            file = getattr(message, "file", None)
+            media_files.append({
+                "message_id": int(message.id),
+                "name": getattr(file, "name", None),
+                "media_type": get_media_type(message),
+                "mime_type": getattr(file, "mime_type", None),
+                "size": int(file_size or 0),
+            })
 
         # Log received
         logger.debug(t("log.bot.message_received",
@@ -836,6 +851,9 @@ class BotManager:
                 sender_id=sender_id,
                 grouped_id=message.grouped_id,
                 settle_seconds=self.config.forward_queue_media_group_settle_seconds,
+                content_preview=message_preview,
+                media_files=media_files,
+                media_size=file_size,
             )
             source = self._message_source_label(chat_title, chat_id, message.id)
             if message.grouped_id:
