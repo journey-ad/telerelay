@@ -68,6 +68,28 @@ class ForwardQueueStoreTests(unittest.TestCase):
 
             self.assertEqual(selected.id, second.id)
 
+    def test_claim_next_deprioritizes_last_rule_when_both_are_ready(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            first, _ = store.enqueue(
+                rule_data=rule_data("rule-a"),
+                source_chat_id=-1001,
+                source_message_id=1,
+                sender_id=7,
+                grouped_id=None,
+            )
+            second, _ = store.enqueue(
+                rule_data=rule_data("rule-b"),
+                source_chat_id=-1001,
+                source_message_id=2,
+                sender_id=7,
+                grouped_id=None,
+            )
+
+            selected = store.claim_next(deprioritize_rule=first.rule_fingerprint)
+
+            self.assertEqual(selected.id, second.id)
+
     def test_processing_item_and_target_checkpoint_survive_reopen(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "forward_queue.db"

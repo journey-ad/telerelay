@@ -11,16 +11,24 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import sqlite3
 import threading
 import time
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Iterator, Optional
+from typing import Any, Awaitable, Callable, Optional
 
+from sqlalchemy import case, delete, func, inspect, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from telethon.errors import FloodWaitError
 
+from backend.database import (
+    Base,
+    ForwardQueueRow,
+    ForwardQueueState,
+    create_sqlite_engine,
+    session_factory,
+    session_scope,
+)
 from backend.i18n import t
 from backend.logger import get_logger
 
@@ -96,139 +104,84 @@ class ForwardQueueStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.engine = create_sqlite_engine(self.db_path)
+        self._session_factory = session_factory(self.engine)
         self._init_db()
 
-    @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(str(self.db_path), timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 30000")
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+    def _session(self):
+        return session_scope(self._session_factory)
 
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS forward_queue (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    dedup_key TEXT NOT NULL UNIQUE,
-                    rule_name TEXT NOT NULL,
-                    rule_data TEXT NOT NULL,
-                    rule_fingerprint TEXT NOT NULL,
-                    source_chat_id INTEGER NOT NULL,
-                    source_chat_name TEXT,
-                    source_message_id INTEGER NOT NULL,
-                    sender_id INTEGER,
-                    grouped_id TEXT,
-                    group_member_ids TEXT,
-                    group_settle_until REAL,
-                    status TEXT NOT NULL DEFAULT 'pending'
-                        CHECK(status IN ('pending', 'processing', 'completed', 'failed')),
-                    attempt_count INTEGER NOT NULL DEFAULT 0,
-                    failure_count INTEGER NOT NULL DEFAULT 0,
-                    next_target_index INTEGER NOT NULL DEFAULT 0,
-                    available_at REAL NOT NULL,
-                    last_error TEXT,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL,
-                    completed_at REAL,
-                    cancel_requested INTEGER NOT NULL DEFAULT 0
-                );
-                CREATE INDEX IF NOT EXISTS idx_forward_queue_ready
-                    ON forward_queue(status, available_at, id);
-                CREATE INDEX IF NOT EXISTS idx_forward_queue_status
-                    ON forward_queue(status, updated_at);
-                CREATE TABLE IF NOT EXISTS forward_queue_state (
-                    id INTEGER PRIMARY KEY CHECK(id = 1),
-                    paused_until REAL NOT NULL DEFAULT 0,
-                    pause_reason TEXT,
-                    updated_at REAL NOT NULL
-                );
-                INSERT OR IGNORE INTO forward_queue_state(id, paused_until, updated_at)
-                    VALUES (1, 0, 0);
-                """
+        with self._lock:
+            Base.metadata.create_all(
+                self.engine, tables=[ForwardQueueRow.__table__, ForwardQueueState.__table__]
             )
-            columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(forward_queue)").fetchall()
+            inspector = inspect(self.engine)
+            columns = {column["name"] for column in inspector.get_columns("forward_queue")}
+            additions = {
+                "failure_count": "INTEGER NOT NULL DEFAULT 0",
+                "group_member_ids": "TEXT",
+                "group_settle_until": "REAL",
+                "source_chat_name": "TEXT",
+                "content_preview": "TEXT NOT NULL DEFAULT ''",
+                "media_files": "TEXT NOT NULL DEFAULT '[]'",
+                "media_size": "INTEGER NOT NULL DEFAULT 0",
+                "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
             }
-            if "failure_count" not in columns:
-                conn.execute(
-                    "ALTER TABLE forward_queue ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
-                )
-            if "group_member_ids" not in columns:
-                conn.execute(
-                    "ALTER TABLE forward_queue ADD COLUMN group_member_ids TEXT"
-                )
-            if "group_settle_until" not in columns:
-                conn.execute(
-                    "ALTER TABLE forward_queue ADD COLUMN group_settle_until REAL"
-                )
-            if "source_chat_name" not in columns:
-                conn.execute(
-                    "ALTER TABLE forward_queue ADD COLUMN source_chat_name TEXT"
-                )
-            if "content_preview" not in columns:
-                conn.execute("ALTER TABLE forward_queue ADD COLUMN content_preview TEXT NOT NULL DEFAULT ''")
-            if "media_files" not in columns:
-                conn.execute("ALTER TABLE forward_queue ADD COLUMN media_files TEXT NOT NULL DEFAULT '[]'")
-            if "media_size" not in columns:
-                conn.execute("ALTER TABLE forward_queue ADD COLUMN media_size INTEGER NOT NULL DEFAULT 0")
-            if "cancel_requested" not in columns:
-                conn.execute(
-                    "ALTER TABLE forward_queue ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0"
-                )
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql("PRAGMA journal_mode = WAL")
+                for name, definition in additions.items():
+                    if name not in columns:
+                        connection.exec_driver_sql(
+                            f"ALTER TABLE forward_queue ADD COLUMN {name} {definition}"
+                        )
+            with self._session() as session:
+                if session.get(ForwardQueueState, 1) is None:
+                    session.add(ForwardQueueState(id=1, paused_until=0, updated_at=0))
         try:
             self.db_path.chmod(0o600)
         except OSError:
             pass
 
     @staticmethod
-    def _row_to_item(row: sqlite3.Row) -> ForwardQueueItem:
-        member_ids = parse_member_ids(row["group_member_ids"])
-        media_files = parse_media_files(row["media_files"])
+    def _row_to_item(row: ForwardQueueRow) -> ForwardQueueItem:
+        member_ids = parse_member_ids(row.group_member_ids)
+        media_files = parse_media_files(row.media_files)
         return ForwardQueueItem(
-            id=row["id"],
-            dedup_key=row["dedup_key"],
-            rule_name=row["rule_name"],
-            rule_data=json.loads(row["rule_data"]),
-            rule_fingerprint=row["rule_fingerprint"],
-            source_chat_id=row["source_chat_id"],
-            source_chat_name=row["source_chat_name"],
-            source_message_id=row["source_message_id"],
-            sender_id=row["sender_id"],
-            grouped_id=row["grouped_id"],
+            id=row.id,
+            dedup_key=row.dedup_key,
+            rule_name=row.rule_name,
+            rule_data=json.loads(row.rule_data),
+            rule_fingerprint=row.rule_fingerprint,
+            source_chat_id=row.source_chat_id,
+            source_chat_name=row.source_chat_name,
+            source_message_id=row.source_message_id,
+            sender_id=row.sender_id,
+            grouped_id=row.grouped_id,
             group_member_ids=tuple(member_ids) if member_ids else None,
-            group_settle_until=row["group_settle_until"],
-            status=row["status"],
-            attempt_count=row["attempt_count"],
-            failure_count=row["failure_count"],
-            next_target_index=row["next_target_index"],
-            available_at=row["available_at"],
-            last_error=row["last_error"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            content_preview=row["content_preview"] or "",
+            group_settle_until=row.group_settle_until,
+            status=row.status,
+            attempt_count=row.attempt_count,
+            failure_count=row.failure_count,
+            next_target_index=row.next_target_index,
+            available_at=row.available_at,
+            last_error=row.last_error,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            content_preview=row.content_preview or "",
             media_files=tuple(media_files),
-            media_size=int(row["media_size"] or 0),
+            media_size=int(row.media_size or 0),
         )
 
-    def _get(self, conn: sqlite3.Connection, item_id: int) -> ForwardQueueItem:
-        row = conn.execute("SELECT * FROM forward_queue WHERE id = ?", (item_id,)).fetchone()
+    def _get(self, session, item_id: int) -> ForwardQueueItem:
+        row = session.get(ForwardQueueRow, int(item_id))
         if row is None:
             raise KeyError(f"Forward queue item {item_id} does not exist")
         return self._row_to_item(row)
 
     def get_item(self, item_id: int) -> ForwardQueueItem:
-        with self._lock, self._connect() as conn:
-            return self._get(conn, item_id)
+        with self._lock, self._session() as session:
+            return self._get(session, item_id)
 
     def delete_item(self, item_id: int) -> bool:
         """Remove an unfinished queue item.
@@ -237,60 +190,61 @@ class ForwardQueueStore:
         cancellation so the active sender can stop before its next target.
         Completed and failed items remain available for retention and history.
         """
-        with self._lock, self._connect() as conn:
-            cursor = conn.execute(
-                """
-                DELETE FROM forward_queue
-                WHERE id = ? AND status = 'pending'
-                """,
-                (int(item_id),),
-            )
-            if cursor.rowcount == 1:
+        with self._lock, self._session() as session:
+            deleted = session.execute(
+                delete(ForwardQueueRow).where(
+                    ForwardQueueRow.id == int(item_id), ForwardQueueRow.status == "pending"
+                )
+            ).rowcount
+            if deleted == 1:
                 return True
-            cursor = conn.execute(
-                """
-                UPDATE forward_queue
-                SET cancel_requested = 1, updated_at = ?
-                WHERE id = ? AND status = 'processing' AND cancel_requested = 0
-                """,
-                (time.time(), int(item_id)),
-            )
-            return cursor.rowcount == 1
+            updated = session.execute(
+                update(ForwardQueueRow)
+                .where(
+                    ForwardQueueRow.id == int(item_id),
+                    ForwardQueueRow.status == "processing",
+                    ForwardQueueRow.cancel_requested.is_(False),
+                )
+                .values(cancel_requested=True, updated_at=time.time())
+            ).rowcount
+            return updated == 1
 
     def is_cancel_requested(self, item_id: int) -> bool:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT cancel_requested FROM forward_queue WHERE id = ?",
-                (int(item_id),),
-            ).fetchone()
-            return bool(row and row[0])
+        with self._lock, self._session() as session:
+            row = session.scalar(
+                select(ForwardQueueRow.cancel_requested).where(ForwardQueueRow.id == int(item_id))
+            )
+            return bool(row)
 
     def remove_item(self, item_id: int) -> None:
         """Remove a cancelled processing item after its worker exits."""
-        with self._lock, self._connect() as conn:
-            conn.execute("DELETE FROM forward_queue WHERE id = ?", (int(item_id),))
+        with self._lock, self._session() as session:
+            session.execute(delete(ForwardQueueRow).where(ForwardQueueRow.id == int(item_id)))
 
     def list_active(self, limit: int = 50) -> list[ForwardQueueItem]:
         return self.list_active_page(limit, 0)[0]
 
     def list_active_page(self, limit: int = 50, offset: int = 0) -> tuple[list[ForwardQueueItem], int]:
         """Return a page and total count of unfinished queue items."""
-        with self._lock, self._connect() as conn:
+        with self._lock, self._session() as session:
             bounded_limit = max(1, min(int(limit), 100))
             bounded_offset = max(0, int(offset))
-            total = conn.execute(
-                "SELECT COUNT(*) FROM forward_queue WHERE status = 'pending' OR (status = 'processing' AND cancel_requested = 0)"
-            ).fetchone()[0]
-            rows = conn.execute(
-                """
-                SELECT * FROM forward_queue
-                WHERE status = 'pending' OR (status = 'processing' AND cancel_requested = 0)
-                ORDER BY CASE status WHEN 'processing' THEN 0 ELSE 1 END,
-                         available_at ASC, id ASC
-                LIMIT ? OFFSET ?
-                """,
-                (bounded_limit, bounded_offset),
-            ).fetchall()
+            active = (ForwardQueueRow.status == "pending") | (
+                (ForwardQueueRow.status == "processing")
+                & ForwardQueueRow.cancel_requested.is_(False)
+            )
+            total = session.scalar(select(func.count()).select_from(ForwardQueueRow).where(active)) or 0
+            rows = session.scalars(
+                select(ForwardQueueRow)
+                .where(active)
+                .order_by(
+                    case((ForwardQueueRow.status == "processing", 0), else_=1),
+                    ForwardQueueRow.available_at,
+                    ForwardQueueRow.id,
+                )
+                .limit(bounded_limit)
+                .offset(bounded_offset)
+            ).all()
             return [self._row_to_item(row) for row in rows], int(total)
 
     def enqueue(
@@ -329,164 +283,100 @@ class ForwardQueueStore:
         normalized_media = [item for item in (media_files or []) if isinstance(item, dict)]
         media_json = json.dumps(normalized_media, ensure_ascii=False)
 
-        with self._lock, self._connect() as conn:
-            cursor = conn.execute(
-                """
-                INSERT OR IGNORE INTO forward_queue
-                (dedup_key, rule_name, rule_data, rule_fingerprint, source_chat_id,
-                 source_chat_name, source_message_id, sender_id, grouped_id,
-                 group_member_ids, group_settle_until, content_preview, media_files, media_size, status,
-                 available_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-                """,
-                (
-                    dedup_key,
-                    str(rule_data.get("name", "")),
-                    encoded_rule,
-                    fingerprint,
-                    int(source_chat_id),
-                    str(source_chat_name) if source_chat_name else None,
-                    int(source_message_id),
-                    sender_id,
-                    group_text,
-                    members_json,
-                    settle_until,
-                    str(content_preview or "")[:500],
-                    media_json,
-                    max(0, int(media_size or 0)),
-                    available_at,
-                    now,
-                    now,
-                ),
-            )
-            inserted = cursor.rowcount == 1
+        with self._lock, self._session() as session:
+            values = {
+                "dedup_key": dedup_key,
+                "rule_name": str(rule_data.get("name", "")),
+                "rule_data": encoded_rule,
+                "rule_fingerprint": fingerprint,
+                "source_chat_id": int(source_chat_id),
+                "source_chat_name": str(source_chat_name) if source_chat_name else None,
+                "source_message_id": int(source_message_id),
+                "sender_id": sender_id,
+                "grouped_id": group_text,
+                "group_member_ids": members_json,
+                "group_settle_until": settle_until,
+                "content_preview": str(content_preview or "")[:500],
+                "media_files": media_json,
+                "media_size": max(0, int(media_size or 0)),
+                "status": "pending",
+                "available_at": available_at,
+                "created_at": now,
+                "updated_at": now,
+            }
+            insert = sqlite_insert(ForwardQueueRow).values(**values).prefix_with("OR IGNORE")
+            result = session.execute(insert)
+            inserted = result.rowcount == 1
             target_key = dedup_key
             if not inserted and group_text is not None:
                 # Album updates arrive separately; wait for the group to settle.
-                existing = conn.execute(
-                    "SELECT id, status, group_member_ids, media_files, media_size, content_preview FROM forward_queue WHERE dedup_key = ?",
-                    (dedup_key,),
-                ).fetchone()
+                existing = session.scalar(
+                    select(ForwardQueueRow).where(ForwardQueueRow.dedup_key == dedup_key)
+                )
                 if existing is not None:
-                    existing_members = parse_member_ids(existing["group_member_ids"])
+                    existing_members = parse_member_ids(existing.group_member_ids)
                     already_member = int(source_message_id) in existing_members
-                    if existing["status"] in ("pending", "processing") and not already_member:
+                    if existing.status in ("pending", "processing") and not already_member:
                         # Normal case: fold the member in and extend the settle window.
                         members = sorted(set(existing_members + [int(source_message_id)]))
-                        merged_media = parse_media_files(existing["media_files"])
+                        merged_media = parse_media_files(existing.media_files)
                         seen_media = {item.get("message_id") for item in merged_media}
                         for media in normalized_media:
                             if media.get("message_id") not in seen_media:
                                 merged_media.append(media)
                         merged_size = sum(int(item.get("size") or 0) for item in merged_media)
-                        conn.execute(
-                            """
-                            UPDATE forward_queue
-                            SET source_message_id = MIN(source_message_id, ?),
-                                source_chat_name = COALESCE(?, source_chat_name),
-                                sender_id = COALESCE(sender_id, ?),
-                                available_at = CASE WHEN status = 'pending'
-                                    THEN MAX(available_at, ?) ELSE available_at END,
-                                group_settle_until = CASE WHEN status = 'pending'
-                                    THEN MAX(COALESCE(group_settle_until, 0), ?)
-                                    ELSE group_settle_until END,
-                                group_member_ids = ?,
-                                content_preview = CASE WHEN content_preview = '' THEN ? ELSE content_preview END,
-                                media_files = ?, media_size = ?,
-                                updated_at = ?
-                            WHERE dedup_key = ? AND next_target_index = 0
-                            """,
-                            (
-                                int(source_message_id),
-                                str(source_chat_name) if source_chat_name else None,
-                                sender_id,
-                                available_at,
-                                settle_until,
-                                json.dumps(members),
-                                str(content_preview or "")[:500], json.dumps(merged_media, ensure_ascii=False), merged_size,
-                                now,
-                                dedup_key,
-                            ),
-                        )
-                    elif existing["status"] in ("completed", "failed") and not already_member:
+                        if existing.next_target_index == 0:
+                            existing.source_message_id = min(existing.source_message_id, int(source_message_id))
+                            existing.source_chat_name = str(source_chat_name) if source_chat_name else existing.source_chat_name
+                            existing.sender_id = existing.sender_id or sender_id
+                            if existing.status == "pending":
+                                existing.available_at = max(existing.available_at, available_at)
+                                existing.group_settle_until = max(existing.group_settle_until or 0, settle_until or 0)
+                            existing.group_member_ids = json.dumps(members)
+                            existing.content_preview = existing.content_preview or str(content_preview or "")[:500]
+                            existing.media_files = json.dumps(merged_media, ensure_ascii=False)
+                            existing.media_size = merged_size
+                            existing.updated_at = now
+                    elif existing.status in ("completed", "failed") and not already_member:
                         # Late member: the album already shipped, so resend the
                         # stragglers as a fresh queue task (same settle window).
-                        late_row = conn.execute(
-                            """
-                            SELECT id, dedup_key, status, group_member_ids, media_files
-                            FROM forward_queue
-                            WHERE grouped_id = ? AND dedup_key LIKE ?
-                            ORDER BY id DESC LIMIT 1
-                            """,
-                            (group_text, "%:late:%"),
-                        ).fetchone()
-                        if late_row is not None and late_row["status"] in ("pending", "processing"):
-                            target_key = late_row["dedup_key"]
+                        late_row = session.scalar(
+                            select(ForwardQueueRow)
+                            .where(
+                                ForwardQueueRow.grouped_id == group_text,
+                                ForwardQueueRow.dedup_key.like("%:late:%"),
+                            )
+                            .order_by(ForwardQueueRow.id.desc())
+                            .limit(1)
+                        )
+                        if late_row is not None and late_row.status in ("pending", "processing"):
+                            target_key = late_row.dedup_key
                             late_members = sorted(
-                                set(parse_member_ids(late_row["group_member_ids"])
+                                set(parse_member_ids(late_row.group_member_ids)
                                     + [int(source_message_id)])
                             )
-                            late_media = parse_media_files(late_row["media_files"])
+                            late_media = parse_media_files(late_row.media_files)
                             late_seen = {item.get("message_id") for item in late_media}
                             for media in normalized_media:
                                 if media.get("message_id") not in late_seen:
                                     late_media.append(media)
-                            conn.execute(
-                                """
-                                UPDATE forward_queue
-                                SET source_message_id = MIN(source_message_id, ?),
-                                    group_member_ids = ?,
-                                    content_preview = CASE WHEN content_preview = '' THEN ? ELSE content_preview END,
-                                    media_files = ?, media_size = ?,
-                                    available_at = CASE WHEN status = 'pending'
-                                        THEN MAX(available_at, ?) ELSE available_at END,
-                                    group_settle_until = CASE WHEN status = 'pending'
-                                        THEN MAX(COALESCE(group_settle_until, 0), ?)
-                                        ELSE group_settle_until END,
-                                    updated_at = ?
-                                WHERE id = ? AND next_target_index = 0
-                                """,
-                                (
-                                    int(source_message_id),
-                                    json.dumps(late_members),
-                                    str(content_preview or "")[:500], json.dumps(late_media, ensure_ascii=False),
-                                    sum(int(item.get("size") or 0) for item in late_media),
-                                    available_at,
-                                    settle_until,
-                                    now,
-                                    late_row["id"],
-                                ),
-                            )
+                            if late_row.next_target_index == 0:
+                                late_row.source_message_id = min(late_row.source_message_id, int(source_message_id))
+                                late_row.group_member_ids = json.dumps(late_members)
+                                late_row.content_preview = late_row.content_preview or str(content_preview or "")[:500]
+                                late_row.media_files = json.dumps(late_media, ensure_ascii=False)
+                                late_row.media_size = sum(int(item.get("size") or 0) for item in late_media)
+                                if late_row.status == "pending":
+                                    late_row.available_at = max(late_row.available_at, available_at)
+                                    late_row.group_settle_until = max(late_row.group_settle_until or 0, settle_until or 0)
+                                late_row.updated_at = now
                         else:
                             # No open late task: seed a new resend job.
                             target_key = f"{dedup_key}:late:{int(source_message_id)}"
-                            conn.execute(
-                                """
-                                INSERT OR IGNORE INTO forward_queue
-                                (dedup_key, rule_name, rule_data, rule_fingerprint,
-                                 source_chat_id, source_chat_name, source_message_id,
-                                 sender_id, grouped_id, group_member_ids,
-                                 group_settle_until, content_preview, media_files, media_size, status, available_at,
-                                 created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
-                                """,
-                                (
-                                    target_key,
-                                    str(rule_data.get("name", "")),
-                                    encoded_rule,
-                                    fingerprint,
-                                    int(source_chat_id),
-                                    str(source_chat_name) if source_chat_name else None,
-                                    int(source_message_id),
-                                    sender_id,
-                                    group_text,
-                                    json.dumps([int(source_message_id)]),
-                                    settle_until,
-                                    str(content_preview or "")[:500], media_json, max(0, int(media_size or 0)),
-                                    available_at,
-                                    now,
-                                    now,
-                                ),
+                            session.execute(
+                                sqlite_insert(ForwardQueueRow)
+                                .values(**{**values, "dedup_key": target_key, "group_member_ids": json.dumps([int(source_message_id)])})
+                                .prefix_with("OR IGNORE")
                             )
                             inserted = True
                             logger.warning(
@@ -498,41 +388,42 @@ class ForwardQueueStore:
                                     group=group_text,
                                 )
                             )
-            item_id = conn.execute(
-                "SELECT id FROM forward_queue WHERE dedup_key = ?", (target_key,)
-            ).fetchone()[0]
-            return self._get(conn, item_id), inserted
+            item = session.scalar(select(ForwardQueueRow).where(ForwardQueueRow.dedup_key == target_key))
+            if item is None:
+                raise KeyError(f"Forward queue item for {target_key} does not exist")
+            return self._row_to_item(item), inserted
 
     def update_source_chat_name(self, item_id: int, source_chat_name: str) -> None:
         name = str(source_chat_name).strip()
         if not name:
             return
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE forward_queue
-                SET source_chat_name = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (name, time.time(), item_id),
+        with self._lock, self._session() as session:
+            session.execute(
+                update(ForwardQueueRow)
+                .where(ForwardQueueRow.id == int(item_id))
+                .values(source_chat_name=name, updated_at=time.time())
             )
 
     def recover_processing(self) -> int:
         """Make jobs left in ``processing`` available after a crash/restart."""
         now = time.time()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                "DELETE FROM forward_queue WHERE status = 'processing' AND cancel_requested = 1"
+        with self._lock, self._session() as session:
+            session.execute(
+                delete(ForwardQueueRow).where(
+                    ForwardQueueRow.status == "processing",
+                    ForwardQueueRow.cancel_requested.is_(True),
+                )
             )
-            cursor = conn.execute(
-                """
-                UPDATE forward_queue
-                SET status = 'pending', available_at = MIN(available_at, ?), updated_at = ?
-                WHERE status = 'processing'
-                """,
-                (now, now),
+            result = session.execute(
+                update(ForwardQueueRow)
+                .where(ForwardQueueRow.status == "processing")
+                .values(
+                    status="pending",
+                    available_at=func.min(ForwardQueueRow.available_at, now),
+                    updated_at=now,
+                )
             )
-            return cursor.rowcount
+            return result.rowcount
 
     def claim_next(
         self,
@@ -543,109 +434,89 @@ class ForwardQueueStore:
     ) -> Optional[ForwardQueueItem]:
         now = time.time() if now is None else now
         blocked = sorted(blocked_rule_fingerprints or set())
-        with self._lock, self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            clauses = [
-                "status = 'pending'",
-                "cancel_requested = 0",
-                "available_at <= ?",
-                "(group_settle_until IS NULL OR group_settle_until <= ?)",
-            ]
-            params: list[Any] = [now, now]
-            if blocked:
-                placeholders = ", ".join("?" for _ in blocked)
-                clauses.append(f"rule_fingerprint NOT IN ({placeholders})")
-                params.extend(blocked)
-            params.append(deprioritize_rule or "")
-            row = conn.execute(
-                f"""
-                SELECT * FROM forward_queue
-                WHERE {' AND '.join(clauses)}
-                ORDER BY CASE WHEN rule_fingerprint = ? THEN 1 ELSE 0 END,
-                         available_at ASC, id ASC
-                LIMIT 1
-                """,
-                params,
-            ).fetchone()
-            if row is None:
-                conn.commit()
-                return None
-            conn.execute(
-                """
-                UPDATE forward_queue
-                SET status = 'processing', attempt_count = attempt_count + 1, updated_at = ?
-                WHERE id = ?
-                """,
-                (now, row["id"]),
+        with self._lock, self._session() as session:
+            session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            statement = select(ForwardQueueRow).where(
+                ForwardQueueRow.status == "pending",
+                ForwardQueueRow.cancel_requested.is_(False),
+                ForwardQueueRow.available_at <= now,
+                (ForwardQueueRow.group_settle_until.is_(None))
+                | (ForwardQueueRow.group_settle_until <= now),
             )
-            return self._get(conn, row["id"])
+            if blocked:
+                statement = statement.where(~ForwardQueueRow.rule_fingerprint.in_(blocked))
+            statement = statement.order_by(
+                (ForwardQueueRow.rule_fingerprint == (deprioritize_rule or "")).asc(),
+                ForwardQueueRow.available_at,
+                ForwardQueueRow.id,
+            ).limit(1)
+            row = session.scalar(statement)
+            if row is None:
+                return None
+            row.status = "processing"
+            row.attempt_count += 1
+            row.updated_at = now
+            session.flush()
+            return self._row_to_item(row)
 
     def next_available_at(self) -> Optional[float]:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT MIN(
-                    CASE WHEN group_settle_until IS NULL THEN available_at
-                         ELSE MAX(available_at, group_settle_until) END
-                ) FROM forward_queue WHERE status = 'pending'
-                """
-            ).fetchone()
-            return row[0]
+        with self._lock, self._session() as session:
+            value = session.scalar(
+                select(
+                    func.min(
+                        func.max(
+                            ForwardQueueRow.available_at,
+                            func.coalesce(ForwardQueueRow.group_settle_until, 0),
+                        )
+                    )
+                ).where(ForwardQueueRow.status == "pending")
+            )
+            return value
 
     def get_pause(self) -> tuple[float, Optional[str]]:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT paused_until, pause_reason FROM forward_queue_state WHERE id = 1"
-            ).fetchone()
-            return float(row[0]), row[1]
+        with self._lock, self._session() as session:
+            row = session.get(ForwardQueueState, 1)
+            return (float(row.paused_until), row.pause_reason) if row else (0.0, None)
 
     def pause_for(self, seconds: float, reason: str) -> float:
         now = time.time()
         requested_until = now + max(0.0, float(seconds))
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT paused_until FROM forward_queue_state WHERE id = 1"
-            ).fetchone()
-            paused_until = max(float(row[0]), requested_until)
-            conn.execute(
-                """
-                UPDATE forward_queue SET available_at = MAX(available_at, ?)
-                WHERE status = 'pending'
-                """,
-                (paused_until,),
+        with self._lock, self._session() as session:
+            state = session.get(ForwardQueueState, 1)
+            paused_until = max(float(state.paused_until if state else 0), requested_until)
+            session.execute(
+                update(ForwardQueueRow)
+                .where(ForwardQueueRow.status == "pending")
+                .values(available_at=func.max(ForwardQueueRow.available_at, paused_until))
             )
-            conn.execute(
-                """
-                UPDATE forward_queue_state
-                SET paused_until = ?, pause_reason = ?, updated_at = ?
-                WHERE id = 1
-                """,
-                (paused_until, reason, now),
-            )
+            if state is None:
+                state = ForwardQueueState(id=1, paused_until=paused_until, pause_reason=reason, updated_at=now)
+                session.add(state)
+            else:
+                state.paused_until = paused_until
+                state.pause_reason = reason
+                state.updated_at = now
             return paused_until
 
     def clear_pause_if_expired(self, now: Optional[float] = None) -> None:
         now = time.time() if now is None else now
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE forward_queue_state
-                SET paused_until = 0, pause_reason = NULL, updated_at = ?
-                WHERE id = 1 AND paused_until <= ?
-                """,
-                (now, now),
+        with self._lock, self._session() as session:
+            session.execute(
+                update(ForwardQueueState)
+                .where(ForwardQueueState.id == 1, ForwardQueueState.paused_until <= now)
+                .values(paused_until=0, pause_reason=None, updated_at=now)
             )
 
     def update_target_index(self, item_id: int, next_target_index: int) -> None:
         now = time.time()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE forward_queue
-                SET next_target_index = MAX(next_target_index, ?), updated_at = ?
-                WHERE id = ? AND status = 'processing'
-                """,
-                (int(next_target_index), now, item_id),
+        with self._lock, self._session() as session:
+            session.execute(
+                update(ForwardQueueRow)
+                .where(ForwardQueueRow.id == int(item_id), ForwardQueueRow.status == "processing")
+                .values(
+                    next_target_index=func.max(ForwardQueueRow.next_target_index, int(next_target_index)),
+                    updated_at=now,
+                )
             )
 
     def reschedule(
@@ -657,46 +528,40 @@ class ForwardQueueStore:
         increment_failure: bool = False,
     ) -> None:
         now = time.time()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE forward_queue
-                SET status = 'pending', available_at = ?, last_error = ?, updated_at = ?,
-                    failure_count = failure_count + ?
-                WHERE id = ?
-                """,
-                (
-                    float(available_at),
-                    str(error)[:2000],
-                    now,
-                    int(increment_failure),
-                    item_id,
-                ),
+        with self._lock, self._session() as session:
+            session.execute(
+                update(ForwardQueueRow)
+                .where(ForwardQueueRow.id == int(item_id))
+                .values(
+                    status="pending",
+                    available_at=float(available_at),
+                    last_error=str(error)[:2000],
+                    updated_at=now,
+                    failure_count=ForwardQueueRow.failure_count + int(increment_failure),
+                )
             )
 
     def mark_completed(self, item_id: int) -> None:
         now = time.time()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE forward_queue
-                SET status = 'completed', completed_at = ?, updated_at = ?, last_error = NULL
-                WHERE id = ?
-                """,
-                (now, now, item_id),
+        with self._lock, self._session() as session:
+            session.execute(
+                update(ForwardQueueRow)
+                .where(ForwardQueueRow.id == int(item_id))
+                .values(status="completed", completed_at=now, updated_at=now, last_error=None)
             )
 
     def mark_failed(self, item_id: int, error: str, *, increment_failure: bool = False) -> None:
         now = time.time()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE forward_queue
-                SET status = 'failed', last_error = ?, updated_at = ?,
-                    failure_count = failure_count + ?
-                WHERE id = ?
-                """,
-                (str(error)[:2000], now, int(increment_failure), item_id),
+        with self._lock, self._session() as session:
+            session.execute(
+                update(ForwardQueueRow)
+                .where(ForwardQueueRow.id == int(item_id))
+                .values(
+                    status="failed",
+                    last_error=str(error)[:2000],
+                    updated_at=now,
+                    failure_count=ForwardQueueRow.failure_count + int(increment_failure),
+                )
             )
 
     def requeue_processing(self) -> int:
@@ -704,36 +569,32 @@ class ForwardQueueStore:
 
     def purge_completed(self, retention_days: int = 7) -> int:
         cutoff = time.time() - max(1, int(retention_days)) * 86400
-        with self._lock, self._connect() as conn:
-            cursor = conn.execute(
-                "DELETE FROM forward_queue WHERE status = 'completed' AND completed_at < ?",
-                (cutoff,),
+        with self._lock, self._session() as session:
+            result = session.execute(
+                delete(ForwardQueueRow).where(
+                    ForwardQueueRow.status == "completed", ForwardQueueRow.completed_at < cutoff
+                )
             )
-            return cursor.rowcount
+            return result.rowcount
 
     def counts(self) -> dict[str, int]:
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT status, COUNT(*) AS count
-                FROM forward_queue
-                WHERE status != 'processing' OR cancel_requested = 0
-                GROUP BY status
-                """
-            ).fetchall()
-            return {row["status"]: row["count"] for row in rows}
+        with self._lock, self._session() as session:
+            active = (ForwardQueueRow.status != "processing") | ForwardQueueRow.cancel_requested.is_(False)
+            rows = session.execute(
+                select(ForwardQueueRow.status, func.count())
+                .where(active)
+                .group_by(ForwardQueueRow.status)
+            ).all()
+            return {status: count for status, count in rows}
 
     def active_count(self) -> int:
         """Return the number of unfinished jobs currently in the queue."""
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT COUNT(*) FROM forward_queue
-                WHERE status = 'pending'
-                   OR (status = 'processing' AND cancel_requested = 0)
-                """
-            ).fetchone()
-            return int(row[0])
+        with self._lock, self._session() as session:
+            active = (ForwardQueueRow.status == "pending") | (
+                (ForwardQueueRow.status == "processing")
+                & ForwardQueueRow.cancel_requested.is_(False)
+            )
+            return int(session.scalar(select(func.count()).select_from(ForwardQueueRow).where(active)) or 0)
 
 
 class ForwardQueue:

@@ -8,14 +8,16 @@ connection pattern as the forward queue and stats databases.
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 import time
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
+
+from sqlalchemy import func, inspect, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.account_paths import AccountPathRegistry
+from backend.database import Base, Subscriber, create_sqlite_engine, session_factory, session_scope
 from backend.logger import get_logger
 
 logger = get_logger()
@@ -32,66 +34,40 @@ class SubscriberStore:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self.engine = create_sqlite_engine(self.db_path)
+        self._session_factory = session_factory(self.engine)
         self._init_db()
 
-    @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(str(self.db_path), timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 30000")
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+    def _session(self):
+        return session_scope(self._session_factory)
 
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS subscribers (
-                    user_id INTEGER PRIMARY KEY,
-                    username TEXT,
-                    first_name TEXT,
-                    last_name TEXT,
-                    status TEXT NOT NULL DEFAULT 'active'
-                        CHECK(status IN ('active', 'paused')),
-                    delivered_count INTEGER NOT NULL DEFAULT 0,
-                    first_seen_at REAL NOT NULL,
-                    updated_at REAL NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_subscribers_status
-                    ON subscribers(status);
-                """
-            )
+        with self._lock:
+            Base.metadata.create_all(self.engine, tables=[Subscriber.__table__])
             columns = {
-                row[1] for row in conn.execute("PRAGMA table_info(subscribers)").fetchall()
+                column["name"] for column in inspect(self.engine).get_columns("subscribers")
             }
             if "delivered_count" not in columns:
-                conn.execute(
-                    "ALTER TABLE subscribers "
-                    "ADD COLUMN delivered_count INTEGER NOT NULL DEFAULT 0"
-                )
+                with self.engine.begin() as connection:
+                    connection.exec_driver_sql(
+                        "ALTER TABLE subscribers ADD COLUMN delivered_count INTEGER NOT NULL DEFAULT 0"
+                    )
         try:
             self.db_path.chmod(0o600)
         except OSError:
             pass
 
     @staticmethod
-    def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    def _row_to_dict(row: Subscriber) -> dict[str, Any]:
         return {
-            "user_id": row["user_id"],
-            "username": row["username"],
-            "first_name": row["first_name"],
-            "last_name": row["last_name"],
-            "status": row["status"],
-            "delivered_count": row["delivered_count"],
-            "first_seen_at": row["first_seen_at"],
-            "updated_at": row["updated_at"],
+            "user_id": row.user_id,
+            "username": row.username,
+            "first_name": row.first_name,
+            "last_name": row.last_name,
+            "status": row.status,
+            "delivered_count": row.delivered_count,
+            "first_seen_at": row.first_seen_at,
+            "updated_at": row.updated_at,
         }
 
     def record(
@@ -104,143 +80,110 @@ class SubscriberStore:
     ) -> dict[str, Any]:
         """Register or refresh a user identity, keeping their opt-out state."""
         now = time.time()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO subscribers
-                    (user_id, username, first_name, last_name, status,
-                     first_seen_at, updated_at)
-                VALUES (?, ?, ?, ?, 'active', ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    username = COALESCE(?, username),
-                    first_name = COALESCE(?, first_name),
-                    last_name = COALESCE(?, last_name),
-                    updated_at = ?
-                """,
-                (
-                    int(user_id),
-                    username,
-                    first_name,
-                    last_name,
-                    now,
-                    now,
-                    username,
-                    first_name,
-                    last_name,
-                    now,
-                ),
+        with self._lock, self._session() as session:
+            statement = sqlite_insert(Subscriber).values(
+                user_id=int(user_id),
+                username=username,
+                first_name=first_name,
+                last_name=last_name,
+                status=STATUS_ACTIVE,
+                first_seen_at=now,
+                updated_at=now,
             )
-            row = conn.execute(
-                "SELECT * FROM subscribers WHERE user_id = ?", (int(user_id),)
-            ).fetchone()
-            return self._row_to_dict(row)
+            session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[Subscriber.user_id],
+                    set_={
+                        "username": func.coalesce(statement.excluded.username, Subscriber.username),
+                        "first_name": func.coalesce(statement.excluded.first_name, Subscriber.first_name),
+                        "last_name": func.coalesce(statement.excluded.last_name, Subscriber.last_name),
+                        "updated_at": now,
+                    },
+                )
+            )
+            return self._row_to_dict(session.get(Subscriber, int(user_id)))
 
     def set_status(self, user_id: int, status: str) -> dict[str, Any]:
         """Persist an opt-in/opt-out change, creating a bare record if needed."""
         if status not in VALID_STATUSES:
             raise ValueError(f"Invalid subscriber status: {status!r}")
         now = time.time()
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO subscribers
-                    (user_id, status, first_seen_at, updated_at)
-                VALUES (?, ?, ?, ?)
-                """,
-                (int(user_id), status, now, now),
+        with self._lock, self._session() as session:
+            session.execute(
+                sqlite_insert(Subscriber)
+                .values(user_id=int(user_id), status=status, first_seen_at=now, updated_at=now)
+                .prefix_with("OR IGNORE")
             )
-            conn.execute(
-                """
-                UPDATE subscribers
-                SET status = ?, updated_at = ?
-                WHERE user_id = ?
-                """,
-                (status, now, int(user_id)),
+            session.execute(
+                update(Subscriber)
+                .where(Subscriber.user_id == int(user_id))
+                .values(status=status, updated_at=now)
             )
-            row = conn.execute(
-                "SELECT * FROM subscribers WHERE user_id = ?", (int(user_id),)
-            ).fetchone()
-            return self._row_to_dict(row)
+            return self._row_to_dict(session.get(Subscriber, int(user_id)))
 
     def get(self, user_id: int) -> Optional[dict[str, Any]]:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM subscribers WHERE user_id = ?", (int(user_id),)
-            ).fetchone()
+        with self._lock, self._session() as session:
+            row = session.get(Subscriber, int(user_id))
             return self._row_to_dict(row) if row else None
 
     def is_suppressed(self, user_id: int) -> bool:
         """True when a registered user has opted out of push delivery."""
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT 1 FROM subscribers
-                WHERE user_id = ? AND status = 'paused'
-                """,
-                (int(user_id),),
-            ).fetchone()
-            return row is not None
+        with self._lock, self._session() as session:
+            return session.scalar(
+                select(Subscriber.user_id).where(
+                    Subscriber.user_id == int(user_id), Subscriber.status == STATUS_PAUSED
+                )
+            ) is not None
 
     def is_suppressed_username(self, username: str) -> bool:
         """Username-based suppressed lookup (Telegram usernames are case-folded)."""
         name = str(username or "").strip().lstrip("@")
         if not name:
             return False
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                """
-                SELECT 1 FROM subscribers
-                WHERE LOWER(username) = LOWER(?) AND status = 'paused'
-                """,
-                (name,),
-            ).fetchone()
-            return row is not None
+        with self._lock, self._session() as session:
+            return session.scalar(
+                select(Subscriber.user_id).where(
+                    func.lower(Subscriber.username) == name.lower(),
+                    Subscriber.status == STATUS_PAUSED,
+                )
+            ) is not None
 
     def increment_delivered(self, user_id: int) -> bool:
         """Increment the successful push count for a registered user."""
-        with self._lock, self._connect() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE subscribers
-                SET delivered_count = delivered_count + 1
-                WHERE user_id = ?
-                """,
-                (int(user_id),),
+        with self._lock, self._session() as session:
+            result = session.execute(
+                update(Subscriber)
+                .where(Subscriber.user_id == int(user_id))
+                .values(delivered_count=Subscriber.delivered_count + 1)
             )
-            return cursor.rowcount > 0
+            return result.rowcount > 0
 
     def increment_delivered_username(self, username: str) -> bool:
         """Increment the successful push count for a registered username."""
         name = str(username or "").strip().lstrip("@")
         if not name:
             return False
-        with self._lock, self._connect() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE subscribers
-                SET delivered_count = delivered_count + 1
-                WHERE LOWER(username) = LOWER(?)
-                """,
-                (name,),
+        with self._lock, self._session() as session:
+            result = session.execute(
+                update(Subscriber)
+                .where(func.lower(Subscriber.username) == name.lower())
+                .values(delivered_count=Subscriber.delivered_count + 1)
             )
-            return cursor.rowcount > 0
+            return result.rowcount > 0
 
     def list(self, limit: int | None = None) -> list[dict[str, Any]]:
-        with self._lock, self._connect() as conn:
-            query = "SELECT * FROM subscribers ORDER BY first_seen_at DESC"
-            params: tuple[Any, ...] = ()
+        with self._lock, self._session() as session:
+            statement = select(Subscriber).order_by(Subscriber.first_seen_at.desc())
             if limit is not None:
-                query += " LIMIT ?"
-                params = (max(1, min(int(limit), 10000)),)
-            rows = conn.execute(query, params).fetchall()
-            return [self._row_to_dict(row) for row in rows]
+                statement = statement.limit(max(1, min(int(limit), 10000)))
+            return [self._row_to_dict(row) for row in session.scalars(statement).all()]
 
     def counts(self) -> dict[str, int]:
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                "SELECT status, COUNT(*) AS count FROM subscribers GROUP BY status"
-            ).fetchall()
-            counts = {row["status"]: int(row["count"]) for row in rows}
+        with self._lock, self._session() as session:
+            rows = session.execute(
+                select(Subscriber.status, func.count()).group_by(Subscriber.status)
+            ).all()
+            counts = {status: int(count) for status, count in rows}
             return {
                 "total": sum(counts.values()),
                 "active": counts.get(STATUS_ACTIVE, 0),

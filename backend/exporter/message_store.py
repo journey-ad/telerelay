@@ -8,11 +8,15 @@ import os
 import sqlite3
 import tempfile
 import threading
-from collections.abc import Iterable, Iterator, Mapping
-from contextlib import contextmanager
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+from backend.database import ArchiveMetadata, Base, MessageArchiveRecord, create_sqlite_engine, session_factory, session_scope
 
 SCHEMA_VERSION = 1
 
@@ -164,106 +168,29 @@ class MessageArchiveStore:
                 f"Message archive database cannot be a symlink: {self.path}"
             )
         self._lock = threading.RLock()
+        self.engine = create_sqlite_engine(self.path)
+        self._session_factory = session_factory(self.engine)
         self._init_db()
         os.chmod(self.path, 0o600)
 
-    @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(str(self.path), timeout=30)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 30000")
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
+    def _session(self):
+        return session_scope(self._session_factory)
 
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS archive_metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS messages (
-                    message_id INTEGER NOT NULL,
-                    chat_id INTEGER NOT NULL,
-                    chat_title TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    date_utc TEXT NOT NULL,
-                    sender_id INTEGER,
-                    sender_type TEXT,
-                    sender_name TEXT,
-                    sender_username TEXT,
-                    sender_first_name TEXT,
-                    sender_last_name TEXT,
-                    sender_is_bot INTEGER,
-                    sender_phone TEXT,
-                    sender_is_verified INTEGER,
-                    sender_is_premium INTEGER,
-                    sender_is_scam INTEGER,
-                    sender_is_fake INTEGER,
-                    sender_is_contact INTEGER,
-                    sender_is_mutual_contact INTEGER,
-                    text TEXT NOT NULL DEFAULT '',
-                    media_type TEXT NOT NULL DEFAULT 'text',
-                    content TEXT NOT NULL DEFAULT '',
-                    reply_to_message_id INTEGER,
-                    reply_to_top_id INTEGER,
-                    edited_at TEXT,
-                    edited_at_utc TEXT,
-                    grouped_id INTEGER,
-                    forward_from_id INTEGER,
-                    forward_from_name TEXT,
-                    forward_date TEXT,
-                    forward_date_utc TEXT,
-                    via_bot_id INTEGER,
-                    post_author TEXT,
-                    views INTEGER,
-                    forwards INTEGER,
-                    replies_count INTEGER,
-                    media_id INTEGER,
-                    media_mime_type TEXT,
-                    media_file_name TEXT,
-                    media_size INTEGER,
-                    media_duration REAL,
-                    service_action TEXT,
-                    is_outgoing INTEGER,
-                    is_mentioned INTEGER,
-                    is_media_unread INTEGER,
-                    is_silent INTEGER,
-                    is_post INTEGER,
-                    is_from_scheduled INTEGER,
-                    is_pinned INTEGER,
-                    is_forwarding_restricted INTEGER,
-                    entities_json TEXT,
-                    reactions_json TEXT,
-                    reply_markup_json TEXT,
-                    restriction_reason_json TEXT,
-                    sender_json TEXT,
-                    record_json TEXT NOT NULL,
-                    raw_json TEXT,
-                    fetched_at TEXT NOT NULL,
-                    PRIMARY KEY (chat_id, message_id)
-                );
-                CREATE INDEX IF NOT EXISTS idx_messages_date
-                    ON messages(date_utc, message_id);
-                CREATE INDEX IF NOT EXISTS idx_messages_sender
-                    ON messages(sender_id);
-                CREATE INDEX IF NOT EXISTS idx_messages_reply
-                    ON messages(reply_to_message_id);
-                """
+        with self._lock:
+            Base.metadata.create_all(
+                self.engine, tables=[ArchiveMetadata.__table__, MessageArchiveRecord.__table__]
             )
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            conn.execute(
-                """
-                INSERT INTO archive_metadata(key, value) VALUES('schema_version', ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (str(SCHEMA_VERSION),),
-            )
+            # Keep the SQLite-level schema marker used by older consumers in
+            # sync with the metadata row maintained below.
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            with self._session() as session:
+                metadata = session.get(ArchiveMetadata, "schema_version")
+                if metadata is None:
+                    session.add(ArchiveMetadata(key="schema_version", value=str(SCHEMA_VERSION)))
+                else:
+                    metadata.value = str(SCHEMA_VERSION)
 
     @staticmethod
     def _column_values(record: Mapping[str, Any], fetched_at: str) -> Dict[str, Any]:
@@ -318,35 +245,21 @@ class MessageArchiveStore:
                     f"archive {self.chat_id}"
                 )
 
-        columns = ", ".join(MESSAGE_COLUMNS)
-        placeholders = ", ".join("?" for _ in MESSAGE_COLUMNS)
-        updates = ", ".join(
-            f"{column} = excluded.{column}"
-            for column in MESSAGE_COLUMNS
-            if column not in {"chat_id", "message_id"}
-        )
-        values = [tuple(row[column] for column in MESSAGE_COLUMNS) for row in rows]
-        with self._lock, self._connect() as conn:
-            conn.executemany(
-                f"""
-                INSERT INTO messages ({columns}) VALUES ({placeholders})
-                ON CONFLICT(chat_id, message_id) DO UPDATE SET {updates}
-                """,
-                values,
+        with self._lock, self._session() as session:
+            statement = sqlite_insert(MessageArchiveRecord).values(rows)
+            session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[MessageArchiveRecord.chat_id, MessageArchiveRecord.message_id],
+                    set_={column: statement.excluded[column] for column in MESSAGE_COLUMNS if column not in {"chat_id", "message_id"}},
+                )
             )
             title = str(rows[-1]["chat_title"])
-            for key, value in (
-                ("chat_id", str(self.chat_id)),
-                ("chat_title", title),
-                ("updated_at", fetched_at),
-            ):
-                conn.execute(
-                    """
-                    INSERT INTO archive_metadata(key, value) VALUES(?, ?)
-                    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                    """,
-                    (key, value),
-                )
+            for key, value in (("chat_id", str(self.chat_id)), ("chat_title", title), ("updated_at", fetched_at)):
+                metadata = session.get(ArchiveMetadata, key)
+                if metadata is None:
+                    session.add(ArchiveMetadata(key=key, value=value))
+                else:
+                    metadata.value = value
         os.chmod(self.path, 0o600)
         return len(rows)
 
@@ -359,45 +272,47 @@ class MessageArchiveStore:
     ) -> List[Dict[str, Any]]:
         start_text = _utc_text(start_at)
         end_text = _utc_text(end_at)
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT record_json, raw_json, sender_json,
-                       date_utc, edited_at_utc, forward_date_utc
-                FROM messages
-                WHERE chat_id = ? AND date_utc >= ? AND date_utc <= ?
-                ORDER BY date_utc, message_id
-                """,
-                (self.chat_id, start_text, end_text),
-            ).fetchall()
+        with self._lock, self._session() as session:
+            rows = session.scalars(
+                select(MessageArchiveRecord)
+                .where(
+                    MessageArchiveRecord.chat_id == self.chat_id,
+                    MessageArchiveRecord.date_utc >= start_text,
+                    MessageArchiveRecord.date_utc <= end_text,
+                )
+                .order_by(MessageArchiveRecord.date_utc, MessageArchiveRecord.message_id)
+            ).all()
 
         records: List[Dict[str, Any]] = []
         for row in rows:
-            record = json.loads(row["record_json"])
-            record["date_utc"] = row["date_utc"]
-            record["date"] = _localized_text(row["date_utc"], output_timezone)
-            record["edited_at_utc"] = row["edited_at_utc"]
+            record = json.loads(row.record_json)
+            record["date_utc"] = row.date_utc
+            record["date"] = _localized_text(row.date_utc, output_timezone)
+            record["edited_at_utc"] = row.edited_at_utc
             record["edited_at"] = _localized_text(
-                row["edited_at_utc"], output_timezone
+                row.edited_at_utc, output_timezone
             )
-            record["forward_date_utc"] = row["forward_date_utc"]
+            record["forward_date_utc"] = row.forward_date_utc
             record["forward_date"] = _localized_text(
-                row["forward_date_utc"], output_timezone
+                row.forward_date_utc, output_timezone
             )
-            if row["raw_json"]:
-                record["raw"] = json.loads(row["raw_json"])
-            if row["sender_json"]:
-                record["sender_raw"] = json.loads(row["sender_json"])
+            if row.raw_json:
+                record["raw"] = json.loads(row.raw_json)
+            if row.sender_json:
+                record["sender_raw"] = json.loads(row.sender_json)
             records.append(record)
         return records
 
     def count(self) -> int:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) FROM messages WHERE chat_id = ?",
-                (self.chat_id,),
-            ).fetchone()
-        return int(row[0])
+        with self._lock, self._session() as session:
+            return int(
+                session.scalar(
+                    select(func.count()).select_from(MessageArchiveRecord).where(
+                        MessageArchiveRecord.chat_id == self.chat_id
+                    )
+                )
+                or 0
+            )
 
     def backup_to(self, destination: Path) -> Path:
         """Write a consistent database snapshot to an export directory."""
@@ -414,9 +329,10 @@ class MessageArchiveStore:
         os.close(file_descriptor)
         temporary_path = Path(temporary_name)
         try:
-            with self._lock, self._connect() as source:
+            with self._lock, self.engine.connect() as source:
                 with sqlite3.connect(str(temporary_path), timeout=30) as target:
-                    source.backup(target)
+                    raw_source = source.connection.driver_connection
+                    raw_source.backup(target)
             os.chmod(temporary_path, 0o600)
             os.replace(temporary_path, destination)
         except Exception:
@@ -425,19 +341,14 @@ class MessageArchiveStore:
         return destination
 
     def get_metadata(self, key: str) -> Optional[str]:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM archive_metadata WHERE key = ?",
-                (str(key),),
-            ).fetchone()
-        return str(row[0]) if row is not None else None
+        with self._lock, self._session() as session:
+            row = session.get(ArchiveMetadata, str(key))
+            return str(row.value) if row is not None else None
 
     def set_metadata(self, key: str, value: str) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO archive_metadata(key, value) VALUES(?, ?)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value
-                """,
-                (str(key), str(value)),
-            )
+        with self._lock, self._session() as session:
+            metadata = session.get(ArchiveMetadata, str(key))
+            if metadata is None:
+                session.add(ArchiveMetadata(key=str(key), value=str(value)))
+            else:
+                metadata.value = str(value)

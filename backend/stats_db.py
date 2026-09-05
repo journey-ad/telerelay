@@ -10,7 +10,23 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List
+
+from sqlalchemy import delete, func, inspect, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 from backend.account_paths import AccountPathRegistry
+from backend.database import (
+    Base,
+    ButtonActionHourly,
+    ButtonActionStat,
+    DailyStat,
+    ForwardedMessage,
+    HourlyStat,
+    RuleStats,
+    create_sqlite_engine,
+    session_factory,
+    session_scope,
+)
 from backend.logger import get_logger
 
 logger = get_logger()
@@ -28,105 +44,47 @@ class StatsDB:
         # Ensure parent directory exists
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
+        self.engine = create_sqlite_engine(self.db_path)
+        self._session_factory = session_factory(self.engine)
+
         # Initialize database
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Create a new connection (sqlite3 connections are not thread-safe)"""
-        return sqlite3.connect(str(self.db_path))
+        """Return a raw connection for legacy migration/test helpers."""
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _session(self):
+        return session_scope(self._session_factory)
 
     def _init_db(self) -> None:
         """Initialize database schema"""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                # Original rule_stats table
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS rule_stats (
-                        rule_name TEXT PRIMARY KEY,
-                        forwarded_count INTEGER NOT NULL DEFAULT 0,
-                        filtered_count INTEGER NOT NULL DEFAULT 0
-                    )
-                """)
-
-                # Message history table
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS forwarded_messages (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        rule_name TEXT NOT NULL,
-                        message_id INTEGER,
-                        source_chat_id INTEGER,
-                        source_chat_name TEXT,
-                        sender_id INTEGER,
-                        sender_name TEXT,
-                        sender_first_name TEXT,
-                        sender_last_name TEXT,
-                        sender_username TEXT,
-                        content TEXT,
-                        media_type TEXT,
-                        entities_json TEXT,
-                        forwarded_at TEXT DEFAULT (datetime('now', 'localtime'))
-                    )
-                """)
-                # Migrate pre-entities databases
-                columns = {
-                    row[1] for row in conn.execute("PRAGMA table_info(forwarded_messages)")
-                }
-                if "entities_json" not in columns:
-                    conn.execute(
+            Base.metadata.create_all(
+                self.engine,
+                tables=[
+                    RuleStats.__table__,
+                    ForwardedMessage.__table__,
+                    DailyStat.__table__,
+                    HourlyStat.__table__,
+                    ButtonActionStat.__table__,
+                    ButtonActionHourly.__table__,
+                ],
+            )
+            inspector = inspect(self.engine)
+            if "entities_json" not in {
+                column["name"] for column in inspector.get_columns("forwarded_messages")
+            }:
+                with self.engine.begin() as connection:
+                    connection.exec_driver_sql(
                         "ALTER TABLE forwarded_messages ADD COLUMN entities_json TEXT"
                     )
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_fm_forwarded_at ON forwarded_messages(forwarded_at)")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_fm_rule ON forwarded_messages(rule_name)")
-
-                # Daily stats table for trend charts
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS daily_stats (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        rule_name TEXT NOT NULL,
-                        date TEXT NOT NULL,
-                        forwarded_count INTEGER DEFAULT 0,
-                        filtered_count INTEGER DEFAULT 0,
-                        UNIQUE(rule_name, date)
-                    )
-                """)
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_ds_date ON daily_stats(date)")
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS hourly_stats (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        rule_name TEXT NOT NULL,
-                        hour TEXT NOT NULL,
-                        forwarded_count INTEGER NOT NULL DEFAULT 0,
-                        filtered_count INTEGER NOT NULL DEFAULT 0,
-                        failed_count INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE(rule_name, hour)
-                    )
-                """)
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_hs_hour ON hourly_stats(hour)")
-
-                # Button action stats table
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS button_action_stats (
-                        rule_name TEXT PRIMARY KEY,
-                        trigger_count INTEGER NOT NULL DEFAULT 0
-                    )
-                """)
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS button_action_hourly (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        rule_name TEXT NOT NULL,
-                        hour TEXT NOT NULL,
-                        trigger_count INTEGER NOT NULL DEFAULT 0,
-                        UNIQUE(rule_name, hour)
-                    )
-                """)
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_bah_hour ON button_action_hourly(hour)"
-                )
-
+            conn = self._get_conn()
+            try:
                 self._backfill_hourly_from_daily(conn)
                 self._backfill_button_action_hourly(conn)
-
                 conn.commit()
             finally:
                 conn.close()
@@ -199,288 +157,224 @@ class StatsDB:
     def get_stats(self, rule_name: str) -> dict:
         """Get statistics for a specific rule"""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                cursor = conn.execute(
-                    "SELECT forwarded_count, filtered_count FROM rule_stats WHERE rule_name = ?",
-                    (rule_name,)
-                )
-                row = cursor.fetchone()
-                if row:
-                    return {"forwarded": row[0], "filtered": row[1]}
-                return {"forwarded": 0, "filtered": 0}
-            finally:
-                conn.close()
+            with self._session() as session:
+                row = session.get(RuleStats, rule_name)
+                return {
+                    "forwarded": row.forwarded_count if row else 0,
+                    "filtered": row.filtered_count if row else 0,
+                }
 
     def get_all_stats(self) -> dict:
         """Get statistics for all rules"""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                cursor = conn.execute(
-                    "SELECT rule_name, forwarded_count, filtered_count FROM rule_stats"
-                )
-                result = {}
-                for row in cursor.fetchall():
-                    result[row[0]] = {"forwarded": row[1], "filtered": row[2]}
-                return result
-            finally:
-                conn.close()
+            with self._session() as session:
+                return {
+                    row.rule_name: {
+                        "forwarded": row.forwarded_count,
+                        "filtered": row.filtered_count,
+                    }
+                    for row in session.scalars(select(RuleStats)).all()
+                }
 
     @staticmethod
-    def _increment_hourly(
-        conn: sqlite3.Connection,
-        rule_name: str,
-        column: str,
-        amount: int = 1,
-    ) -> None:
+    def _hourly_column(column: str):
         if column not in {"forwarded_count", "filtered_count", "failed_count"}:
             raise ValueError(f"Unsupported hourly stats column: {column}")
+
+        return getattr(HourlyStat, column)
+
+    def _increment_hourly(self, session, rule_name: str, column: str, amount: int = 1) -> None:
         hour = datetime.now().strftime("%Y-%m-%d %H:00")
-        conn.execute(
-            f"""
-            INSERT INTO hourly_stats (rule_name, hour, {column})
-            VALUES (?, ?, ?)
-            ON CONFLICT(rule_name, hour) DO UPDATE SET
-                {column} = {column} + excluded.{column}
-            """,
-            (rule_name, hour, int(amount)),
+        field = self._hourly_column(column)
+        statement = sqlite_insert(HourlyStat).values(
+            rule_name=rule_name,
+            hour=hour,
+            **{column: int(amount)},
+        )
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[HourlyStat.rule_name, HourlyStat.hour],
+                set_={column: field + statement.excluded[column]},
+            )
         )
 
     def increment_failed(self, rule_name: str) -> None:
         """Record one forwarding task that reached its final failed state."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                self._increment_hourly(conn, rule_name, "failed_count")
-                conn.commit()
-            finally:
-                conn.close()
+            with self._session() as session:
+                self._increment_hourly(session, rule_name, "failed_count")
 
     # -- Button action stats --
 
     def increment_button_action(self, rule_name: str) -> None:
         """Increment the successful trigger count for a button automation."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("""
-                    INSERT INTO button_action_stats (rule_name, trigger_count)
-                    VALUES (?, 1)
-                    ON CONFLICT(rule_name) DO UPDATE SET
-                        trigger_count = trigger_count + 1
-                """, (rule_name,))
+            with self._session() as session:
+                statement = sqlite_insert(ButtonActionStat).values(
+                    rule_name=rule_name, trigger_count=1
+                )
+                session.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[ButtonActionStat.rule_name],
+                        set_={
+                            "trigger_count": ButtonActionStat.trigger_count
+                            + statement.excluded.trigger_count
+                        },
+                    )
+                )
                 hour = datetime.now().strftime("%Y-%m-%d %H:00")
-                conn.execute("""
-                    INSERT INTO button_action_hourly (rule_name, hour, trigger_count)
-                    VALUES (?, ?, 1)
-                    ON CONFLICT(rule_name, hour) DO UPDATE SET
-                        trigger_count = trigger_count + 1
-                """, (rule_name, hour))
-                conn.commit()
-            finally:
-                conn.close()
+                hourly = sqlite_insert(ButtonActionHourly).values(
+                    rule_name=rule_name, hour=hour, trigger_count=1
+                )
+                session.execute(
+                    hourly.on_conflict_do_update(
+                        index_elements=[ButtonActionHourly.rule_name, ButtonActionHourly.hour],
+                        set_={
+                            "trigger_count": ButtonActionHourly.trigger_count
+                            + hourly.excluded.trigger_count
+                        },
+                    )
+                )
 
     def get_button_action_stats(self) -> List[dict]:
         """Return cumulative trigger counts for all button automations."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                cursor = conn.execute(
-                    "SELECT rule_name, trigger_count FROM button_action_stats ORDER BY rule_name"
-                )
+            with self._session() as session:
                 return [
-                    {"rule_name": row[0], "triggered": row[1]}
-                    for row in cursor.fetchall()
+                    {"rule_name": row.rule_name, "triggered": row.trigger_count}
+                    for row in session.scalars(
+                        select(ButtonActionStat).order_by(ButtonActionStat.rule_name)
+                    ).all()
                 ]
-            finally:
-                conn.close()
 
     def reset_button_action_stats(self, rule_name: str = None) -> None:
         """Reset trigger counts for one button automation or all of them."""
         with self._lock:
-            conn = self._get_conn()
-            try:
+            with self._session() as session:
+                statement = update(ButtonActionStat).values(trigger_count=0)
                 if rule_name:
-                    conn.execute(
-                        "UPDATE button_action_stats SET trigger_count = 0 WHERE rule_name = ?",
-                        (rule_name,)
-                    )
-                else:
-                    conn.execute(
-                        "UPDATE button_action_stats SET trigger_count = 0"
-                    )
-                conn.commit()
-            finally:
-                conn.close()
+                    statement = statement.where(ButtonActionStat.rule_name == rule_name)
+                session.execute(statement)
 
     def rename_button_rule(self, old_name: str, new_name: str) -> None:
         """Keep button trigger history when a button automation is renamed."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute(
-                    "UPDATE button_action_stats SET rule_name = ? WHERE rule_name = ?",
-                    (new_name, old_name)
+            with self._session() as session:
+                session.execute(
+                    update(ButtonActionStat)
+                    .where(ButtonActionStat.rule_name == old_name)
+                    .values(rule_name=new_name)
                 )
-                conn.execute(
-                    "UPDATE button_action_hourly SET rule_name = ? WHERE rule_name = ?",
-                    (new_name, old_name),
+                session.execute(
+                    update(ButtonActionHourly)
+                    .where(ButtonActionHourly.rule_name == old_name)
+                    .values(rule_name=new_name)
                 )
-                conn.commit()
-            finally:
-                conn.close()
 
     def delete_button_rule(self, rule_name: str) -> None:
         """Remove trigger history when a button automation is deleted."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute(
-                    "DELETE FROM button_action_stats WHERE rule_name = ?",
-                    (rule_name,)
+            with self._session() as session:
+                session.execute(
+                    delete(ButtonActionStat).where(ButtonActionStat.rule_name == rule_name)
                 )
-                conn.execute(
-                    "DELETE FROM button_action_hourly WHERE rule_name = ?",
-                    (rule_name,),
+                session.execute(
+                    delete(ButtonActionHourly).where(ButtonActionHourly.rule_name == rule_name)
                 )
-                conn.commit()
-            finally:
-                conn.close()
 
     def increment_forwarded(self, rule_name: str) -> None:
         """Increment forwarded count for a rule"""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("""
-                    INSERT INTO rule_stats (rule_name, forwarded_count, filtered_count)
-                    VALUES (?, 1, 0)
-                    ON CONFLICT(rule_name) DO UPDATE SET
-                        forwarded_count = forwarded_count + 1
-                """, (rule_name,))
-                self._increment_hourly(conn, rule_name, "forwarded_count")
-                conn.commit()
-            finally:
-                conn.close()
+            with self._session() as session:
+                statement = sqlite_insert(RuleStats).values(
+                    rule_name=rule_name, forwarded_count=1, filtered_count=0
+                )
+                session.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[RuleStats.rule_name],
+                        set_={"forwarded_count": RuleStats.forwarded_count + 1},
+                    )
+                )
+                self._increment_hourly(session, rule_name, "forwarded_count")
 
     def increment_filtered(self, rule_name: str) -> None:
         """Increment filtered count for a rule"""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("""
-                    INSERT INTO rule_stats (rule_name, forwarded_count, filtered_count)
-                    VALUES (?, 0, 1)
-                    ON CONFLICT(rule_name) DO UPDATE SET
-                        filtered_count = filtered_count + 1
-                """, (rule_name,))
-                self._increment_hourly(conn, rule_name, "filtered_count")
-                conn.commit()
-            finally:
-                conn.close()
+            with self._session() as session:
+                statement = sqlite_insert(RuleStats).values(
+                    rule_name=rule_name, forwarded_count=0, filtered_count=1
+                )
+                session.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[RuleStats.rule_name],
+                        set_={"filtered_count": RuleStats.filtered_count + 1},
+                    )
+                )
+                self._increment_hourly(session, rule_name, "filtered_count")
 
     def reset_stats(self, rule_name: str = None) -> None:
         """Reset statistics. If rule_name is None, reset all rules."""
         with self._lock:
-            conn = self._get_conn()
-            try:
+            with self._session() as session:
                 if rule_name:
-                    conn.execute(
-                        "DELETE FROM daily_stats WHERE rule_name = ?",
-                        (rule_name,),
+                    rule_filter = RuleStats.rule_name == rule_name
+                    session.execute(delete(DailyStat).where(DailyStat.rule_name == rule_name))
+                    session.execute(
+                        update(RuleStats).where(rule_filter).values(forwarded_count=0, filtered_count=0)
                     )
-                    conn.execute(
-                        "UPDATE rule_stats SET forwarded_count = 0, filtered_count = 0 WHERE rule_name = ?",
-                        (rule_name,)
+                    session.execute(
+                        update(ButtonActionStat)
+                        .where(ButtonActionStat.rule_name == rule_name)
+                        .values(trigger_count=0)
                     )
-                    conn.execute(
-                        "UPDATE button_action_stats SET trigger_count = 0 WHERE rule_name = ?",
-                        (rule_name,)
+                    session.execute(
+                        update(HourlyStat)
+                        .where(HourlyStat.rule_name == rule_name)
+                        .values(forwarded_count=0, filtered_count=0, failed_count=0)
+                    )
+                    session.execute(
+                        update(ButtonActionHourly)
+                        .where(ButtonActionHourly.rule_name == rule_name)
+                        .values(trigger_count=0)
                     )
                 else:
-                    conn.execute("DELETE FROM daily_stats")
-                    conn.execute(
-                        "UPDATE rule_stats SET forwarded_count = 0, filtered_count = 0"
+                    session.execute(delete(DailyStat))
+                    session.execute(update(RuleStats).values(forwarded_count=0, filtered_count=0))
+                    session.execute(update(ButtonActionStat).values(trigger_count=0))
+                    session.execute(
+                        update(HourlyStat).values(forwarded_count=0, filtered_count=0, failed_count=0)
                     )
-                    conn.execute(
-                        "UPDATE button_action_stats SET trigger_count = 0"
-                    )
-                if rule_name:
-                    conn.execute(
-                        "UPDATE hourly_stats SET forwarded_count = 0, filtered_count = 0, failed_count = 0 WHERE rule_name = ?",
-                        (rule_name,),
-                    )
-                    conn.execute(
-                        "UPDATE button_action_hourly SET trigger_count = 0 WHERE rule_name = ?",
-                        (rule_name,),
-                    )
-                else:
-                    conn.execute(
-                        "UPDATE hourly_stats SET forwarded_count = 0, filtered_count = 0, failed_count = 0"
-                    )
-                    conn.execute("UPDATE button_action_hourly SET trigger_count = 0")
-                conn.commit()
-            finally:
-                conn.close()
+                    session.execute(update(ButtonActionHourly).values(trigger_count=0))
 
     def rename_rule(self, old_name: str, new_name: str) -> None:
         """Rename a rule in the stats database"""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute(
-                    "UPDATE rule_stats SET rule_name = ? WHERE rule_name = ?",
-                    (new_name, old_name)
-                )
-                conn.execute(
-                    "UPDATE forwarded_messages SET rule_name = ? WHERE rule_name = ?",
-                    (new_name, old_name)
-                )
-                conn.execute(
-                    "UPDATE daily_stats SET rule_name = ? WHERE rule_name = ?",
-                    (new_name, old_name)
-                )
-                conn.execute(
-                    "UPDATE hourly_stats SET rule_name = ? WHERE rule_name = ?",
-                    (new_name, old_name),
-                )
-                conn.execute(
-                    "UPDATE button_action_hourly SET rule_name = ? WHERE rule_name = ?",
-                    (new_name, old_name),
-                )
-                conn.commit()
-            finally:
-                conn.close()
+            with self._session() as session:
+                for model in (
+                    RuleStats,
+                    ForwardedMessage,
+                    DailyStat,
+                    HourlyStat,
+                    ButtonActionHourly,
+                ):
+                    session.execute(
+                        update(model)
+                        .where(model.rule_name == old_name)
+                        .values(rule_name=new_name)
+                    )
 
     def delete_rule(self, rule_name: str) -> None:
         """Delete statistics for a rule"""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute(
-                    "DELETE FROM rule_stats WHERE rule_name = ?",
-                    (rule_name,)
-                )
-                conn.execute(
-                    "DELETE FROM forwarded_messages WHERE rule_name = ?",
-                    (rule_name,)
-                )
-                conn.execute(
-                    "DELETE FROM daily_stats WHERE rule_name = ?",
-                    (rule_name,)
-                )
-                conn.execute(
-                    "DELETE FROM hourly_stats WHERE rule_name = ?",
-                    (rule_name,),
-                )
-                conn.execute(
-                    "DELETE FROM button_action_hourly WHERE rule_name = ?",
-                    (rule_name,),
-                )
-                conn.commit()
-            finally:
-                conn.close()
+            with self._session() as session:
+                for model in (
+                    RuleStats,
+                    ForwardedMessage,
+                    DailyStat,
+                    HourlyStat,
+                    ButtonActionHourly,
+                ):
+                    session.execute(delete(model).where(model.rule_name == rule_name))
 
     # -- Message history --
 
@@ -503,20 +397,24 @@ class StatsDB:
         now = datetime.now()
         forwarded_at = now.strftime("%Y-%m-%d %H:%M:%S.") + f"{now.microsecond // 1000:03d}"
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("""
-                    INSERT INTO forwarded_messages
-                    (rule_name, message_id, source_chat_id, source_chat_name,
-                     sender_id, sender_name, sender_first_name, sender_last_name, sender_username,
-                     content, media_type, entities_json, forwarded_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (rule_name, message_id, source_chat_id, source_chat_name,
-                      sender_id, sender_name, sender_first_name, sender_last_name, sender_username,
-                      content, media_type, entities, forwarded_at))
-                conn.commit()
-            finally:
-                conn.close()
+            with self._session() as session:
+                session.add(
+                    ForwardedMessage(
+                        rule_name=rule_name,
+                        message_id=message_id,
+                        source_chat_id=source_chat_id,
+                        source_chat_name=source_chat_name,
+                        sender_id=sender_id,
+                        sender_name=sender_name,
+                        sender_first_name=sender_first_name,
+                        sender_last_name=sender_last_name,
+                        sender_username=sender_username,
+                        content=content,
+                        media_type=media_type,
+                        entities_json=entities,
+                        forwarded_at=forwarded_at,
+                    )
+                )
 
     def query_history(
         self,
@@ -532,59 +430,46 @@ class StatsDB:
             (list of row dicts, total count matching the filter)
         """
         with self._lock:
-            conn = self._get_conn()
-            try:
-                where_clauses = []
-                params = []
-
+            with self._session() as session:
+                statement = select(ForwardedMessage)
                 if rule_name:
-                    where_clauses.append("rule_name = ?")
-                    params.append(rule_name)
+                    statement = statement.where(ForwardedMessage.rule_name == rule_name)
                 if keyword:
-                    where_clauses.append("(content LIKE ? OR source_chat_name LIKE ? OR sender_name LIKE ?)")
                     like = f"%{keyword}%"
-                    params.extend([like, like, like])
-
-                where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-
-                # Total count
-                count_cursor = conn.execute(
-                    f"SELECT COUNT(*) FROM forwarded_messages{where_sql}", params
-                )
-                total = count_cursor.fetchone()[0]
-
-                # Query rows
-                cursor = conn.execute(
-                    f"SELECT id, rule_name, message_id, source_chat_id, source_chat_name, "
-                    f"sender_id, sender_name, sender_first_name, sender_last_name, sender_username, "
-                    f"content, media_type, entities_json, forwarded_at "
-                    f"FROM forwarded_messages{where_sql} "
-                    f"ORDER BY forwarded_at DESC, id DESC LIMIT ? OFFSET ?",
-                    params + [limit, offset]
-                )
-
-                rows = []
-                for row in cursor.fetchall():
-                    rows.append({
-                        "id": row[0],
-                        "rule_name": row[1],
-                        "message_id": row[2],
-                        "source_chat_id": row[3],
-                        "source_chat_name": row[4],
-                        "sender_id": row[5],
-                        "sender_name": row[6],
-                        "sender_first_name": row[7],
-                        "sender_last_name": row[8],
-                        "sender_username": row[9],
-                        "content": row[10],
-                        "media_type": row[11],
-                        "entities": json.loads(row[12]) if row[12] else None,
-                        "forwarded_at": row[13],
-                    })
-
-                return rows, total
-            finally:
-                conn.close()
+                    statement = statement.where(
+                        ForwardedMessage.content.like(like)
+                        | ForwardedMessage.source_chat_name.like(like)
+                        | ForwardedMessage.sender_name.like(like)
+                    )
+                total = session.scalar(
+                    select(func.count()).select_from(statement.subquery())
+                ) or 0
+                records = session.scalars(
+                    statement.order_by(
+                        ForwardedMessage.forwarded_at.desc(), ForwardedMessage.id.desc()
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                ).all()
+                return [
+                    {
+                        "id": row.id,
+                        "rule_name": row.rule_name,
+                        "message_id": row.message_id,
+                        "source_chat_id": row.source_chat_id,
+                        "source_chat_name": row.source_chat_name,
+                        "sender_id": row.sender_id,
+                        "sender_name": row.sender_name,
+                        "sender_first_name": row.sender_first_name,
+                        "sender_last_name": row.sender_last_name,
+                        "sender_username": row.sender_username,
+                        "content": row.content,
+                        "media_type": row.media_type,
+                        "entities": json.loads(row.entities_json) if row.entities_json else None,
+                        "forwarded_at": row.forwarded_at,
+                    }
+                    for row in records
+                ], int(total)
 
     def export_history(
         self,
@@ -665,19 +550,19 @@ class StatsDB:
         today = datetime.now().strftime("%Y-%m-%d")
         col = "forwarded_count" if is_forwarded else "filtered_count"
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute(f"""
-                    INSERT INTO daily_stats (rule_name, date, forwarded_count, filtered_count)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(rule_name, date) DO UPDATE SET
-                        {col} = {col} + 1
-                """, (rule_name, today,
-                      1 if is_forwarded else 0,
-                      0 if is_forwarded else 1))
-                conn.commit()
-            finally:
-                conn.close()
+            with self._session() as session:
+                statement = sqlite_insert(DailyStat).values(
+                    rule_name=rule_name,
+                    date=today,
+                    forwarded_count=1 if is_forwarded else 0,
+                    filtered_count=0 if is_forwarded else 1,
+                )
+                session.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[DailyStat.rule_name, DailyStat.date],
+                        set_={col: getattr(DailyStat, col) + 1},
+                    )
+                )
 
     def get_daily_stats(
         self, days: Optional[int] = 30, rule_name: str | None = None
@@ -689,200 +574,128 @@ class StatsDB:
             List of {date, forwarded, filtered} dicts, ordered by date ASC
         """
         with self._lock:
-            conn = self._get_conn()
-            try:
-                daily_clauses = []
-                daily_parameters: list[object] = []
-                hourly_clauses = []
-                hourly_parameters: list[object] = []
+            with self._session() as session:
+                daily_statement = select(DailyStat)
+                failed_statement = select(HourlyStat)
                 if days is not None:
                     cutoff_dt = datetime.now() - timedelta(days=days)
-                    cutoff = cutoff_dt.strftime("%Y-%m-%d")
-                    daily_clauses.append("date >= ?")
-                    daily_parameters.append(cutoff)
-                    hourly_clauses.append("hour >= ?")
-                    hourly_parameters.append(cutoff_dt.strftime("%Y-%m-%d 00:00"))
-                if rule_name:
-                    daily_clauses.append("rule_name = ?")
-                    daily_parameters.append(rule_name)
-                    hourly_clauses.append("rule_name = ?")
-                    hourly_parameters.append(rule_name)
-                daily_where = f"WHERE {' AND '.join(daily_clauses)}" if daily_clauses else ""
-                hourly_where = f"WHERE {' AND '.join(hourly_clauses)}" if hourly_clauses else ""
-                cursor = conn.execute(
-                    f"""
-                    WITH daily AS (
-                        SELECT date,
-                               SUM(forwarded_count) AS forwarded,
-                               SUM(filtered_count) AS filtered
-                        FROM daily_stats {daily_where}
-                        GROUP BY date
-                    ), failed AS (
-                        SELECT substr(hour, 1, 10) AS date,
-                               SUM(failed_count) AS failed
-                        FROM hourly_stats
-                        {hourly_where}
-                        {'AND' if hourly_where else 'WHERE'} failed_count != 0
-                        GROUP BY substr(hour, 1, 10)
-                    ), dates AS (
-                        SELECT date FROM daily
-                        UNION
-                        SELECT date FROM failed
+                    daily_statement = daily_statement.where(
+                        DailyStat.date >= cutoff_dt.strftime("%Y-%m-%d")
                     )
-                    SELECT dates.date,
-                           COALESCE(daily.forwarded, 0),
-                           COALESCE(daily.filtered, 0),
-                           COALESCE(failed.failed, 0)
-                    FROM dates
-                    LEFT JOIN daily ON daily.date = dates.date
-                    LEFT JOIN failed ON failed.date = dates.date
-                    ORDER BY dates.date ASC
-                    """,
-                    daily_parameters + hourly_parameters,
-                )
-                return [
-                    {
-                        "date": row[0],
-                        "forwarded": row[1] or 0,
-                        "filtered": row[2] or 0,
-                        "failed": row[3] or 0,
-                    }
-                    for row in cursor.fetchall()
-                ]
-            finally:
-                conn.close()
+                    failed_statement = failed_statement.where(
+                        HourlyStat.hour >= cutoff_dt.strftime("%Y-%m-%d 00:00")
+                    )
+                if rule_name:
+                    daily_statement = daily_statement.where(DailyStat.rule_name == rule_name)
+                    failed_statement = failed_statement.where(HourlyStat.rule_name == rule_name)
+                daily_rows = session.scalars(daily_statement).all()
+                failed_rows = session.scalars(
+                    failed_statement.where(HourlyStat.failed_count != 0)
+                ).all()
+                result = {
+                    row.date: {"date": row.date, "forwarded": 0, "filtered": 0, "failed": 0}
+                    for row in daily_rows
+                }
+                for row in daily_rows:
+                    result[row.date]["forwarded"] += row.forwarded_count or 0
+                    result[row.date]["filtered"] += row.filtered_count or 0
+                for row in failed_rows:
+                    date = row.hour[:10]
+                    result.setdefault(
+                        date, {"date": date, "forwarded": 0, "filtered": 0, "failed": 0}
+                    )["failed"] += row.failed_count or 0
+                return [result[key] for key in sorted(result)]
 
     def get_hourly_stats(
         self, hours: Optional[int] = 720, rule_name: str | None = None
     ) -> List[dict]:
         """Return hourly forwarding statistics, optionally scoped to one rule."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                clauses = []
-                params: list[object] = []
+            with self._session() as session:
+                statement = select(HourlyStat)
                 if hours is not None:
                     cutoff = datetime.now() - timedelta(hours=max(1, int(hours)))
-                    clauses.append("hour >= ?")
-                    params.append(cutoff.strftime("%Y-%m-%d %H:00"))
+                    statement = statement.where(HourlyStat.hour >= cutoff.strftime("%Y-%m-%d %H:00"))
                 if rule_name:
-                    clauses.append("rule_name = ?")
-                    params.append(rule_name)
-                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-                rows = conn.execute(
-                    f"""
-                    SELECT hour,
-                           SUM(forwarded_count),
-                           SUM(filtered_count),
-                           SUM(failed_count)
-                    FROM hourly_stats {where}
-                    GROUP BY hour
-                    ORDER BY hour ASC
-                    """,
-                    params,
-                ).fetchall()
-                return [
-                    {
-                        "hour": row[0],
-                        "forwarded": row[1] or 0,
-                        "filtered": row[2] or 0,
-                        "failed": row[3] or 0,
-                    }
-                    for row in rows
-                ]
-            finally:
-                conn.close()
+                    statement = statement.where(HourlyStat.rule_name == rule_name)
+                rows = session.scalars(statement.order_by(HourlyStat.hour)).all()
+                grouped = {}
+                for row in rows:
+                    item = grouped.setdefault(row.hour, {"hour": row.hour, "forwarded": 0, "filtered": 0, "failed": 0})
+                    item["forwarded"] += row.forwarded_count or 0
+                    item["filtered"] += row.filtered_count or 0
+                    item["failed"] += row.failed_count or 0
+                return list(grouped.values())
 
     def get_media_type_stats(
         self, days: Optional[int] = 30, rule_name: str | None = None
     ) -> List[dict]:
         """Return forwarded message counts grouped by media type."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                clauses = []
-                params: list[object] = []
+            with self._session() as session:
+                statement = select(ForwardedMessage)
                 if days is not None:
                     cutoff = datetime.now() - timedelta(days=max(1, int(days)))
-                    clauses.append("forwarded_at >= ?")
-                    params.append(cutoff.strftime("%Y-%m-%d %H:%M:%S"))
+                    statement = statement.where(
+                        ForwardedMessage.forwarded_at >= cutoff.strftime("%Y-%m-%d %H:%M:%S")
+                    )
                 if rule_name:
-                    clauses.append("rule_name = ?")
-                    params.append(rule_name)
-                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-                rows = conn.execute(
-                    f"""
-                    SELECT COALESCE(NULLIF(media_type, ''), 'text') AS media_type,
-                           COUNT(*)
-                    FROM forwarded_messages {where}
-                    GROUP BY media_type
-                    ORDER BY COUNT(*) DESC, media_type ASC
-                    """,
-                    params,
-                ).fetchall()
-                return [{"media_type": row[0], "count": row[1]} for row in rows]
-            finally:
-                conn.close()
+                    statement = statement.where(ForwardedMessage.rule_name == rule_name)
+                counts: dict[str, int] = {}
+                for row in session.scalars(statement).all():
+                    media_type = row.media_type or "text"
+                    counts[media_type] = counts.get(media_type, 0) + 1
+                return [
+                    {"media_type": media_type, "count": count}
+                    for media_type, count in sorted(
+                        counts.items(), key=lambda item: (-item[1], item[0])
+                    )
+                ]
 
     def get_button_action_hourly(
         self, hours: Optional[int] = 720, rule_name: str | None = None
     ) -> List[dict]:
         """Return hourly automation trigger counts."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                clauses = []
-                params: list[object] = []
+            with self._session() as session:
+                statement = select(ButtonActionHourly)
                 if hours is not None:
                     cutoff = datetime.now() - timedelta(hours=max(1, int(hours)))
-                    clauses.append("hour >= ?")
-                    params.append(cutoff.strftime("%Y-%m-%d %H:00"))
+                    statement = statement.where(
+                        ButtonActionHourly.hour >= cutoff.strftime("%Y-%m-%d %H:00")
+                    )
                 if rule_name:
-                    clauses.append("rule_name = ?")
-                    params.append(rule_name)
-                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-                rows = conn.execute(
-                    f"""
-                    SELECT hour, SUM(trigger_count)
-                    FROM button_action_hourly {where}
-                    GROUP BY hour
-                    ORDER BY hour ASC
-                    """,
-                    params,
-                ).fetchall()
-                return [{"hour": row[0], "triggered": row[1] or 0} for row in rows]
-            finally:
-                conn.close()
+                    statement = statement.where(ButtonActionHourly.rule_name == rule_name)
+                grouped: dict[str, int] = {}
+                for row in session.scalars(statement).all():
+                    grouped[row.hour] = grouped.get(row.hour, 0) + row.trigger_count
+                return [
+                    {"hour": hour, "triggered": grouped[hour]}
+                    for hour in sorted(grouped)
+                ]
 
     def get_button_action_daily(
         self, days: Optional[int] = 30, rule_name: str | None = None
     ) -> List[dict]:
         """Return daily automation trigger counts."""
         with self._lock:
-            conn = self._get_conn()
-            try:
-                clauses = []
-                params: list[object] = []
+            with self._session() as session:
+                statement = select(ButtonActionHourly)
                 if days is not None:
                     cutoff = datetime.now() - timedelta(days=max(1, int(days)))
-                    clauses.append("hour >= ?")
-                    params.append(cutoff.strftime("%Y-%m-%d 00:00"))
+                    statement = statement.where(
+                        ButtonActionHourly.hour >= cutoff.strftime("%Y-%m-%d 00:00")
+                    )
                 if rule_name:
-                    clauses.append("rule_name = ?")
-                    params.append(rule_name)
-                where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-                rows = conn.execute(
-                    f"""
-                    SELECT substr(hour, 1, 10) AS date, SUM(trigger_count)
-                    FROM button_action_hourly {where}
-                    GROUP BY date
-                    ORDER BY date ASC
-                    """,
-                    params,
-                ).fetchall()
-                return [{"date": row[0], "triggered": row[1] or 0} for row in rows]
-            finally:
-                conn.close()
+                    statement = statement.where(ButtonActionHourly.rule_name == rule_name)
+                grouped: dict[str, int] = {}
+                for row in session.scalars(statement).all():
+                    date = row.hour[:10]
+                    grouped[date] = grouped.get(date, 0) + row.trigger_count
+                return [
+                    {"date": date, "triggered": grouped[date]}
+                    for date in sorted(grouped)
+                ]
 
     def get_rule_stats_detail(self) -> List[dict]:
         """
@@ -892,22 +705,18 @@ class StatsDB:
             List of {rule_name, forwarded, filtered, total} dicts
         """
         with self._lock:
-            conn = self._get_conn()
-            try:
-                cursor = conn.execute(
-                    "SELECT rule_name, forwarded_count, filtered_count FROM rule_stats ORDER BY rule_name"
-                )
+            with self._session() as session:
                 return [
                     {
-                        "rule_name": row[0],
-                        "forwarded": row[1],
-                        "filtered": row[2],
-                        "total": row[1] + row[2],
+                        "rule_name": row.rule_name,
+                        "forwarded": row.forwarded_count,
+                        "filtered": row.filtered_count,
+                        "total": row.forwarded_count + row.filtered_count,
                     }
-                    for row in cursor.fetchall()
+                    for row in session.scalars(
+                        select(RuleStats).order_by(RuleStats.rule_name)
+                    ).all()
                 ]
-            finally:
-                conn.close()
 
     def export_stats(self, fmt: str = "csv") -> str:
         """Export rule statistics as CSV, JSON, or HTML"""
