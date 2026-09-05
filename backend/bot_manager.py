@@ -682,6 +682,13 @@ class BotManager:
             for item in store.list_active(limit)
         ]
 
+    def delete_queue_item(self, item_id: int) -> bool:
+        """Remove one pending or processing task from this account's queue."""
+        store = self.forward_queue_store
+        if not store:
+            return False
+        return store.delete_item(item_id)
+
     def _forward_event_payload(
         self, item: ForwardQueueItem, *, status: str, error: str | None = None
     ) -> dict[str, Any]:

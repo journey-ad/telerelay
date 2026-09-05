@@ -11,6 +11,7 @@ from typing import Any
 from backend.account_paths import AccountPathRegistry, is_telegram_user_id
 from backend.auth_manager import AuthManager
 from backend.bot_manager import BotManager
+from backend.forward_queue import ForwardQueueStore
 from backend.stats_db import get_stats_db
 from backend.telegram_accounts import TelegramAccountError, TelegramAccountStore
 
@@ -376,6 +377,22 @@ class TelegramRuntimeRegistry:
             )
         )
         return items[: max(1, min(int(limit), 100))]
+
+    def delete_queue_item(
+        self,
+        item_id: int,
+        account_id: str | None = None,
+    ) -> bool:
+        """Delete one active queue task belonging to the selected account."""
+        target = account_id or self.account_store.active_account_id
+        self.account_store.get_public(target)
+        with self._state_lock:
+            runtime = self._runtimes.get(target)
+        store = getattr(runtime, "forward_queue_store", None) if runtime is not None else None
+        if store is None:
+            # The queue is durable even while a runtime is stopped.
+            store = ForwardQueueStore(self.queue_db_path(target))
+        return store.delete_item(item_id)
 
     def reset_stats(self, account_id: str | None = None) -> None:
         active_id = account_id or self.account_store.active_account_id

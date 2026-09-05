@@ -17,6 +17,7 @@ import {
   Target,
   TimerReset,
   Trophy,
+  Trash2,
 } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -33,7 +34,7 @@ import {
   YAxis,
 } from 'recharts'
 import { accountRequest, json, request } from '../api/client'
-import { Button, EmptyState, PageHeader, Panel } from '../components/ui'
+import { Button, EmptyState, IconButton, PageHeader, Panel, confirm } from '../components/ui'
 import { useEvents } from '../hooks/useEvents'
 import { useAccountScope } from '../hooks/useAccountScope'
 import type { BotStatus, ForwardQueueItem, RelayEvent, Stats, TelegramAccount } from '../types'
@@ -414,6 +415,25 @@ export function DashboardPage() {
       accountRequest(accountId, `/api/v1/bot/${action}`, json('POST')),
     onSuccess: () => void client.invalidateQueries({ queryKey: ['bot-status'] }),
   })
+  const deleteQueueItem = useMutation({
+    mutationFn: (itemId: number) =>
+      accountRequest(accountId, `/api/v1/queue/items/${itemId}`, json('DELETE')),
+    onSuccess: (_data, itemId) => {
+      client.setQueryData<ForwardQueueItem[]>(['forward-queue-items', accountId], (items) =>
+        items?.filter((item) => item.id !== itemId),
+      )
+      void client.invalidateQueries({ queryKey: ['bot-status'] })
+    },
+  })
+
+  async function confirmDeleteQueueItem(item: ForwardQueueItem) {
+    await confirm({
+      title: t('dashboard.queuePreview.deleteTitle'),
+      description: t('dashboard.queuePreview.deleteConfirm', { rule: item.rule_name }),
+      confirmLabel: t('dashboard.queuePreview.delete'),
+      onConfirm: () => deleteQueueItem.mutateAsync(item.id),
+    })
+  }
 
   const status = statusQuery.data ?? {}
   const telegramStatusLabel =
@@ -609,7 +629,7 @@ export function DashboardPage() {
             ) : queueItems.length ? (
               <div className="overflow-x-auto">
                 <div className="min-w-225">
-                  <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
+                  <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)_70px] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
                     <span>{t('dashboard.queuePreview.columns.account')}</span>
                     <span>{t('dashboard.queuePreview.columns.rule')}</span>
                     <span>{t('dashboard.queuePreview.columns.source')}</span>
@@ -619,12 +639,15 @@ export function DashboardPage() {
                       {t('dashboard.queuePreview.columns.retries')}
                     </span>
                     <span>{t('dashboard.queuePreview.columns.waiting')}</span>
+                    <span className="text-right">
+                      {t('dashboard.queuePreview.columns.actions')}
+                    </span>
                   </div>
                   {queueItems.map((item) => {
                     const state = queueState(item)
                     return (
                       <div
-                        className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)] items-center gap-3 border-b border-slate-100 py-3 last:border-0"
+                        className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_100px_110px_70px_minmax(160px,1fr)_70px] items-center gap-3 border-b border-slate-100 py-3 last:border-0"
                         key={`${item.account_id}-${item.id}`}
                       >
                         <div className="min-w-0">
@@ -684,6 +707,18 @@ export function DashboardPage() {
                               {item.last_error}
                             </small>
                           ) : null}
+                        </div>
+                        <div className="flex justify-end">
+                          <IconButton
+                            type="button"
+                            label={t('dashboard.queuePreview.delete')}
+                            icon={Trash2}
+                            className="border-rose-200 bg-rose-50 text-rose-600 hover:border-rose-300 hover:bg-rose-100 hover:text-rose-700"
+                            disabled={
+                              deleteQueueItem.isPending && deleteQueueItem.variables === item.id
+                            }
+                            onClick={() => void confirmDeleteQueueItem(item)}
+                          />
                         </div>
                       </div>
                     )

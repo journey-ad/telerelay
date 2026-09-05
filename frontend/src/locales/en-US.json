@@ -321,14 +321,18 @@
         "status": "Status",
         "progress": "Target progress",
         "retries": "Failures",
-        "waiting": "Available at / error"
+        "waiting": "Available at / error",
+        "actions": "Actions"
       },
       "statuses": {
         "processing": "Forwarding",
         "waiting": "Waiting to retry",
         "pending": "Pending"
       },
-      "targetProgress": "{{current}} / {{total}} targets"
+      "targetProgress": "{{current}} / {{total}} targets",
+      "delete": "Delete",
+      "deleteTitle": "Delete queued task",
+      "deleteConfirm": "Remove the forwarding task for rule “{{rule}}” from the queue?"
     },
     "ruleRanking": "Rule performance ranking",
     "ruleRankingMeta": "{{count}} rules · cumulative data",

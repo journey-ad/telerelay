@@ -499,6 +499,24 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(calls, [(25, self.account_id)])
         self.assertEqual(invalid.status_code, 422)
 
+    def test_queue_item_delete_is_account_scoped_and_reports_missing(self):
+        calls = []
+
+        def delete_queue_item(item_id, account_id=None):
+            calls.append((item_id, account_id))
+            return item_id == 42
+
+        self.bot.delete_queue_item = delete_queue_item
+
+        deleted = self.client.delete("/api/v1/queue/items/42")
+        missing = self.client.delete("/api/v1/queue/items/43")
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["code"], "queue_item_deleted")
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["detail"]["code"], "queue_item_not_found")
+        self.assertEqual(calls, [(42, self.account_id), (43, self.account_id)])
+
     def test_recent_events_contract_filters_types_and_limits_results(self):
         self.events.publish("bot", {"action": "start"})
         self.events.publish("telegram-auth", {"submitted": "phone"})

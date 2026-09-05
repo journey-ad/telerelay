@@ -536,6 +536,26 @@ async def queue_items(
     return await asyncio.to_thread(context.bot.list_queue_items, limit)
 
 
+@router.delete("/queue/items/{item_id}", response_model=ApiMessage)
+async def delete_queue_item(
+    item_id: int,
+    context: ApplicationContext = Depends(get_context),
+) -> ApiMessage:
+    scope = _account_scope(context)
+    deleted = (
+        await asyncio.to_thread(context.bot.delete_queue_item, item_id, scope.account_id)
+        if scope
+        else await asyncio.to_thread(context.bot.delete_queue_item, item_id)
+    )
+    if not deleted:
+        raise _error(
+            "queue_item_not_found",
+            "Queue item does not exist or is no longer active",
+            404,
+        )
+    return ApiMessage(code="queue_item_deleted")
+
+
 @router.post("/bot/start", response_model=ApiMessage)
 async def bot_start(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
     scope = _account_scope(context)

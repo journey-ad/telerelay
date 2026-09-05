@@ -321,14 +321,18 @@
         "status": "状态",
         "progress": "目标进度",
         "retries": "失败次数",
-        "waiting": "可执行时间 / 错误"
+        "waiting": "可执行时间 / 错误",
+        "actions": "操作"
       },
       "statuses": {
         "processing": "转发中",
         "waiting": "等待重试",
         "pending": "待处理"
       },
-      "targetProgress": "{{current}} / {{total}} 个目标"
+      "targetProgress": "{{current}} / {{total}} 个目标",
+      "delete": "删除",
+      "deleteTitle": "删除积压任务",
+      "deleteConfirm": "确定要从队列中移除规则“{{rule}}”的转发任务吗？"
     },
     "ruleRanking": "规则表现排行",
     "ruleRankingMeta": "{{count}} 条规则 · 累计数据",

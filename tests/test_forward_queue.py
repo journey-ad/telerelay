@@ -89,6 +89,50 @@ class ForwardQueueStoreTests(unittest.TestCase):
                 store.get_item(item.id).source_chat_name, "Backfilled Room"
             )
 
+    def test_delete_item_only_removes_active_tasks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            pending, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=42,
+                sender_id=7,
+                grouped_id=None,
+            )
+            processing, _ = store.enqueue(
+                rule_data=rule_data(name="processing"),
+                source_chat_id=-1001,
+                source_message_id=43,
+                sender_id=7,
+                grouped_id=None,
+            )
+            completed, _ = store.enqueue(
+                rule_data=rule_data(name="completed"),
+                source_chat_id=-1001,
+                source_message_id=44,
+                sender_id=7,
+                grouped_id=None,
+            )
+            failed, _ = store.enqueue(
+                rule_data=rule_data(name="failed"),
+                source_chat_id=-1001,
+                source_message_id=45,
+                sender_id=7,
+                grouped_id=None,
+            )
+            self.assertEqual(store.claim_next().id, pending.id)
+            self.assertEqual(store.claim_next().id, processing.id)
+            store.mark_completed(completed.id)
+            store.mark_failed(failed.id, "failed")
+
+            self.assertTrue(store.delete_item(pending.id))
+            self.assertTrue(store.delete_item(processing.id))
+            self.assertFalse(store.delete_item(completed.id))
+            self.assertFalse(store.delete_item(failed.id))
+            self.assertFalse(store.delete_item(999999))
+            self.assertEqual(store.active_count(), 0)
+            self.assertEqual(store.counts(), {"completed": 1, "failed": 1})
+
     def test_media_group_updates_merge_and_extend_settle_window(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")

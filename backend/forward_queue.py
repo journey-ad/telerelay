@@ -196,6 +196,24 @@ class ForwardQueueStore:
         with self._lock, self._connect() as conn:
             return self._get(conn, item_id)
 
+    def delete_item(self, item_id: int) -> bool:
+        """Remove an unfinished queue item.
+
+        Completed and failed items remain available for retention and history,
+        while pending/processing items are the operational queue shown in the
+        dashboard.  The conditional delete also makes this operation safe to
+        repeat when a consumer changes the item state concurrently.
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM forward_queue
+                WHERE id = ? AND status IN ('pending', 'processing')
+                """,
+                (int(item_id),),
+            )
+            return cursor.rowcount == 1
+
     def list_active(self, limit: int = 50) -> list[ForwardQueueItem]:
         """Return a bounded operational view of unfinished queue items."""
         with self._lock, self._connect() as conn:
