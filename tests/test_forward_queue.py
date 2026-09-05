@@ -43,6 +43,31 @@ def rule_data(name="queue-rule"):
 
 
 class ForwardQueueStoreTests(unittest.TestCase):
+    def test_claim_next_can_skip_cooled_rule_and_deprioritize_last_rule(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            first, _ = store.enqueue(
+                rule_data=rule_data("rule-a"),
+                source_chat_id=-1001,
+                source_message_id=1,
+                sender_id=7,
+                grouped_id=None,
+            )
+            second, _ = store.enqueue(
+                rule_data=rule_data("rule-b"),
+                source_chat_id=-1001,
+                source_message_id=2,
+                sender_id=7,
+                grouped_id=None,
+            )
+
+            selected = store.claim_next(
+                blocked_rule_fingerprints={first.rule_fingerprint},
+                deprioritize_rule=first.rule_fingerprint,
+            )
+
+            self.assertEqual(selected.id, second.id)
+
     def test_processing_item_and_target_checkpoint_survive_reopen(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "forward_queue.db"
@@ -624,7 +649,7 @@ class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
                     break
                 await asyncio.sleep(0.01)
             queue.enqueue(
-                rule_data=rule_data("second"),
+                rule_data=rule_data("first"),
                 source_chat_id=-1001,
                 source_message_id=6,
                 sender_id=7,
@@ -638,6 +663,44 @@ class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(len(calls), 2)
             self.assertGreaterEqual(calls[1][1] - calls[0][1], 0.13)
+
+    async def test_rule_delay_does_not_block_another_rule(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            first, _ = store.enqueue(
+                rule_data=rule_data("slow-rule"),
+                source_chat_id=-1001,
+                source_message_id=5,
+                sender_id=7,
+                grouped_id=None,
+            )
+            calls = []
+
+            async def processor(item):
+                calls.append((item.rule_name, time.monotonic()))
+                return 0.2 if item.id == first.id else 0
+
+            queue = ForwardQueue(store, processor, poll_interval=0.01)
+            await queue.start()
+            for _ in range(50):
+                if calls:
+                    break
+                await asyncio.sleep(0.01)
+            queue.enqueue(
+                rule_data=rule_data("fast-rule"),
+                source_chat_id=-1001,
+                source_message_id=6,
+                sender_id=7,
+                grouped_id=None,
+            )
+            for _ in range(100):
+                if len(calls) == 2:
+                    break
+                await asyncio.sleep(0.01)
+            await queue.stop()
+
+            self.assertEqual([name for name, _ in calls], ["slow-rule", "fast-rule"])
+            self.assertLess(calls[1][1] - calls[0][1], 0.13)
 
 
 class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):

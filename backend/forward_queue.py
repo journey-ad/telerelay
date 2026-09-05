@@ -500,18 +500,37 @@ class ForwardQueueStore:
             )
             return cursor.rowcount
 
-    def claim_next(self, now: Optional[float] = None) -> Optional[ForwardQueueItem]:
+    def claim_next(
+        self,
+        now: Optional[float] = None,
+        *,
+        blocked_rule_fingerprints: Optional[set[str]] = None,
+        deprioritize_rule: Optional[str] = None,
+    ) -> Optional[ForwardQueueItem]:
         now = time.time() if now is None else now
+        blocked = sorted(blocked_rule_fingerprints or set())
         with self._lock, self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            clauses = [
+                "status = 'pending'",
+                "available_at <= ?",
+                "(group_settle_until IS NULL OR group_settle_until <= ?)",
+            ]
+            params: list[Any] = [now, now]
+            if blocked:
+                placeholders = ", ".join("?" for _ in blocked)
+                clauses.append(f"rule_fingerprint NOT IN ({placeholders})")
+                params.extend(blocked)
+            params.append(deprioritize_rule or "")
             row = conn.execute(
-                """
+                f"""
                 SELECT * FROM forward_queue
-                WHERE status = 'pending' AND available_at <= ?
-                  AND (group_settle_until IS NULL OR group_settle_until <= ?)
-                ORDER BY id ASC LIMIT 1
+                WHERE {' AND '.join(clauses)}
+                ORDER BY CASE WHEN rule_fingerprint = ? THEN 1 ELSE 0 END,
+                         available_at ASC, id ASC
+                LIMIT 1
                 """,
-                (now, now),
+                params,
             ).fetchone()
             if row is None:
                 conn.commit()
@@ -703,6 +722,8 @@ class ForwardQueue:
         self._wake = asyncio.Event()
         self._stop = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
+        self._rule_next_at: dict[str, float] = {}
+        self._last_rule_fingerprint: Optional[str] = None
 
     @property
     def running(self) -> bool:
@@ -766,13 +787,6 @@ class ForwardQueue:
         except asyncio.TimeoutError:
             pass
 
-    async def _wait_post_delay(self, seconds: float) -> None:
-        """Honor forwarding delay; new queue items must not shorten it."""
-        try:
-            await asyncio.wait_for(self._stop.wait(), timeout=max(0.01, seconds))
-        except asyncio.TimeoutError:
-            pass
-
     def _notify_outcome(
         self, item: ForwardQueueItem, status: str, error: Optional[Exception] = None
     ) -> None:
@@ -805,11 +819,22 @@ class ForwardQueue:
             return
         self.store.clear_pause_if_expired(now)
 
-        item = self.store.claim_next(now)
+        blocked_rules = {
+            fingerprint
+            for fingerprint, available_at in self._rule_next_at.items()
+            if available_at > now
+        }
+        item = self.store.claim_next(
+            now,
+            blocked_rule_fingerprints=blocked_rules,
+            deprioritize_rule=self._last_rule_fingerprint,
+        )
         if item is None:
             next_at = self.store.next_available_at()
-            delay = self.poll_interval if next_at is None else max(
-                0.01, min(self.poll_interval, next_at - now)
+            rule_next_at = min(self._rule_next_at.values(), default=None)
+            candidates = [value for value in (next_at, rule_next_at) if value is not None]
+            delay = self.poll_interval if not candidates else max(
+                0.01, min(self.poll_interval, min(candidates) - now)
             )
             await self._wait(delay)
             return
@@ -867,5 +892,6 @@ class ForwardQueue:
         else:
             self.store.mark_completed(item.id)
             self._notify_outcome(item, "completed")
+            self._last_rule_fingerprint = item.rule_fingerprint
             if post_delay:
-                await self._wait_post_delay(float(post_delay))
+                self._rule_next_at[item.rule_fingerprint] = time.time() + float(post_delay)
