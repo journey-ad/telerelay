@@ -896,16 +896,18 @@ async def stats(
             "automation_hourly": automation_hourly,
         }
     daily_days = None if report_days is None else report_days * 2
-    details, button_details, daily, automation_daily = await asyncio.gather(
+    details, button_details, daily, media_types, automation_daily = await asyncio.gather(
         asyncio.to_thread(database.get_rule_stats_detail),
         asyncio.to_thread(database.get_button_action_stats),
         asyncio.to_thread(database.get_daily_stats, daily_days, rule_name),
+        asyncio.to_thread(database.get_media_type_stats, report_days, rule_name),
         asyncio.to_thread(database.get_button_action_daily, report_days, rule_name),
     )
     return {
         "rules": details,
         "button_rules": button_details,
         "daily": daily,
+        "media_types": media_types,
         "automation_daily": automation_daily,
     }
 

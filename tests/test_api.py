@@ -622,6 +622,7 @@ class ApiContractTests(unittest.TestCase):
         database = SimpleNamespace(
             get_rule_stats_detail=list,
             get_daily_stats=lambda days, rule: calls.append(days) or [{"days": days}],
+            get_media_type_stats=lambda days, rule: [{"media_type": "text", "count": 1}],
             get_button_action_stats=lambda: [{"rule_name": "button", "triggered": 3}],
             get_button_action_daily=lambda days, rule: [],
         )
@@ -638,6 +639,7 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(default.status_code, 200, default.text)
         self.assertEqual(default.json()["button_rules"], [{"rule_name": "button", "triggered": 3}])
+        self.assertEqual(default.json()["media_types"], [{"media_type": "text", "count": 1}])
         self.assertEqual(calls, [60, 14, 28, 60, None])
         self.assertTrue(all(response.status_code == 200 for response in responses.values()))
         self.assertEqual(invalid.status_code, 422)
