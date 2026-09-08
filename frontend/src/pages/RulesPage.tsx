@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Braces, Edit3, Plus, Route, Search, Trash2 } from 'lucide-react'
+import { Braces, Edit3, FolderKanban, Plus, Route, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { accountRequest, json } from '../api/client'
@@ -22,7 +22,7 @@ import {
   tableClass,
   tableWrapClass,
 } from '../components/ui'
-import type { ChatRef, ForwardingRule, Stats } from '../types'
+import type { ChatGroup, ChatRef, ForwardingRule, Stats } from '../types'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 import { lines } from '../utils/parse'
@@ -32,6 +32,8 @@ const blankRule = (): ForwardingRule => ({
   enabled: true,
   source_chats: [],
   target_chats: [],
+  source_groups: [],
+  target_groups: [],
   filters: {
     mode: 'whitelist',
     keywords: [],
@@ -61,6 +63,9 @@ export function RulesPage() {
   const statsKey = ['stats', accountId, 'all'] as const
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
+  const [groupsOpen, setGroupsOpen] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<number | null>(null)
+  const [groupForm, setGroupForm] = useState<ChatGroup>({ name: '', chats: [] })
   const [editing, setEditing] = useState<number | null>(null)
   const [form, setForm] = useState<ForwardingRule>(blankRule())
   const [regex, setRegex] = useState('')
@@ -74,6 +79,11 @@ export function RulesPage() {
     queryFn: () => accountRequest<Stats>(accountId, '/api/v1/stats?date_limit=all'),
   })
   const chatsQuery = useTelegramChats()
+  const groupsKey = ['chat-groups', accountId] as const
+  const groupsQuery = useQuery({
+    queryKey: groupsKey,
+    queryFn: () => accountRequest<ChatGroup[]>(accountId, '/api/v1/chat-groups'),
+  })
   const chatLabels = useMemo(
     () => new Map((chatsQuery.data ?? []).map((chat) => [String(chat.id), chat.title] as const)),
     [chatsQuery.data],
@@ -81,6 +91,10 @@ export function RulesPage() {
   const ruleStats = useMemo(
     () => new Map((statsQuery.data?.rules ?? []).map((item) => [item.rule_name, item] as const)),
     [statsQuery.data],
+  )
+  const groupMap = useMemo(
+    () => new Map((groupsQuery.data ?? []).map((group) => [group.name, group.chats] as const)),
+    [groupsQuery.data],
   )
   const rules = useMemo(
     () =>
@@ -100,6 +114,8 @@ export function RulesPage() {
   }
   function editRule(index: number) {
     const value = structuredClone(rulesQuery.data?.[index] ?? blankRule())
+    value.source_groups = value.source_groups ?? []
+    value.target_groups = value.target_groups ?? []
     setEditing(index)
     setForm(value)
     setRegex(value.filters.regex_patterns.join('\n'))
@@ -175,6 +191,32 @@ export function RulesPage() {
       void client.invalidateQueries({ queryKey: statsKey })
     },
   })
+  const saveGroup = useMutation({
+    mutationFn: ({ group, index }: { group: ChatGroup; index: number | null }) =>
+      accountRequest<ChatGroup>(
+        accountId,
+        index === null ? '/api/v1/chat-groups' : `/api/v1/chat-groups/${index}`,
+        json(index === null ? 'POST' : 'PUT', group),
+      ),
+    onSuccess: (updated, { index }) => {
+      client.setQueryData<ChatGroup[]>(groupsKey, (current) => {
+        if (!current) return [updated]
+        if (index === null) return [...current, updated]
+        return current.map((group, position) => (position === index ? updated : group))
+      })
+      setEditingGroup(null)
+      setGroupForm({ name: '', chats: [] })
+    },
+  })
+  const removeGroup = useMutation({
+    mutationFn: (index: number) =>
+      accountRequest(accountId, `/api/v1/chat-groups/${index}`, json('DELETE')),
+    onSuccess: (_, index) => {
+      client.setQueryData<ChatGroup[]>(groupsKey, (current) =>
+        current?.filter((_, position) => position !== index),
+      )
+    },
+  })
   function submit(event: FormEvent) {
     event.preventDefault()
     regexValidation.validate(regex).then((valid) => {
@@ -193,12 +235,28 @@ export function RulesPage() {
       onConfirm: () => remove.mutateAsync(index),
     })
   }
+  async function deleteGroup(index: number) {
+    await confirm({
+      title: t('rules.groups.deleteTitle'),
+      description: t('rules.groups.deleteConfirm', {
+        name: groupsQuery.data?.[index]?.name ?? '',
+      }),
+      confirmLabel: t('rules.groups.delete'),
+      onConfirm: () => removeGroup.mutateAsync(index),
+    })
+  }
   const setForwarding = <K extends keyof ForwardingRule['forwarding']>(
     key: K,
     value: ForwardingRule['forwarding'][K],
   ) => setForm((current) => ({ ...current, forwarding: { ...current.forwarding, [key]: value } }))
   const formatChats = (chatRefs: ChatRef[]) =>
     chatRefs.map((chatRef) => chatLabels.get(String(chatRef)) ?? String(chatRef)).join(', ')
+  const formatEndpoint = (chats: ChatRef[], groups: string[] = []) =>
+    [formatChats(chats), ...groups.map((name) => t('rules.groupLabel', { name }))]
+      .filter(Boolean)
+      .join(', ')
+  const endpointCount = (chats: ChatRef[], groups: string[] = []) =>
+    new Set([...chats, ...groups.flatMap((name) => groupMap.get(name) ?? [])].map(String)).size
 
   return (
     <>
@@ -207,9 +265,14 @@ export function RulesPage() {
         title={t('rules.title')}
         description={t('rules.description')}
         actions={
-          <Button icon={Plus} onClick={createRule}>
-            {t('rules.new')}
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" icon={FolderKanban} onClick={() => setGroupsOpen(true)}>
+              {t('rules.groups.manage')}
+            </Button>
+            <Button icon={Plus} onClick={createRule}>
+              {t('rules.new')}
+            </Button>
+          </div>
         }
       />
       <div
@@ -286,18 +349,22 @@ export function RulesPage() {
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
-                      {formatChats(rule.source_chats) || '-'}
+                      {formatEndpoint(rule.source_chats, rule.source_groups) || '-'}
                     </span>
                     <small className="mt-1 block text-xs text-slate-400">
-                      {t('common.chatCount', { count: rule.source_chats.length })}
+                      {t('common.chatCount', {
+                        count: endpointCount(rule.source_chats, rule.source_groups),
+                      })}
                     </small>
                   </td>
                   <td>
                     <span className="block max-w-48 truncate">
-                      {formatChats(rule.target_chats) || '-'}
+                      {formatEndpoint(rule.target_chats, rule.target_groups) || '-'}
                     </span>
                     <small className="mt-1 block text-xs text-slate-400">
-                      {t('common.chatCount', { count: rule.target_chats.length })}
+                      {t('common.chatCount', {
+                        count: endpointCount(rule.target_chats, rule.target_groups),
+                      })}
                     </small>
                   </td>
                   <td>
@@ -377,6 +444,9 @@ export function RulesPage() {
               <ChatTagInput
                 value={form.source_chats}
                 onChange={(source_chats) => setForm({ ...form, source_chats })}
+                groups={groupsQuery.data ?? []}
+                selectedGroups={form.source_groups}
+                onGroupsChange={(source_groups) => setForm({ ...form, source_groups })}
               />
             </div>
             <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
@@ -384,6 +454,9 @@ export function RulesPage() {
               <ChatTagInput
                 value={form.target_chats}
                 onChange={(target_chats) => setForm({ ...form, target_chats })}
+                groups={groupsQuery.data ?? []}
+                selectedGroups={form.target_groups}
+                onGroupsChange={(target_groups) => setForm({ ...form, target_groups })}
               />
             </div>
             <label className={fieldClass}>
@@ -521,6 +594,95 @@ export function RulesPage() {
             </Button>
             <Button type="submit" disabled={save.isPending || toggle.isPending}>
               {t(save.isPending ? 'common.saving' : 'rules.save')}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={groupsOpen}
+        onOpenChange={setGroupsOpen}
+        title={t('rules.groups.title')}
+        description={t('rules.groups.description')}
+      >
+        <div className="mb-4 space-y-2">
+          {(groupsQuery.data ?? []).map((group, index) => (
+            <div
+              key={group.name}
+              className="flex items-center gap-3 rounded-md border border-slate-200 p-3"
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded bg-amber-50 text-amber-700">
+                <FolderKanban size={17} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-[13px] text-slate-700">{group.name}</strong>
+                <small className="text-xs text-slate-400">
+                  {t('common.chatCount', { count: group.chats.length })}
+                </small>
+              </span>
+              <IconButton
+                label={t('rules.groups.edit')}
+                icon={Edit3}
+                onClick={() => {
+                  setEditingGroup(index)
+                  setGroupForm(structuredClone(group))
+                }}
+              />
+              <IconButton
+                label={t('rules.groups.delete')}
+                icon={Trash2}
+                onClick={() => deleteGroup(index)}
+              />
+            </div>
+          ))}
+        </div>
+        <form
+          className="rounded-md border border-slate-200 bg-slate-50 p-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            saveGroup.mutate({ group: structuredClone(groupForm), index: editingGroup })
+          }}
+        >
+          <h3 className="mb-3 text-sm font-bold text-slate-700">
+            {t(editingGroup === null ? 'rules.groups.new' : 'rules.groups.editNamed', {
+              name: groupForm.name,
+            })}
+          </h3>
+          <label className={fieldClass}>
+            <span>{t('rules.groups.name')}</span>
+            <input
+              value={groupForm.name}
+              onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })}
+              required
+            />
+          </label>
+          <div className={cn(fieldClass, 'mt-3')}>
+            <span>{t('rules.groups.chats')}</span>
+            <ChatTagInput
+              value={groupForm.chats}
+              onChange={(chats) => setGroupForm({ ...groupForm, chats })}
+            />
+          </div>
+          {saveGroup.error || removeGroup.error ? (
+            <p className="mt-3 rounded border border-rose-100 bg-rose-50 p-2 text-[13px] text-rose-700">
+              {messageFrom(saveGroup.error ?? removeGroup.error)}
+            </p>
+          ) : null}
+          <div className="mt-4 flex justify-end gap-2">
+            {editingGroup !== null ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setEditingGroup(null)
+                  setGroupForm({ name: '', chats: [] })
+                }}
+              >
+                {t('common.cancel')}
+              </Button>
+            ) : null}
+            <Button type="submit" disabled={saveGroup.isPending || groupForm.chats.length === 0}>
+              {t(saveGroup.isPending ? 'common.saving' : 'rules.groups.save')}
             </Button>
           </div>
         </form>

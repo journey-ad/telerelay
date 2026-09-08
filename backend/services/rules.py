@@ -5,7 +5,11 @@ import re
 from backend.button_actions import ButtonActionRule
 from backend.config import Config
 from backend.rule import ForwardingRule
-from backend.schemas import ButtonActionRulePayload, ForwardingRulePayload
+from backend.schemas import (
+    ButtonActionRulePayload,
+    ChatGroupPayload,
+    ForwardingRulePayload,
+)
 from backend.stats_db import get_stats_db
 
 
@@ -47,6 +51,43 @@ class RuleService:
 
     def list_button_rules(self) -> list[dict]:
         return [rule.to_dict() for rule in self.config.get_button_action_rules()]
+
+    def list_chat_groups(self) -> list[dict]:
+        return self.config.get_chat_groups()
+
+    async def create_chat_group(self, payload: ChatGroupPayload) -> dict:
+        groups = self.config.get_chat_groups()
+        self._ensure_unique(payload.name, [group["name"] for group in groups])
+        group = payload.model_dump()
+        groups.append(group)
+        self.config.update({"chat_groups": groups})
+        await self._reload_if_running()
+        return group
+
+    async def update_chat_group(self, index: int, payload: ChatGroupPayload) -> dict:
+        groups = self.config.get_chat_groups()
+        self._ensure_index(index, groups)
+        old_name = groups[index]["name"]
+        self._ensure_unique(
+            payload.name,
+            [group["name"] for position, group in enumerate(groups) if position != index],
+        )
+        if old_name != payload.name and self._group_is_used(old_name):
+            raise ServiceError("group_in_use", "Groups used by rules cannot be renamed")
+        group = payload.model_dump()
+        groups[index] = group
+        self.config.update({"chat_groups": groups})
+        await self._reload_if_running()
+        return group
+
+    async def delete_chat_group(self, index: int) -> None:
+        groups = self.config.get_chat_groups()
+        self._ensure_index(index, groups)
+        if self._group_is_used(groups[index]["name"]):
+            raise ServiceError("group_in_use", "Groups used by rules cannot be deleted")
+        groups.pop(index)
+        self.config.update({"chat_groups": groups})
+        await self._reload_if_running()
 
     async def create_rule(self, payload: ForwardingRulePayload) -> dict:
         rules = self.config.get_forwarding_rules()
@@ -131,12 +172,18 @@ class RuleService:
         await self._reload_if_running()
 
     def _forwarding_rule(self, payload: ForwardingRulePayload) -> ForwardingRule:
-        if payload.enabled and not payload.source_chats:
+        group_names = {group["name"].casefold() for group in self.config.get_chat_groups()}
+        referenced = [*payload.source_groups, *payload.target_groups]
+        if any(name.casefold() not in group_names for name in referenced):
+            raise ServiceError("group_not_found", "A referenced chat group does not exist")
+        rule = ForwardingRule.from_dict(payload.model_dump())
+        resolved = self.config.resolve_rule(rule)
+        if payload.enabled and not resolved.source_chats:
             raise ServiceError("rule_source_required", "Enabled rules need a source chat")
-        if payload.enabled and not payload.target_chats:
+        if payload.enabled and not resolved.target_chats:
             raise ServiceError("rule_target_required", "Enabled rules need a target chat")
         _ensure_valid_regex(payload.filters.regex_patterns)
-        return ForwardingRule.from_dict(payload.model_dump())
+        return rule
 
     def _button_rule(self, payload: ButtonActionRulePayload) -> ButtonActionRule:
         if payload.enabled and self.session_type != "user":
@@ -158,6 +205,13 @@ class RuleService:
     async def _reload_if_running(self) -> None:
         if self.bot_manager.is_running:
             await self.bot_manager.reload_rules()
+
+    def _group_is_used(self, name: str) -> bool:
+        key = name.casefold()
+        return any(
+            key in {item.casefold() for item in [*rule.source_groups, *rule.target_groups]}
+            for rule in self.config.get_forwarding_rules()
+        )
 
     @staticmethod
     def _ensure_index(index: int, values: list) -> None:

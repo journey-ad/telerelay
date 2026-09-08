@@ -28,6 +28,7 @@ from backend.schemas import (
     AuthValue,
     BotTokenPayload,
     ButtonActionRulePayload,
+    ChatGroupPayload,
     ConfigPayload,
     ExportTaskPayload,
     ForwardingRulePayload,
@@ -737,6 +738,46 @@ async def clear_telegram_session(
 @router.get("/rules")
 async def list_rules(context: ApplicationContext = Depends(get_context)) -> list[dict]:
     return _active_rules(context).list_rules()
+
+
+@router.get("/chat-groups")
+async def list_chat_groups(context: ApplicationContext = Depends(get_context)) -> list[dict]:
+    return _active_rules(context).list_chat_groups()
+
+
+@router.post("/chat-groups", status_code=201)
+async def create_chat_group(
+    payload: ChatGroupPayload,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _active_rules(context).create_chat_group(payload)
+    except ServiceError as exc:
+        raise _error(exc.code, str(exc), 422) from exc
+
+
+@router.put("/chat-groups/{index}")
+async def update_chat_group(
+    index: int,
+    payload: ChatGroupPayload,
+    context: ApplicationContext = Depends(get_context),
+) -> dict:
+    try:
+        return await _active_rules(context).update_chat_group(index, payload)
+    except ServiceError as exc:
+        raise _error(exc.code, str(exc), 404 if exc.code == "not_found" else 422) from exc
+
+
+@router.delete("/chat-groups/{index}", response_model=ApiMessage)
+async def delete_chat_group(
+    index: int,
+    context: ApplicationContext = Depends(get_context),
+) -> ApiMessage:
+    try:
+        await _active_rules(context).delete_chat_group(index)
+    except ServiceError as exc:
+        raise _error(exc.code, str(exc), 404 if exc.code == "not_found" else 422) from exc
+    return ApiMessage(code="chat_group_deleted")
 
 
 @router.post("/rules", status_code=201)

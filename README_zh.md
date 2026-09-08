@@ -17,6 +17,7 @@
 ## 功能
 
 - 多规则转发，分别配置来源、目标、过滤、忽略及转发选项
+- 会话组：将多个会话保存为组，并在规则中复用为来源或目标；成员变更实时生效
 - SQLite 持久化队列，支持重试、FloodWait 和重启恢复
 - User Session 与 Bot Token 两种模式
 - User 模式下多账号并行运行
@@ -87,7 +88,20 @@ pnpm dev
 
 `.env` — 凭据和运行参数：API 凭据、代理、地址、端口、日志级别、运行时语言、Web Basic Auth、管理 Bot 和 Mini App 设置。
 
-账号认证后会自动生成 `config/<telegram_user_id>.yaml`，并由控制台管理。它保存该账号的转发规则、按钮自动化、过滤和导出设置。
+账号认证后会自动生成 `config/<telegram_user_id>.yaml`，并由控制台管理。它保存该账号的会话组、转发规则、按钮自动化、过滤和导出设置。
+
+会话组和规则示例：
+
+```yaml
+chat_groups:
+  - name: 新闻来源
+    chats: [-100123456789, -100987654321]
+forwarding_rules:
+  - name: 新闻转发
+    enabled: true
+    source_groups: [新闻来源]
+    target_chats: [-100111111111]
+```
 
 控制台可导入导出 YAML 配置，`.env` 不包含在内。
 

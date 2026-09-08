@@ -213,6 +213,21 @@ class Config:
         """Target group/channel list"""
         return self.config_data.get("target_chats", [])
 
+    def get_chat_groups(self) -> List[Dict[str, Any]]:
+        """Return account-local forwarding chat groups."""
+        groups = self.config_data.get("chat_groups", []) or []
+        return [
+            {"name": str(item.get("name", "")), "chats": list(item.get("chats", []) or [])}
+            for item in groups
+            if isinstance(item, dict) and item.get("name")
+        ]
+
+    def chat_group_map(self) -> Dict[str, List[Any]]:
+        return {item["name"]: item["chats"] for item in self.get_chat_groups()}
+
+    def resolve_rule(self, rule: ForwardingRule) -> ForwardingRule:
+        return rule.resolved(self.chat_group_map())
+
     # Filter rules configuration
     @property
     def filter_regex_patterns(self) -> List[str]:
@@ -372,9 +387,10 @@ class Config:
             return False, t("message.validation.no_rules")
 
         for rule in rules:
-            if not rule.source_chats:
+            resolved = self.resolve_rule(rule)
+            if not resolved.source_chats:
                 return False, t("message.validation.no_source", rule=rule.name)
-            if not rule.target_chats:
+            if not resolved.target_chats:
                 return False, t("message.validation.no_target", rule=rule.name)
 
         return True, t("message.validation.passed")
@@ -480,6 +496,7 @@ class AccountConfigRegistry:
         for key in (
             "source_chats",
             "target_chats",
+            "chat_groups",
             "filters",
             "ignore",
             "forwarding",

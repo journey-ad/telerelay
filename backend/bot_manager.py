@@ -292,6 +292,9 @@ class BotManager:
         forwarding_chats = []
         seen_forwarding_chats = set()
         for rule in rules:
+            resolver = getattr(self.config, "resolve_rule", None)
+            if resolver:
+                rule = resolver(rule)
             message_filter, forwarder = self._create_forwarder(rule)
             forwarders.append(forwarder)
             rule_forwarder_map[rule.name] = (rule, message_filter, forwarder)

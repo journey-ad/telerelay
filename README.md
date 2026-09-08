@@ -17,6 +17,7 @@ An intelligent Telegram message relay tool with smart filtering based on regex p
 ## Features
 
 - Multi-rule forwarding with source, target, filter, ignore, and forwarding options
+- Chat groups: reuse multiple chats as rule sources or targets; member changes take effect immediately
 - Persistent SQLite queue with retry, FloodWait handling, and restart recovery
 - User session and Bot Token modes
 - Parallel multi-account runtimes in User mode
@@ -87,7 +88,20 @@ Use `pnpm dev:backend` and `pnpm dev:frontend` to run either side separately.
 
 `.env` — credentials and runtime settings: API credentials, proxy, host, port, log level, runtime language, Web Basic Auth, Admin Bot and Mini App settings.
 
-`config/<telegram_user_id>.yaml` is generated after account authentication and managed by the console. It stores forwarding rules, button automation, filters, and export settings for that account.
+`config/<telegram_user_id>.yaml` is generated after account authentication and managed by the console. It stores chat groups, forwarding rules, button automation, filters, and export settings for that account.
+
+Example:
+
+```yaml
+chat_groups:
+  - name: News sources
+    chats: [-100123456789, -100987654321]
+forwarding_rules:
+  - name: News relay
+    enabled: true
+    source_groups: [News sources]
+    target_chats: [-100111111111]
+```
 
 The console can import/export YAML config. `.env` secrets are never included.
 

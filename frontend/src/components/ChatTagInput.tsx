@@ -1,15 +1,18 @@
 import * as Popover from '@radix-ui/react-popover'
-import { Check, Plus, Search, TriangleAlert, X } from 'lucide-react'
+import { Check, FolderKanban, Plus, Search, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTelegramChats } from '../hooks/useTelegramChats'
-import type { ChatRef, TelegramChat } from '../types'
+import type { ChatGroup, ChatRef, TelegramChat } from '../types'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 
 interface ChatTagInputProps {
   value: ChatRef[]
   onChange: (value: ChatRef[]) => void
+  groups?: ChatGroup[]
+  selectedGroups?: string[]
+  onGroupsChange?: (value: string[]) => void
   className?: string
 }
 
@@ -25,7 +28,19 @@ function parseChatRef(value: string): ChatRef {
   return /^-?\d+$/.test(value) ? Number(value) : value
 }
 
-export function ChatTagInput({ value, onChange, className }: ChatTagInputProps) {
+function groupMatches(group: ChatGroup, term: string) {
+  const query = term.trim().toLowerCase()
+  return !query || group.name.toLowerCase().includes(query)
+}
+
+export function ChatTagInput({
+  value,
+  onChange,
+  groups = [],
+  selectedGroups = [],
+  onGroupsChange,
+  className,
+}: ChatTagInputProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -59,6 +74,15 @@ export function ChatTagInput({ value, onChange, className }: ChatTagInputProps) 
     onChange(value.filter((_, itemIndex) => itemIndex !== index))
   }
 
+  function toggleGroup(name: string) {
+    if (!onGroupsChange) return
+    onGroupsChange(
+      selectedGroups.includes(name)
+        ? selectedGroups.filter((item) => item !== name)
+        : [...selectedGroups, name],
+    )
+  }
+
   function addCustomChat() {
     if (customChat === null || customChatSelected) return
     onChange([...value, customChat])
@@ -76,6 +100,26 @@ export function ChatTagInput({ value, onChange, className }: ChatTagInputProps) 
           className,
         )}
       >
+        {selectedGroups.map((name) => (
+          <span
+            key={`group-${name}`}
+            className="inline-flex h-6.5 items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 text-xs text-amber-800"
+          >
+            <FolderKanban className="shrink-0" size={12} />
+            {name}
+            <button
+              type="button"
+              aria-label={t('chatInput.remove', { name })}
+              className="grid size-4 place-items-center rounded-sm text-amber-500 hover:bg-amber-100"
+              onClick={(event) => {
+                event.stopPropagation()
+                toggleGroup(name)
+              }}
+            >
+              <X size={12} strokeWidth={2.5} />
+            </button>
+          </span>
+        ))}
         {value.map((chatId, index) => {
           const chat = findChat(chats.data, chatId)
           const unknown = chats.isSuccess && !chat
@@ -175,6 +219,42 @@ export function ChatTagInput({ value, onChange, className }: ChatTagInputProps) 
             />
           </div>
           <div className="max-h-52 overflow-y-auto overscroll-contain p-1">
+            {groups.length > 0 ? (
+              <>
+                <p className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  {t('chatInput.groups')}
+                </p>
+                {groups
+                  .filter(
+                    (group) => groupMatches(group, search) && !selectedGroups.includes(group.name),
+                  )
+                  .map((group) => {
+                    const selected = selectedGroups.includes(group.name)
+                    return (
+                      <button
+                        key={`group-${group.name}`}
+                        type="button"
+                        aria-pressed={selected}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-amber-800 transition-colors hover:bg-amber-50"
+                        onClick={() => toggleGroup(group.name)}
+                      >
+                        <FolderKanban size={13} className="shrink-0" />
+                        <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                        <span className="shrink-0 text-[10px] text-amber-500">
+                          {t('chatInput.itemCount', { count: group.chats.length })}
+                        </span>
+                        <span className="grid size-4 shrink-0 place-items-center text-amber-600">
+                          {selected ? <Check size={13} strokeWidth={2.5} /> : null}
+                        </span>
+                      </button>
+                    )
+                  })}
+                <div className="my-1 border-t border-slate-100" />
+                <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  {t('chatInput.chats')}
+                </p>
+              </>
+            ) : null}
             {customChat !== null && !customChatSelected ? (
               <button
                 type="button"

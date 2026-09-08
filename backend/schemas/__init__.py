@@ -5,13 +5,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from backend.timezones import (
-    TIMEZONE_NAMES,
     TIMEZONE_NAME_SET,
+    TIMEZONE_NAMES,
     TIMEZONE_OPTIONS,
     system_timezone,
     timezone_label,
 )
-
 
 ChatRef = int | str
 
@@ -72,6 +71,8 @@ class ForwardingRulePayload(StrictModel):
     enabled: bool = True
     source_chats: list[ChatRef] = Field(default_factory=list)
     target_chats: list[ChatRef] = Field(default_factory=list)
+    source_groups: list[str] = Field(default_factory=list)
+    target_groups: list[str] = Field(default_factory=list)
     filters: FilterConfig = Field(default_factory=FilterConfig)
     ignore: IgnoreConfig = Field(default_factory=IgnoreConfig)
     forwarding: ForwardingOptions = Field(default_factory=ForwardingOptions)
@@ -84,6 +85,30 @@ class ForwardingRulePayload(StrictModel):
             raise ValueError("Rule name is required")
         return value
 
+
+class ChatGroupPayload(StrictModel):
+    name: str = Field(min_length=1, max_length=100)
+    chats: list[ChatRef] = Field(min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def clean_group_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Group name is required")
+        return value
+
+    @field_validator("chats")
+    @classmethod
+    def deduplicate_chats(cls, value: list[ChatRef]) -> list[ChatRef]:
+        result = []
+        seen = set()
+        for item in value:
+            key = str(item)
+            if key not in seen:
+                seen.add(key)
+                result.append(item)
+        return result
 
 class ButtonActionRulePayload(StrictModel):
     name: str = Field(min_length=1, max_length=100)
@@ -140,6 +165,8 @@ class ConfigForwardingRule(ConfigModel):
     target_chats: list[ChatRef] = Field(
         default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
     )
+    source_groups: list[str] = Field(default_factory=list)
+    target_groups: list[str] = Field(default_factory=list)
     filters: ConfigFilter = Field(default_factory=ConfigFilter)
     ignore: ConfigIgnore = Field(default_factory=ConfigIgnore)
     forwarding: ConfigForwarding = Field(default_factory=ConfigForwarding)
@@ -158,6 +185,11 @@ class ConfigButtonActionRule(ConfigModel):
     match_mode: Literal["exact", "contains", "regex"] = "exact"
     delay: float = Field(default=0, ge=0, le=30)
     click_all_matches: bool = False
+
+
+class ConfigChatGroup(ConfigModel):
+    name: str = Field(min_length=1, max_length=100)
+    chats: list[ChatRef] = Field(default_factory=list)
 
 
 class ConfigExport(ConfigModel):
@@ -198,6 +230,7 @@ class ConfigDocument(ConfigModel):
     filters: ConfigFilter = Field(default_factory=ConfigFilter)
     forwarding: ConfigForwarding = Field(default_factory=ConfigForwarding)
     forwarding_rules: list[ConfigForwardingRule] = Field(default_factory=list)
+    chat_groups: list[ConfigChatGroup] = Field(default_factory=list)
     button_action_rules: list[ConfigButtonActionRule] = Field(default_factory=list)
     ignore: ConfigIgnore = Field(default_factory=ConfigIgnore)
     language: Literal["zh_CN", "en_US"] = "zh_CN"

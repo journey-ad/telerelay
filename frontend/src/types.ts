@@ -214,6 +214,8 @@ export interface ForwardingRule {
   enabled: boolean
   source_chats: ChatRef[]
   target_chats: ChatRef[]
+  source_groups: string[]
+  target_groups: string[]
   filters: {
     mode: 'whitelist' | 'blacklist'
     keywords: string[]
@@ -233,6 +235,11 @@ export interface ForwardingRule {
     deduplicate: boolean
     deduplicate_window: number
   }
+}
+
+export interface ChatGroup {
+  name: string
+  chats: ChatRef[]
 }
 
 export interface ButtonRule {

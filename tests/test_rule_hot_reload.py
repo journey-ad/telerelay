@@ -7,7 +7,7 @@ from backend.bot_manager import BotManager
 from backend.button_actions import ButtonActionRule
 from backend.config import Config
 from backend.rule import ForwardingRule
-from backend.schemas import ForwardingRulePayload
+from backend.schemas import ChatGroupPayload, ForwardingRulePayload
 from backend.services import RuleService
 
 
@@ -57,6 +57,41 @@ class LiveConfig:
 
 
 class RuleHotReloadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_chat_group_expands_rules_and_reloads_live_runtime(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = Config(
+                env_file=str(root / "missing.env"),
+                config_file=str(root / "config.yaml"),
+            )
+            runtime = SimpleNamespace(is_running=True, reload_count=0)
+
+            async def reload_rules():
+                runtime.reload_count += 1
+                return True
+
+            runtime.reload_rules = reload_rules
+            service = RuleService(config, runtime)
+
+            await service.create_chat_group(ChatGroupPayload(name="News", chats=[-1001, -1002]))
+            await service.create_rule(
+                ForwardingRulePayload(
+                    name="live",
+                    enabled=True,
+                    source_groups=["news"],
+                    target_chats=[-2001],
+                )
+            )
+            self.assertEqual(config.get_enabled_rules()[0].source_chats, [])
+            self.assertEqual(
+                config.resolve_rule(config.get_enabled_rules()[0]).source_chats,
+                [-1001, -1002],
+            )
+
+            await service.update_chat_group(0, ChatGroupPayload(name="News", chats=[-1003]))
+            self.assertEqual(config.resolve_rule(config.get_enabled_rules()[0]).source_chats, [-1003])
+            self.assertEqual(runtime.reload_count, 3)
+
     async def test_runtime_replaces_handlers_and_preserves_queued_rule_snapshots(self):
         config = LiveConfig()
         manager = BotManager(config)

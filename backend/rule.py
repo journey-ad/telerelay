@@ -2,7 +2,7 @@
 Forwarding rule data class
 Defines data structure for multi-rule groups
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List
 
 from backend.i18n import t
@@ -17,6 +17,8 @@ class ForwardingRule:
     # Source and target
     source_chats: List[Any] = field(default_factory=list)
     target_chats: List[Any] = field(default_factory=list)
+    source_groups: List[str] = field(default_factory=list)
+    target_groups: List[str] = field(default_factory=list)
 
     # Filter configuration
     filter_mode: str = "whitelist"
@@ -52,6 +54,8 @@ class ForwardingRule:
             enabled=data.get("enabled", True),
             source_chats=data.get("source_chats", []),
             target_chats=data.get("target_chats", []),
+            source_groups=data.get("source_groups", []),
+            target_groups=data.get("target_groups", []),
             filter_mode=filters.get("mode", "whitelist"),
             filter_keywords=filters.get("keywords", []),
             filter_regex_patterns=filters.get("regex_patterns", []),
@@ -79,6 +83,8 @@ class ForwardingRule:
             "enabled": self.enabled,
             "source_chats": self.source_chats,
             "target_chats": self.target_chats,
+            "source_groups": self.source_groups,
+            "target_groups": self.target_groups,
             "filters": {
                 "mode": self.filter_mode,
                 "keywords": self.filter_keywords,
@@ -102,6 +108,26 @@ class ForwardingRule:
                 "deduplicate_window": self.deduplicate_window,
             },
         }
+
+    def resolved(self, groups: dict[str, list[Any]]) -> "ForwardingRule":
+        """Return a runtime copy with current group members expanded."""
+        names = {str(name).casefold(): members for name, members in groups.items()}
+
+        def expand(chats: list[Any], group_names: list[str]) -> list[Any]:
+            result = []
+            seen = set()
+            for value in [*chats, *(member for name in group_names for member in names.get(str(name).casefold(), []))]:
+                key = str(value)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(value)
+            return result
+
+        return replace(
+            self,
+            source_chats=expand(self.source_chats, self.source_groups),
+            target_chats=expand(self.target_chats, self.target_groups),
+        )
 
 
 def load_rules_from_config(config_data: Dict[str, Any]) -> List[ForwardingRule]:

@@ -1308,6 +1308,36 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(self.client.get("/api/v1/rules").json(), [])
 
+    def test_chat_group_crud_and_rule_reference(self):
+        created = self.client.post(
+            "/api/v1/chat-groups",
+            json={"name": "News", "chats": [-1001, -1001, -1002]},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["chats"], [-1001, -1002])
+
+        rule = self.client.post(
+            "/api/v1/rules",
+            json={
+                "name": "group relay",
+                "enabled": True,
+                "source_groups": ["news"],
+                "target_chats": [-2001],
+            },
+        )
+        self.assertEqual(rule.status_code, 201, rule.text)
+
+        blocked = self.client.delete("/api/v1/chat-groups/0")
+        self.assertEqual(blocked.status_code, 422)
+        self.assertEqual(blocked.json()["detail"]["code"], "group_in_use")
+
+        updated = self.client.put(
+            "/api/v1/chat-groups/0",
+            json={"name": "News", "chats": [-1003]},
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(self.client.get("/api/v1/chat-groups").json()[0]["chats"], [-1003])
+
     def test_invalid_button_regex_is_structured_error(self):
         payload = {
             "name": "confirm",
