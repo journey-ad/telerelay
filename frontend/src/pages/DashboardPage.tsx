@@ -1450,6 +1450,7 @@ export function DashboardPage() {
         </Panel>
 
         <Panel
+          className="flex h-full flex-col"
           title={t('dashboard.liveEvents')}
           meta={
             <span className={connected ? 'text-emerald-600' : ''}>
@@ -1457,42 +1458,47 @@ export function DashboardPage() {
             </span>
           }
         >
-          <div className="flex max-h-72 flex-col gap-3 overflow-y-auto overscroll-contain pr-1">
-            {recent.map((event) => (
-              <div
-                className={cn(
-                  'grid grid-cols-[7px_1fr_auto] items-start gap-2 border-b',
-                  'border-slate-100 pb-2.5 last:border-0',
-                )}
-                key={event.id}
-              >
-                <span
-                  className={cn('mt-1 size-2 rounded-full border-2', eventMarkerClass(event.type))}
-                />
-                <div className="min-w-0">
-                  <strong className="text-[13px] text-slate-600 uppercase">
-                    {eventTypeLabel(event.type, t)}
-                  </strong>
-                  <p className="mt-0.5 truncate text-[13px] text-slate-500">
-                    {eventDetail(event, t, accountsQuery.data)}
-                  </p>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+            <div className="flex flex-col gap-3">
+              {recent.map((event) => (
+                <div
+                  className={cn(
+                    'grid grid-cols-[7px_1fr_auto] items-start gap-2 border-b',
+                    'border-slate-100 pb-2.5 last:border-0',
+                  )}
+                  key={event.id}
+                >
+                  <span
+                    className={cn(
+                      'mt-1 size-2 rounded-full border-2',
+                      eventMarkerClass(event.type),
+                    )}
+                  />
+                  <div className="min-w-0">
+                    <strong className="text-[13px] text-slate-600 uppercase">
+                      {eventTypeLabel(event.type, t)}
+                    </strong>
+                    <p className="mt-0.5 truncate text-[13px] text-slate-500">
+                      {eventDetail(event, t, accountsQuery.data)}
+                    </p>
+                  </div>
+                  <time className="text-xs text-slate-400">
+                    {new Date(event.at).toLocaleTimeString(locale, {
+                      hour12: false,
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </time>
                 </div>
-                <time className="text-xs text-slate-400">
-                  {new Date(event.at).toLocaleTimeString(locale, {
-                    hour12: false,
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </time>
-              </div>
-            ))}
-            {!recent.length ? (
-              <EmptyState
-                icon={Activity}
-                title={t('dashboard.waitingLiveEvents')}
-                detail={t('dashboard.waitingLiveEventsDetail')}
-              />
-            ) : null}
+              ))}
+              {!recent.length ? (
+                <EmptyState
+                  icon={Activity}
+                  title={t('dashboard.waitingLiveEvents')}
+                  detail={t('dashboard.waitingLiveEventsDetail')}
+                />
+              ) : null}
+            </div>
           </div>
         </Panel>
       </div>
