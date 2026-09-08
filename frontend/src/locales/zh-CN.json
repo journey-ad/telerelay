@@ -299,7 +299,7 @@
     "trendRule": "趋势规则",
     "allRules": "全部规则",
     "noTrend": "暂无趋势数据",
-    "noTrendDetail": "消息开始流转后，这里会显示每小时吞吐变化",
+    "noTrendDetail": "产生数据后，这里会显示按时间变化的趋势",
     "currentPeriodCount": "当前周期 {{value}} 条",
     "periodSummary": "周期摘要",
     "allTime": "全部时长",

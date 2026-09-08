@@ -299,7 +299,7 @@
     "trendRule": "Trend rule",
     "allRules": "All rules",
     "noTrend": "No trend data",
-    "noTrendDetail": "Hourly throughput will appear once messages begin flowing.",
+    "noTrendDetail": "Trend data will appear once activity is recorded.",
     "currentPeriodCount": "{{value}} in current period",
     "periodSummary": "Period summary",
     "allTime": "All time",
