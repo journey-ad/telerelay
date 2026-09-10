@@ -295,6 +295,8 @@
     "forwarded": "已转发",
     "filtered": "已过滤",
     "failed": "转发失败",
+    "trendRunning": "至今",
+    "trendProjected": "预计完整周期 {{value}}",
     "periodForwarded": "周期转发",
     "periodFiltered": "周期过滤",
     "periodFailed": "周期失败",

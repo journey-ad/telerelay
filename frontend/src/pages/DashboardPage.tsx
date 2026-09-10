@@ -31,6 +31,7 @@ import {
   AreaChart,
   CartesianGrid,
   Cell,
+  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -69,6 +70,10 @@ type TrendStat = {
   filtered: number
   failed: number
   total: number
+  /** Set on the still-running bucket once a full-period estimate exists. */
+  projected?: { forwarded: number; filtered: number; failed: number; total: number }
+  /** Cumulative stack tops of the dashed estimate segment (anchor + projected). */
+  edge?: { forwarded: number; filtered: number; total: number }
 }
 type TrendIntensityStat = TrendStat & { endDate?: string }
 type HourlyStat = NonNullable<Stats['hourly']>[number]
@@ -89,6 +94,7 @@ const metricTones = {
   rose: 'bg-rose-50 text-rose-600',
 }
 const chartTooltipStyle = {
+  backgroundColor: '#ffffff',
   border: '1px solid #dbe6f4',
   borderRadius: 6,
   boxShadow: '0 12px 32px rgba(22, 63, 116, .12)',
@@ -347,6 +353,126 @@ function allTimeDays(source: NonNullable<Stats['daily']>): number {
   return Math.max(1, Math.round((today.getTime() - first.getTime()) / 86_400_000) + 1)
 }
 
+/**
+ * Share of yesterday's traffic that had already happened by this time of day.
+ * Null when yesterday carries no traffic to scale against.
+ */
+function elapsedShareOfYesterday(hourly: HourlyStat[], now: Date): number | null {
+  const yesterday = localDateKey(new Date(now.getTime() - 86_400_000))
+  const rows = hourly.filter((item) => item.hour.startsWith(yesterday))
+  const full = rows.reduce((sum, item) => sum + item.forwarded + item.filtered + item.failed, 0)
+  if (full <= 0) return null
+
+  const currentHour = now.getHours()
+  const minutesIntoHour = now.getMinutes() / 60
+  const elapsed = rows.reduce((sum, item) => {
+    const hour = Number(item.hour.slice(11, 13))
+    if (hour > currentHour) return sum
+    const total = item.forwarded + item.filtered + item.failed
+    return sum + (hour === currentHour ? total * minutesIntoHour : total)
+  }, 0)
+  return elapsed / full
+}
+
+/**
+ * Full-period estimate for the still-running bucket, or null when it is too
+ * early to tell: the daily view scales by yesterday's same time of day, the
+ * hourly view by the minutes elapsed in the current hour.
+ */
+function estimateRunningTotal(
+  runningTotal: number,
+  hourly: HourlyStat[],
+  now: Date,
+  isHourly: boolean,
+): number | null {
+  if (runningTotal <= 0) return null
+
+  if (isHourly) {
+    const minutes = now.getMinutes()
+    return minutes >= 10 ? Math.round((runningTotal * 60) / minutes) : null
+  }
+
+  const share = elapsedShareOfYesterday(hourly, now)
+  // Below a fifth of yesterday's day the ratio is too noisy to project.
+  return share !== null && share >= 0.2 ? Math.round(runningTotal / share) : null
+}
+
+/** Scale the running bucket to `estimated` and add the dashed overlay anchors. */
+function withProjection(series: TrendStat[], estimated: number | null): TrendStat[] {
+  const last = series.at(-1)
+  if (estimated === null || !last || last.total <= 0) return series
+
+  const factor = estimated / last.total
+  const forwarded = Math.round(last.forwarded * factor)
+  const filtered = Math.round(last.filtered * factor)
+  const failed = Math.round(last.failed * factor)
+  const total = forwarded + filtered + failed
+
+  const rows = [...series]
+  const anchor = rows.at(-2)
+  if (anchor) {
+    rows[rows.length - 2] = {
+      ...anchor,
+      edge: {
+        forwarded: anchor.forwarded,
+        filtered: anchor.forwarded + anchor.filtered,
+        total: anchor.total,
+      },
+    }
+  }
+  rows[rows.length - 1] = {
+    ...last,
+    projected: { forwarded, filtered, failed, total },
+    edge: { forwarded, filtered: forwarded + filtered, total },
+  }
+  return rows
+}
+
+function TrendTooltip({
+  active,
+  payload,
+  label,
+  locale,
+}: {
+  active?: boolean
+  payload?: Array<{ payload?: TrendStat }>
+  label?: string | number
+  locale: string
+}) {
+  const { t } = useTranslation()
+  const row = payload?.[0]?.payload
+  if (!active || !row) return null
+
+  const series = [
+    { label: t('dashboard.forwarded'), value: row.forwarded, color: '#2563eb' },
+    { label: t('dashboard.filtered'), value: row.filtered, color: '#f59e0b' },
+    { label: t('dashboard.failed'), value: row.failed, color: '#e11d48' },
+  ]
+
+  return (
+    <div style={chartTooltipStyle} className="px-2 py-1.5">
+      <p className="mb-1 text-slate-500">
+        {formatReportDate(String(label ?? row.date), locale)}
+        {row.projected ? ` · ${t('dashboard.trendRunning')}` : ''}
+      </p>
+      {series.map((item) => (
+        <p key={item.label} className="flex items-center gap-1.5 text-slate-600">
+          <i className="size-1.5 shrink-0 rounded-full" style={{ background: item.color }} />
+          {item.label}
+          <strong className="ml-auto pl-3 font-mono text-slate-700">
+            {formatNumber(item.value)}
+          </strong>
+        </p>
+      ))}
+      {row.projected ? (
+        <p className="mt-1 border-t border-slate-100 pt-1 text-slate-500">
+          {t('dashboard.trendProjected', { value: formatNumber(row.projected.total) })}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 function allTimeHours(source: HourlyStat[]): number {
   if (!source.length) return 1
   const first = new Date(`${source[0].hour.replace(' ', 'T')}:00`)
@@ -466,6 +592,18 @@ export function DashboardPage() {
     },
     refetchInterval: 15_000,
   })
+  // Daily reports scale the running bucket by yesterday's same time of day, which
+  // needs the hourly series; the 1-day view already fetches it as its own report.
+  const hourlyStatsQuery = useQuery({
+    queryKey: ['stats', accountId, '1day', trendRule],
+    queryFn: () => {
+      const params = new URLSearchParams({ date_limit: '1day', granularity: 'hour' })
+      if (trendRule !== 'all') params.set('rule_name', trendRule)
+      return accountRequest<Stats>(accountId, `/api/v1/stats?${params}`)
+    },
+    enabled: reportPeriod !== '1day',
+    refetchInterval: 15_000,
+  })
   const eventHistoryQuery = useQuery({
     queryKey: ['dashboard-events', accountId, initialEventLimit],
     queryFn: () => accountRequest<RelayEvent[]>(accountId, recentEventsPath),
@@ -566,7 +704,9 @@ export function DashboardPage() {
   const queuePages = Math.max(1, Math.ceil(queueTotal / queuePreviewLimit))
   const report = useMemo(() => {
     const isHourly = reportPeriod === '1day'
-    const hourlySource = statsQuery.data?.hourly ?? []
+    const hourlySource = isHourly
+      ? (statsQuery.data?.hourly ?? [])
+      : (hourlyStatsQuery.data?.hourly ?? [])
     const dailySource = statsQuery.data?.daily ?? []
     const durationUnits = isHourly
       ? reportDays
@@ -582,6 +722,10 @@ export function DashboardPage() {
     const previousSeries = allTime ? [] : series.slice(0, durationUnits)
     const current = aggregateTrend(currentSeries)
     const previous = aggregateTrend(previousSeries)
+    const projectedSeries = withProjection(
+      currentSeries,
+      estimateRunningTotal(currentSeries.at(-1)?.total ?? 0, hourlySource, new Date(), isHourly),
+    )
     const peak = currentSeries.reduce<TrendStat | null>(
       (best, item) => (item.total > 0 && (!best || item.total > best.total) ? item : best),
       null,
@@ -595,7 +739,9 @@ export function DashboardPage() {
     return {
       current,
       previous,
-      currentHourly: currentSeries,
+      // The chart plots the estimate for the running bucket; cards and the
+      // intensity strip keep using the measured series.
+      currentHourly: projectedSeries,
       intensityHourly: intensitySeries,
       peak,
       activeHours: activePeriods,
@@ -609,7 +755,14 @@ export function DashboardPage() {
       forwardRate: current.total ? (current.forwarded / current.total) * 100 : 0,
       dailyAverage: current.total / Math.max(isHourly ? durationUnits / 24 : durationUnits, 1 / 24),
     }
-  }, [allTime, reportDays, reportPeriod, statsQuery.data?.daily, statsQuery.data?.hourly])
+  }, [
+    allTime,
+    reportDays,
+    reportPeriod,
+    hourlyStatsQuery.data?.hourly,
+    statsQuery.data?.daily,
+    statsQuery.data?.hourly,
+  ])
   const rankedRules = useMemo(
     () => [...(statsQuery.data?.rules ?? [])].sort((left, right) => right.total - left.total),
     [statsQuery.data?.rules],
@@ -1076,13 +1229,10 @@ export function DashboardPage() {
                     tick={{ fill: '#7b8ca5', fontSize: 10 }}
                     allowDecimals={false}
                   />
-                  <Tooltip
-                    contentStyle={chartTooltipStyle}
-                    labelFormatter={(value) => formatReportDate(String(value), locale)}
-                  />
+                  <Tooltip content={<TrendTooltip locale={locale} />} />
                   <Area
                     type="monotone"
-                    dataKey="forwarded"
+                    dataKey={(row: TrendStat) => (row.projected ? null : row.forwarded)}
                     name={t('dashboard.forwarded')}
                     stackId="flow"
                     stroke="#2563eb"
@@ -1091,7 +1241,7 @@ export function DashboardPage() {
                   />
                   <Area
                     type="monotone"
-                    dataKey="filtered"
+                    dataKey={(row: TrendStat) => (row.projected ? null : row.filtered)}
                     name={t('dashboard.filtered')}
                     stackId="flow"
                     stroke="#f59e0b"
@@ -1100,12 +1250,43 @@ export function DashboardPage() {
                   />
                   <Area
                     type="monotone"
-                    dataKey="failed"
+                    dataKey={(row: TrendStat) => (row.projected ? null : row.failed)}
                     name={t('dashboard.failed')}
                     stroke="#e11d48"
                     strokeWidth={1.5}
                     fill="#e11d48"
                     fillOpacity={0.12}
+                  />
+                  {/* Dashed continuation of the stack edges into the estimated bucket. */}
+                  <Line
+                    type="monotone"
+                    dataKey="edge.forwarded"
+                    stroke="#2563eb"
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="edge.filtered"
+                    stroke="#f59e0b"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="edge.total"
+                    stroke="#e11d48"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
                   />
                 </AreaChart>
               </ResponsiveContainer>

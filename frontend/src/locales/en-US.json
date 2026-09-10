@@ -295,6 +295,8 @@
     "forwarded": "Forwarded",
     "filtered": "Filtered",
     "failed": "Failed",
+    "trendRunning": "so far",
+    "trendProjected": "Projected full period {{value}}",
     "periodForwarded": "Period forwarded",
     "periodFiltered": "Period filtered",
     "periodFailed": "Period failed",
