@@ -70,9 +70,11 @@ type TrendStat = {
   filtered: number
   failed: number
   total: number
-  /** Set on the still-running bucket once a full-period estimate exists. */
-  projected?: { forwarded: number; filtered: number; failed: number; total: number }
-  /** Cumulative stack tops of the dashed estimate segment (anchor + projected). */
+  /** Set on the still-running bucket, drawn hollow and closed by a dashed edge. */
+  running?: boolean
+  /** Whether that dashed edge ends on a full-period estimate rather than on the measured value. */
+  estimated?: boolean
+  /** Cumulative stack tops of the dashed closing segment (last complete bucket + running one). */
   edge?: { forwarded: number; filtered: number; total: number }
 }
 type TrendIntensityStat = TrendStat & { endDate?: string }
@@ -100,6 +102,8 @@ const chartTooltipStyle = {
   boxShadow: '0 12px 32px rgba(22, 63, 116, .12)',
   fontSize: 11,
 }
+// Entrance animation of the trend chart: the stack sweeps in, then the dashed
+// closing segment draws so the line stays connected the whole way.
 const liveEventLimit = 50
 const initialEventLimit = 10
 const queuePreviewLimit = 20
@@ -397,33 +401,35 @@ function estimateRunningTotal(
   return share !== null && share >= 0.2 ? Math.round(runningTotal / share) : null
 }
 
-/** Scale the running bucket to `estimated` and add the dashed overlay anchors. */
-function withProjection(series: TrendStat[], estimated: number | null): TrendStat[] {
+/**
+ * Close the chart with the still-running bucket: the solid stack stops at the
+ * last complete bucket and a dashed edge carries the final segment, ending on
+ * the full-period estimate when one is available and on the measured value
+ * otherwise.
+ */
+function withRunningBucket(series: TrendStat[], estimated: number | null): TrendStat[] {
   const last = series.at(-1)
-  if (estimated === null || !last || last.total <= 0) return series
+  const anchor = series.at(-2)
+  if (!last || !anchor) return series
 
-  const factor = estimated / last.total
+  const factor = estimated !== null && last.total > 0 ? estimated / last.total : 1
   const forwarded = Math.round(last.forwarded * factor)
   const filtered = Math.round(last.filtered * factor)
   const failed = Math.round(last.failed * factor)
-  const total = forwarded + filtered + failed
-
   const rows = [...series]
-  const anchor = rows.at(-2)
-  if (anchor) {
-    rows[rows.length - 2] = {
-      ...anchor,
-      edge: {
-        forwarded: anchor.forwarded,
-        filtered: anchor.forwarded + anchor.filtered,
-        total: anchor.total,
-      },
-    }
+  rows[rows.length - 2] = {
+    ...anchor,
+    edge: {
+      forwarded: anchor.forwarded,
+      filtered: anchor.forwarded + anchor.filtered,
+      total: anchor.total,
+    },
   }
   rows[rows.length - 1] = {
     ...last,
-    projected: { forwarded, filtered, failed, total },
-    edge: { forwarded, filtered: forwarded + filtered, total },
+    running: true,
+    estimated: estimated !== null,
+    edge: { forwarded, filtered: forwarded + filtered, total: forwarded + filtered + failed },
   }
   return rows
 }
@@ -453,7 +459,7 @@ function TrendTooltip({
     <div style={chartTooltipStyle} className="px-2 py-1.5">
       <p className="mb-1 text-slate-500">
         {formatReportDate(String(label ?? row.date), locale)}
-        {row.projected ? ` · ${t('dashboard.trendRunning')}` : ''}
+        {row.running ? ` · ${t('dashboard.trendRunning')}` : ''}
       </p>
       {series.map((item) => (
         <p key={item.label} className="flex items-center gap-1.5 text-slate-600">
@@ -464,9 +470,9 @@ function TrendTooltip({
           </strong>
         </p>
       ))}
-      {row.projected ? (
+      {row.estimated && row.edge ? (
         <p className="mt-1 border-t border-slate-100 pt-1 text-slate-500">
-          {t('dashboard.trendProjected', { value: formatNumber(row.projected.total) })}
+          {t('dashboard.trendProjected', { value: formatNumber(row.edge.total) })}
         </p>
       ) : null}
     </div>
@@ -722,7 +728,7 @@ export function DashboardPage() {
     const previousSeries = allTime ? [] : series.slice(0, durationUnits)
     const current = aggregateTrend(currentSeries)
     const previous = aggregateTrend(previousSeries)
-    const projectedSeries = withProjection(
+    const chartSeries = withRunningBucket(
       currentSeries,
       estimateRunningTotal(currentSeries.at(-1)?.total ?? 0, hourlySource, new Date(), isHourly),
     )
@@ -739,9 +745,9 @@ export function DashboardPage() {
     return {
       current,
       previous,
-      // The chart plots the estimate for the running bucket; cards and the
-      // intensity strip keep using the measured series.
-      currentHourly: projectedSeries,
+      // The chart closes with the running bucket (on an estimate when one is
+      // available); cards and the intensity strip keep the measured series.
+      currentHourly: chartSeries,
       intensityHourly: intensitySeries,
       peak,
       activeHours: activePeriods,
@@ -1197,7 +1203,7 @@ export function DashboardPage() {
           }
         >
           {report.current.total ? (
-            <div className="h-68">
+            <div className="trend-reveal h-68" key={`${reportPeriod}:${trendRule}`}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
                   data={report.currentHourly}
@@ -1232,7 +1238,8 @@ export function DashboardPage() {
                   <Tooltip content={<TrendTooltip locale={locale} />} />
                   <Area
                     type="monotone"
-                    dataKey={(row: TrendStat) => (row.projected ? null : row.forwarded)}
+                    dataKey={(row: TrendStat) => (row.running ? null : row.forwarded)}
+                    isAnimationActive={false}
                     name={t('dashboard.forwarded')}
                     stackId="flow"
                     stroke="#2563eb"
@@ -1241,7 +1248,8 @@ export function DashboardPage() {
                   />
                   <Area
                     type="monotone"
-                    dataKey={(row: TrendStat) => (row.projected ? null : row.filtered)}
+                    dataKey={(row: TrendStat) => (row.running ? null : row.filtered)}
+                    isAnimationActive={false}
                     name={t('dashboard.filtered')}
                     stackId="flow"
                     stroke="#f59e0b"
@@ -1250,14 +1258,15 @@ export function DashboardPage() {
                   />
                   <Area
                     type="monotone"
-                    dataKey={(row: TrendStat) => (row.projected ? null : row.failed)}
+                    dataKey={(row: TrendStat) => (row.running ? null : row.failed)}
+                    isAnimationActive={false}
                     name={t('dashboard.failed')}
                     stroke="#e11d48"
                     strokeWidth={1.5}
                     fill="#e11d48"
                     fillOpacity={0.12}
                   />
-                  {/* Dashed continuation of the stack edges into the estimated bucket. */}
+                  {/* Dashed closing segment for the still-running bucket. */}
                   <Line
                     type="monotone"
                     dataKey="edge.forwarded"

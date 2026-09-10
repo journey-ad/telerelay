@@ -7,6 +7,19 @@
   --font-emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
 }
 
+/* One sweep across the throughput chart's series. Recharts animates each series
+   separately and cannot keep the solid stack and its dashed closing segment in
+   step; clipping them together against the chart viewport can. Axes, ticks and
+   grid stay outside the clip, so no label is ever half drawn. */
+@keyframes trend-reveal {
+  from {
+    clip-path: inset(0 100% 0 0) view-box;
+  }
+  to {
+    clip-path: inset(0 0 0 0) view-box;
+  }
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -45,5 +58,10 @@
   .linkified:hover {
     color: #1d4ed8;
     text-decoration: underline;
+  }
+
+  .trend-reveal .recharts-area,
+  .trend-reveal .recharts-line {
+    animation: trend-reveal 1000ms linear both;
   }
 }
