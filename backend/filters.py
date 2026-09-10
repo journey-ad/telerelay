@@ -18,6 +18,13 @@ logger = get_logger()
 # Supported media types
 MEDIA_TYPES = ["text", "photo", "video", "document", "audio", "voice", "sticker", "animation", "webpage"]
 
+# Filter modes
+FILTER_MODES = ["whitelist", "blacklist", "media-only"]
+
+# Types that carry no attached media file. The media-only mode forwards every
+# other type, so plain text and link previews are excluded.
+NON_MEDIA_TYPES = ("text", "webpage")
+
 
 def get_media_type(message: Message) -> str:
     """Get the media type of a message"""
@@ -74,6 +81,18 @@ def get_file_size(message: Message) -> int:
     return 0
 
 
+def is_media_message(message: Message) -> bool:
+    """Whether a message carries an attached media file.
+
+    Plain text and link previews are not media, so ``text`` and ``webpage``
+    messages are excluded.
+    """
+    if message is None or not getattr(message, "media", None):
+        return False
+
+    return get_media_type(message) not in NON_MEDIA_TYPES
+
+
 class MessageFilter:
     """Message filter"""
     
@@ -96,7 +115,7 @@ class MessageFilter:
         Args:
             regex_patterns: List of regex patterns
             keywords: List of keywords
-            mode: Filter mode (whitelist or blacklist)
+            mode: Filter mode (whitelist, blacklist or media-only)
             ignored_user_ids: List of ignored user IDs
             ignored_keywords: List of ignored keywords
             media_types: List of allowed media types (empty list = allow all)
@@ -231,7 +250,15 @@ class MessageFilter:
         if msg_obj and not self.check_file_size(msg_obj):
             return False
 
-        # 4. Text
+        # 4. Media-only: only messages with attached media are forwarded and
+        #    keywords/regex do not participate in the decision.
+        if self.mode == "media-only":
+            allowed = is_media_message(msg_obj)
+            if not allowed:
+                logger.debug(f"{self._log_prefix}{t('log.filter.media_only_filtered')}")
+            return allowed
+
+        # 5. Text
         if not self.compiled_patterns and not self.keywords:
             return self.mode == "blacklist"
 

@@ -243,7 +243,7 @@ class Config:
     
     @property
     def filter_mode(self) -> str:
-        """Filter mode: whitelist or blacklist"""
+        """Filter mode: whitelist, blacklist or media-only"""
         filters = self.config_data.get("filters", {})
         return filters.get("mode", "whitelist")
     

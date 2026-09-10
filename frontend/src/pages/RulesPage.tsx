@@ -27,6 +27,16 @@ import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 import { lines } from '../utils/parse'
 
+const filterModeLabels = {
+  whitelist: 'rules.allowlist',
+  blacklist: 'rules.blocklist',
+  'media-only': 'rules.mediaOnly',
+} as const
+
+function filterModeLabel(mode: ForwardingRule['filters']['mode']) {
+  return filterModeLabels[mode] ?? 'rules.allowlist'
+}
+
 const blankRule = (): ForwardingRule => ({
   name: '',
   enabled: true,
@@ -219,6 +229,12 @@ export function RulesPage() {
   })
   function submit(event: FormEvent) {
     event.preventDefault()
+    if (form.filters.mode === 'media-only') {
+      // Keywords and regex do not participate in media-only mode; stored
+      // patterns are carried over untouched.
+      save.mutate({ rule: structuredClone(form), regexPatterns: lines(regex), index: editing })
+      return
+    }
     regexValidation.validate(regex).then((valid) => {
       if (valid) {
         save.mutate({ rule: structuredClone(form), regexPatterns: lines(regex), index: editing })
@@ -368,9 +384,7 @@ export function RulesPage() {
                     </small>
                   </td>
                   <td>
-                    <Badge>
-                      {t(rule.filters.mode === 'whitelist' ? 'rules.allowlist' : 'rules.blocklist')}
-                    </Badge>
+                    <Badge>{t(filterModeLabel(rule.filters.mode))}</Badge>
                     <small className="mt-1 block text-xs text-slate-400">
                       {t('common.conditionCount', {
                         count: rule.filters.keywords.length + rule.filters.regex_patterns.length,
@@ -466,12 +480,16 @@ export function RulesPage() {
                 onValueChange={(value) =>
                   setForm({
                     ...form,
-                    filters: { ...form.filters, mode: value as 'whitelist' | 'blacklist' },
+                    filters: {
+                      ...form.filters,
+                      mode: value as ForwardingRule['filters']['mode'],
+                    },
                   })
                 }
                 options={[
                   { value: 'whitelist', label: t('rules.allowlistDescription') },
                   { value: 'blacklist', label: t('rules.blocklistDescription') },
+                  { value: 'media-only', label: t('rules.mediaOnlyDescription') },
                 ]}
               />
             </label>
@@ -485,26 +503,30 @@ export function RulesPage() {
                 onChange={(event) => setForwarding('delay', Number(event.target.value))}
               />
             </label>
-            <div className={fieldClass}>
-              <span>{t('rules.keywords')}</span>
-              <MultiValueInput
-                value={form.filters.keywords}
-                onChange={(keywords) =>
-                  setForm((current) => ({
-                    ...current,
-                    filters: { ...current.filters, keywords },
-                  }))
-                }
-                ariaLabel={t('rules.removeKeyword')}
-                placeholder={t('rules.keywordPlaceholder')}
-              />
-            </div>
-            <RegexField
-              label={t('rules.regex')}
-              value={regex}
-              onChange={setRegex}
-              validation={regexValidation}
-            />
+            {form.filters.mode === 'media-only' ? null : (
+              <>
+                <div className={fieldClass}>
+                  <span>{t('rules.keywords')}</span>
+                  <MultiValueInput
+                    value={form.filters.keywords}
+                    onChange={(keywords) =>
+                      setForm((current) => ({
+                        ...current,
+                        filters: { ...current.filters, keywords },
+                      }))
+                    }
+                    ariaLabel={t('rules.removeKeyword')}
+                    placeholder={t('rules.keywordPlaceholder')}
+                  />
+                </div>
+                <RegexField
+                  label={t('rules.regex')}
+                  value={regex}
+                  onChange={setRegex}
+                  validation={regexValidation}
+                />
+              </>
+            )}
             <div className={fieldClass}>
               <span>{t('rules.ignoredUsers')}</span>
               <MultiValueInput

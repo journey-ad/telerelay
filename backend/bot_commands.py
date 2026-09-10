@@ -25,6 +25,7 @@ from telethon.tl.types import (
 from telethon.tl.functions.bots import SetBotMenuButtonRequest
 from telethon.errors import FloodWaitError
 from backend.config import Config
+from backend.filters import FILTER_MODES, MEDIA_TYPES
 from backend.logger import get_logger
 from backend.rule import ForwardingRule, save_rules_to_config
 from backend.i18n import t
@@ -632,7 +633,7 @@ class AdminBotManager:
             elif field == "regex":
                 rule.filter_regex_patterns = [] if self._is_clear(value) else self._parse_list(value)
             elif field == "mode":
-                if value not in ("whitelist", "blacklist"):
+                if value not in FILTER_MODES:
                     await event.reply(t("bot_cmd.invalid_mode"))
                     return
                 rule.filter_mode = value
@@ -654,7 +655,6 @@ class AdminBotManager:
                 if self._is_clear(value):
                     rule.filter_media_types = []
                 else:
-                    from backend.filters import MEDIA_TYPES
                     types = self._parse_list(value)
                     invalid = [t_ for t_ in types if t_ not in MEDIA_TYPES]
                     if invalid:

@@ -217,7 +217,7 @@ export interface ForwardingRule {
   source_groups: string[]
   target_groups: string[]
   filters: {
-    mode: 'whitelist' | 'blacklist'
+    mode: 'whitelist' | 'blacklist' | 'media-only'
     keywords: string[]
     regex_patterns: string[]
     media_types: string[]

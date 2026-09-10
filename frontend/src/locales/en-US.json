@@ -181,6 +181,8 @@
     "filterMode": "Filter mode",
     "allowlistDescription": "Allowlist: forward on match",
     "blocklistDescription": "Blocklist: filter on match",
+    "mediaOnly": "Media only",
+    "mediaOnlyDescription": "Media only: forward messages that carry media",
     "delay": "Forwarding delay (seconds)",
     "keywords": "Keywords",
     "keywordPlaceholder": "Add a keyword",
@@ -589,6 +591,7 @@
     "configOptions": {
       "whitelist": "Allow list",
       "blacklist": "Block list",
+      "media-only": "Media only",
       "exact": "Exact match",
       "contains": "Contains text",
       "regex": "Regular expression",

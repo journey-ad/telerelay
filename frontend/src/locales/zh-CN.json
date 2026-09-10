@@ -181,6 +181,8 @@
     "filterMode": "过滤方式",
     "allowlistDescription": "白名单：匹配后转发",
     "blocklistDescription": "黑名单：匹配后过滤",
+    "mediaOnly": "仅媒体",
+    "mediaOnlyDescription": "仅媒体：只转发含媒体的消息",
     "delay": "转发延迟（秒）",
     "keywords": "关键词",
     "keywordPlaceholder": "添加关键词",
@@ -589,6 +591,7 @@
     "configOptions": {
       "whitelist": "白名单",
       "blacklist": "黑名单",
+      "media-only": "仅媒体",
       "exact": "完全匹配",
       "contains": "包含文本",
       "regex": "正则匹配",

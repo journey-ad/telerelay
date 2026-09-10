@@ -1235,7 +1235,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(next(iter(schema["properties"])), "session_type")
         self.assertEqual(
             definitions["ConfigFilter"]["properties"]["mode"]["enum"],
-            ["whitelist", "blacklist"],
+            ["whitelist", "blacklist", "media-only"],
         )
         self.assertEqual(
             definitions["ConfigForwardQueue"]["properties"]["max_retries"]["maximum"],
@@ -1307,6 +1307,26 @@ class ApiContractTests(unittest.TestCase):
         deleted = self.client.delete("/api/v1/rules/0")
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(self.client.get("/api/v1/rules").json(), [])
+
+    def test_rule_accepts_media_only_mode_and_rejects_unknown_modes(self):
+        payload = {
+            "name": "media relay",
+            "enabled": True,
+            "source_chats": [-1001],
+            "target_chats": [-2001],
+            "filters": {"mode": "media-only"},
+            "ignore": {},
+            "forwarding": {},
+        }
+        created = self.client.post("/api/v1/rules", json=payload)
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["filters"]["mode"], "media-only")
+        self.assertEqual(self.client.get("/api/v1/rules").json()[0]["filters"]["mode"], "media-only")
+
+        payload["filters"] = {"mode": "attachments"}
+        invalid = self.client.post("/api/v1/rules", json=payload)
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+        self.assertEqual(invalid.json()["detail"][0]["loc"][-1], "mode")
 
     def test_chat_group_crud_and_rule_reference(self):
         created = self.client.post(

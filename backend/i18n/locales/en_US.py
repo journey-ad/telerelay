@@ -155,6 +155,7 @@ TRANSLATIONS = {
             "keyword_matched": "Keyword matched - keyword={keyword}",
             "user_ignored": "User ignored - user={user_id}",
             "keyword_ignored": "Keyword ignored - keyword={keyword}",
+            "media_only_filtered": "Message filtered - reason=no media attachment (media-only mode)",
         },
 
         # log.auth.* - auth_manager.py logs
@@ -418,7 +419,7 @@ TRANSLATIONS = {
             "target_chats": "Messages will be forwarded to these locations, one per line",
             "regex_patterns": "One regex pattern per line",
             "keywords": "One keyword per line",
-            "filter_mode": "whitelist: Only forward matching messages | blacklist: Forward non-matching messages",
+            "filter_mode": "whitelist: Only forward matching messages | blacklist: Forward non-matching messages | media-only: Only forward messages with media (keywords and regex are ignored)",
             "media_types": "Leave empty to allow all types",
             "max_file_size": "0 means no limit",
             "ignored_user_ids": "All messages from these users will be ignored, one numeric ID per line (get ID via @userinfobot)",
@@ -880,7 +881,7 @@ TRANSLATIONS = {
             "`target` Target chats (comma-separated)\n"
             "`keywords` Keywords (comma-separated)\n"
             "`regex` Regex patterns (comma-separated)\n"
-            "`mode` Mode (whitelist/blacklist)\n"
+            "`mode` Mode (whitelist/blacklist/media-only)\n"
             "`delay` Delay in seconds\n"
             "`force_forward` Force forward (true/false)\n"
             "`hide_sender` Hide sender (true/false)\n"
@@ -892,7 +893,7 @@ TRANSLATIONS = {
             "`max_file_size` Max file size (MB)\n"
             "`min_file_size` Min file size (MB)\n\n"
             "💡 Use `clear` to empty list-type fields",
-        "invalid_mode": "⚠️ Mode must be whitelist or blacklist",
+        "invalid_mode": "⚠️ Mode must be whitelist, blacklist or media-only",
         "invalid_media_types": "⚠️ Invalid media types: {types}\nValid types: {valid}",
         "unknown_field": "⚠️ Unknown field: {field}",
         "rule_updated": "✅ Rule '{name}' updated: {field} = {value}",

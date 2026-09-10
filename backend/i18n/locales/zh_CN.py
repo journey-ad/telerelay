@@ -155,6 +155,7 @@ TRANSLATIONS = {
             "keyword_matched": "匹配关键词 - 关键词={keyword}",
             "user_ignored": "忽略用户 - 用户={user_id}",
             "keyword_ignored": "忽略关键词 - 关键词={keyword}",
+            "media_only_filtered": "过滤消息 - 原因=无媒体附件（仅媒体模式）",
         },
 
         # log.auth.* - auth_manager.py 的日志
@@ -418,7 +419,7 @@ TRANSLATIONS = {
             "target_chats": "消息将转发到这些位置，每行一个",
             "regex_patterns": "每行一个正则表达式",
             "keywords": "每行一个关键词",
-            "filter_mode": "whitelist: 仅转发匹配的消息 | blacklist: 转发不匹配的消息",
+            "filter_mode": "whitelist: 仅转发匹配的消息 | blacklist: 转发不匹配的消息 | media-only: 仅转发含媒体的消息（忽略关键词与正则）",
             "media_types": "不选则允许所有类型",
             "max_file_size": "0 表示不限制",
             "ignored_user_ids": "这些用户发送的所有消息将被忽略，每行一个数字 ID（可通过 @userinfobot 获取）",
@@ -880,7 +881,7 @@ TRANSLATIONS = {
             "`target` 目标群组 (逗号分隔)\n"
             "`keywords` 关键词 (逗号分隔)\n"
             "`regex` 正则表达式 (逗号分隔)\n"
-            "`mode` 模式 (whitelist/blacklist)\n"
+            "`mode` 模式 (whitelist/blacklist/media-only)\n"
             "`delay` 延迟秒数\n"
             "`force_forward` 强制转发 (true/false)\n"
             "`hide_sender` 隐藏发送者 (true/false)\n"
@@ -892,7 +893,7 @@ TRANSLATIONS = {
             "`max_file_size` 最大文件大小 (MB)\n"
             "`min_file_size` 最小文件大小 (MB)\n\n"
             "💡 列表型字段可传 `clear` 清空",
-        "invalid_mode": "⚠️ 模式必须是 whitelist 或 blacklist",
+        "invalid_mode": "⚠️ 模式必须是 whitelist、blacklist 或 media-only",
         "invalid_media_types": "⚠️ 无效的媒体类型: {types}\n合法值: {valid}",
         "unknown_field": "⚠️ 未知属性: {field}",
         "rule_updated": "✅ 规则 '{name}' 已更新: {field} = {value}",

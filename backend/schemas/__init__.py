@@ -42,7 +42,7 @@ class ApiMessage(StrictModel):
 
 
 class FilterConfig(StrictModel):
-    mode: Literal["whitelist", "blacklist"] = "whitelist"
+    mode: Literal["whitelist", "blacklist", "media-only"] = "whitelist"
     keywords: list[str] = Field(default_factory=list)
     regex_patterns: list[str] = Field(default_factory=list)
     media_types: list[str] = Field(default_factory=list)
@@ -122,7 +122,7 @@ class ButtonActionRulePayload(StrictModel):
 
 
 class ConfigFilter(ConfigModel):
-    mode: Literal["whitelist", "blacklist"] = "whitelist"
+    mode: Literal["whitelist", "blacklist", "media-only"] = "whitelist"
     keywords: list[str] = Field(
         default_factory=list, json_schema_extra={"x-item-control": "tags"}
     )
