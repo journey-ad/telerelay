@@ -262,7 +262,11 @@ export interface BotStatus {
   running_account_ids?: string[]
   connected_account_ids?: string[]
   stats?: { forwarded?: number; filtered?: number; total?: number }
-  queue?: { counts?: Record<string, number>; pause_reason?: string }
+  queue?: {
+    counts?: Record<string, number>
+    pause_reason?: string
+    paused?: boolean
+  }
 }
 
 export interface Subscriber {

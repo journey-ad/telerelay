@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { TFunction } from 'i18next'
 import {
   Activity,
@@ -7,6 +8,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Ellipsis,
   Filter,
   Gauge,
   ListChecks,
@@ -38,6 +40,7 @@ import {
 } from 'recharts'
 import { accountRequest, json, request } from '../api/client'
 import {
+  Badge,
   Button,
   EmptyState,
   IconButton,
@@ -93,7 +96,7 @@ const chartTooltipStyle = {
 }
 const liveEventLimit = 50
 const initialEventLimit = 10
-const queuePreviewLimit = 50
+const queuePreviewLimit = 20
 const intensitySampleLimit = 60
 const eventTypeKeys = {
   ready: 'dashboard.events.types.ready',
@@ -140,6 +143,11 @@ const queueStatusKeys = {
   waiting: 'dashboard.queuePreview.statuses.waiting',
   pending: 'dashboard.queuePreview.statuses.pending',
 } as const
+const queueMenuItemClass = cn(
+  'flex h-8.5 cursor-pointer items-center gap-2 rounded px-2',
+  'text-[13px] text-slate-600 outline-none',
+  'data-[highlighted]:bg-blue-50 data-[highlighted]:text-blue-700',
+)
 const dashboardEventTypeList = [
   'bot',
   'stats',
@@ -500,12 +508,42 @@ export function DashboardPage() {
     },
   })
 
+  const clearQueue = useMutation({
+    mutationFn: () => accountRequest(accountId, '/api/v1/queue/items', json('DELETE')),
+    onSuccess: () => {
+      setQueuePage(0)
+      void client.invalidateQueries({ queryKey: ['forward-queue-items', accountId] })
+      void client.invalidateQueries({ queryKey: ['bot-status'] })
+    },
+  })
+  const toggleQueuePause = useMutation({
+    mutationFn: (paused: boolean) =>
+      accountRequest(
+        accountId,
+        paused ? '/api/v1/queue/pause' : '/api/v1/queue/resume',
+        json('POST'),
+      ),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['forward-queue-items', accountId] })
+      void client.invalidateQueries({ queryKey: ['bot-status'] })
+    },
+  })
+
   async function confirmDeleteQueueItem(item: ForwardQueueItem) {
     await confirm({
       title: t('dashboard.queuePreview.deleteTitle'),
       description: t('dashboard.queuePreview.deleteConfirm', { rule: item.rule_name }),
       confirmLabel: t('dashboard.queuePreview.delete'),
       onConfirm: () => deleteQueueItem.mutateAsync(item.id),
+    })
+  }
+
+  async function confirmClearQueue() {
+    await confirm({
+      title: t('dashboard.queuePreview.actions.clearTitle'),
+      description: t('dashboard.queuePreview.actions.clearConfirm', { total: queueTotal }),
+      confirmLabel: t('dashboard.queuePreview.actions.clear'),
+      onConfirm: () => clearQueue.mutateAsync(),
     })
   }
 
@@ -524,6 +562,7 @@ export function DashboardPage() {
     .filter(([key]) => key === 'pending' || key === 'processing')
     .reduce((sum, [, value]) => sum + value, 0)
   const queueTotal = queueQuery.data?.total ?? activeQueue
+  const queuePaused = Boolean(status.queue?.paused)
   const queuePages = Math.max(1, Math.ceil(queueTotal / queuePreviewLimit))
   const report = useMemo(() => {
     const isHourly = reportPeriod === '1day'
@@ -730,13 +769,18 @@ export function DashboardPage() {
           className="mb-3"
           title={t('dashboard.queuePreview.title')}
           meta={
-            <button
-              type="button"
-              className="rounded border-0 bg-transparent p-0 text-xs text-slate-400 transition hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
-              onClick={() => setQueuePreviewOpen(false)}
-            >
-              {t('dashboard.queuePreview.hide')}
-            </button>
+            <span className="flex items-center gap-2">
+              {queuePaused ? (
+                <Badge tone="amber">{t('dashboard.queuePreview.paused')}</Badge>
+              ) : null}
+              <button
+                type="button"
+                className="rounded border-0 bg-transparent p-0 text-xs text-slate-400 transition hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+                onClick={() => setQueuePreviewOpen(false)}
+              >
+                {t('dashboard.queuePreview.hide')}
+              </button>
+            </span>
           }
         >
           <div id="forward-queue-preview">
@@ -891,12 +935,58 @@ export function DashboardPage() {
                 detail={t('dashboard.queuePreview.emptyDetail')}
               />
             )}
-            {queueTotal > 0 ? (
+            {queueTotal > 0 || queuePaused ? (
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
                 <small className="text-xs text-slate-400">
-                  {t('dashboard.queuePreview.page', { current: queuePage + 1, total: queuePages })}
+                  {queueTotal > 0
+                    ? t('dashboard.queuePreview.page', {
+                        current: queuePage + 1,
+                        total: queuePages,
+                      })
+                    : ''}
                 </small>
                 <div className="flex items-center gap-1">
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                      <IconButton
+                        type="button"
+                        label={t('dashboard.queuePreview.actions.label')}
+                        icon={Ellipsis}
+                        disabled={clearQueue.isPending || toggleQueuePause.isPending}
+                      />
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Portal>
+                      <DropdownMenu.Content
+                        align="end"
+                        sideOffset={5}
+                        className="z-100 min-w-44 rounded-md border border-slate-200 bg-white p-1 shadow-xl"
+                      >
+                        <DropdownMenu.Item
+                          className={queueMenuItemClass}
+                          onSelect={() => toggleQueuePause.mutate(!queuePaused)}
+                        >
+                          {queuePaused ? (
+                            <Play size={14} aria-hidden />
+                          ) : (
+                            <Pause size={14} aria-hidden />
+                          )}
+                          {t(
+                            queuePaused
+                              ? 'dashboard.queuePreview.actions.resume'
+                              : 'dashboard.queuePreview.actions.pause',
+                          )}
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Separator className="my-1 h-px bg-slate-100" />
+                        <DropdownMenu.Item
+                          className={cn(queueMenuItemClass, 'text-rose-600')}
+                          onSelect={() => void confirmClearQueue()}
+                        >
+                          <Trash2 size={14} aria-hidden />
+                          {t('dashboard.queuePreview.actions.clear')}
+                        </DropdownMenu.Item>
+                      </DropdownMenu.Content>
+                    </DropdownMenu.Portal>
+                  </DropdownMenu.Root>
                   <IconButton
                     type="button"
                     label={t('dashboard.queuePreview.previous')}

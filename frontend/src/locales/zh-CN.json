@@ -369,7 +369,16 @@
       "deleteConfirm": "确定要从队列中移除规则“{{rule}}”的转发任务吗？",
       "page": "第 {{current}} / {{total}} 页",
       "previous": "上一页",
-      "next": "下一页"
+      "next": "下一页",
+      "paused": "已暂停",
+      "actions": {
+        "label": "更多功能",
+        "pause": "暂停队列",
+        "resume": "恢复队列",
+        "clear": "清除队列",
+        "clearTitle": "清除队列",
+        "clearConfirm": "是否确认清除转发队列中的 {{total}} 条任务？"
+      }
     },
     "ruleRanking": "规则表现排行",
     "ruleRankingMeta": "{{count}} 条规则 · 累计数据",

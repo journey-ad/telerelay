@@ -146,6 +146,7 @@ class ForwardQueueState(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     paused_until: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     pause_reason: Mapped[str | None] = mapped_column(String)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     updated_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 

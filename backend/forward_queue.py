@@ -128,6 +128,9 @@ class ForwardQueueStore:
                 "media_size": "INTEGER NOT NULL DEFAULT 0",
                 "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
             }
+            state_columns = {
+                column["name"] for column in inspector.get_columns("forward_queue_state")
+            }
             with self.engine.begin() as connection:
                 connection.exec_driver_sql("PRAGMA journal_mode = WAL")
                 for name, definition in additions.items():
@@ -135,6 +138,11 @@ class ForwardQueueStore:
                         connection.exec_driver_sql(
                             f"ALTER TABLE forward_queue ADD COLUMN {name} {definition}"
                         )
+                if "paused" not in state_columns:
+                    connection.exec_driver_sql(
+                        "ALTER TABLE forward_queue_state ADD COLUMN paused"
+                        " INTEGER NOT NULL DEFAULT 0"
+                    )
             with self._session() as session:
                 if session.get(ForwardQueueState, 1) is None:
                     session.add(ForwardQueueState(id=1, paused_until=0, updated_at=0))
@@ -507,6 +515,44 @@ class ForwardQueueStore:
                 .values(paused_until=0, pause_reason=None, updated_at=now)
             )
 
+    def set_paused(self, paused: bool) -> bool:
+        """Persist the operator-controlled pause gate for this queue."""
+        now = time.time()
+        with self._lock, self._session() as session:
+            state = session.get(ForwardQueueState, 1)
+            if state is None:
+                state = ForwardQueueState(id=1, paused_until=0, updated_at=now)
+                session.add(state)
+            state.paused = bool(paused)
+            state.updated_at = now
+            return bool(paused)
+
+    def is_paused(self) -> bool:
+        with self._lock, self._session() as session:
+            row = session.get(ForwardQueueState, 1)
+            return bool(row.paused) if row else False
+
+    def clear_active(self) -> int:
+        """Drop every pending job and request cancellation of processing ones.
+
+        Completed and failed rows are retained for history/retention, mirroring
+        the single-item delete semantics.
+        """
+        now = time.time()
+        with self._lock, self._session() as session:
+            deleted = session.execute(
+                delete(ForwardQueueRow).where(ForwardQueueRow.status == "pending")
+            ).rowcount
+            cancelled = session.execute(
+                update(ForwardQueueRow)
+                .where(
+                    ForwardQueueRow.status == "processing",
+                    ForwardQueueRow.cancel_requested.is_(False),
+                )
+                .values(cancel_requested=True, updated_at=now)
+            ).rowcount
+            return int(deleted) + int(cancelled)
+
     def update_target_index(self, item_id: int, next_target_index: int) -> None:
         now = time.time()
         with self._lock, self._session() as session:
@@ -714,6 +760,12 @@ class ForwardQueue:
                 await self._wait(self.poll_interval)
 
     async def _run_once(self) -> None:
+        # An operator pause gates new claims only: an in-flight send finishes
+        # its current target, then the loop idles until the queue is resumed.
+        if self.store.is_paused():
+            await self._wait(self.poll_interval)
+            return
+
         paused_until, _ = self.store.get_pause()
         now = time.time()
         if paused_until > now:

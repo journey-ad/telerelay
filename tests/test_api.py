@@ -517,6 +517,39 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(missing.json()["detail"]["code"], "queue_item_not_found")
         self.assertEqual(calls, [(42, self.account_id), (43, self.account_id)])
 
+    def test_queue_clear_and_pause_are_account_scoped(self):
+        calls = []
+
+        def clear_queue(account_id=None):
+            calls.append(("clear", account_id))
+            return 3
+
+        def set_queue_pause(paused, account_id=None):
+            calls.append(("pause" if paused else "resume", account_id))
+            return paused
+
+        self.bot.clear_queue = clear_queue
+        self.bot.set_queue_pause = set_queue_pause
+
+        cleared = self.client.delete("/api/v1/queue/items")
+        paused = self.client.post("/api/v1/queue/pause")
+        resumed = self.client.post("/api/v1/queue/resume")
+
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        self.assertEqual(cleared.json()["code"], "queue_cleared")
+        self.assertEqual(paused.status_code, 200, paused.text)
+        self.assertEqual(paused.json()["code"], "queue_paused")
+        self.assertEqual(resumed.status_code, 200, resumed.text)
+        self.assertEqual(resumed.json()["code"], "queue_resumed")
+        self.assertEqual(
+            calls,
+            [
+                ("clear", self.account_id),
+                ("pause", self.account_id),
+                ("resume", self.account_id),
+            ],
+        )
+
     def test_recent_events_contract_filters_types_and_limits_results(self):
         self.events.publish("bot", {"action": "start"})
         self.events.publish("telegram-auth", {"submitted": "phone"})

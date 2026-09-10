@@ -62,6 +62,7 @@ TRANSLATIONS = {
             "failed": "Forward task failed after {attempts} attempts - Rule: {rule}, Source: {chat_id}/{message_id}, Target: {target}, Error: {error}",
             "loop_error": "Persistent forward queue loop failed and will recover: {error}",
             "recovery_failed": "Failed to recover persistent forward queue processing state",
+            "cleared": "Backlog queue cleared - account={account}, tasks={cleared}",
         },
 
         "button_action": {

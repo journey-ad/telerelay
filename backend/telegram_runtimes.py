@@ -12,8 +12,12 @@ from backend.account_paths import AccountPathRegistry, is_telegram_user_id
 from backend.auth_manager import AuthManager
 from backend.bot_manager import BotManager
 from backend.forward_queue import ForwardQueueStore
+from backend.i18n import t
+from backend.logger import get_logger
 from backend.stats_db import get_stats_db
 from backend.telegram_accounts import TelegramAccountError, TelegramAccountStore
+
+logger = get_logger()
 
 
 class TelegramRuntimeRegistry:
@@ -47,6 +51,7 @@ class TelegramRuntimeRegistry:
         self.on_user_authenticated: Callable[[str, dict[str, Any]], None] | None = None
         self._runtimes: dict[str, Any] = {}
         self._auth_managers: dict[str, AuthManager] = {}
+        self._fallback_queue_stores: dict[str, ForwardQueueStore] = {}
         self._blocked_account_ids: set[str] = set()
         self._state_lock = threading.RLock()
         self._lifecycle_lock = asyncio.Lock()
@@ -268,6 +273,7 @@ class TelegramRuntimeRegistry:
         with self._state_lock:
             self._runtimes.pop(account_id, None)
             self._auth_managers.pop(account_id, None)
+            self._fallback_queue_stores.pop(account_id, None)
         if clear_queue:
             await asyncio.to_thread(self._clear_queue_files, queue_path)
 
@@ -292,20 +298,13 @@ class TelegramRuntimeRegistry:
                     "is_connected": runtime.is_connected,
                     "queue": queue_status,
                 }
-        counts: dict[str, int] = {}
-        paused_until = 0.0
-        pause_reasons: list[str] = []
         active_id = account_id or self.account_store.active_account_id
         self.account_store.get_public(active_id)
         active_status = runtime_statuses.get(active_id, {})
-        for status in [active_status] if active_status else []:
-            queue = status.get("queue", {})
-            for key, value in queue.get("counts", {}).items():
-                counts[key] = counts.get(key, 0) + int(value)
-            paused_until = max(paused_until, float(queue.get("paused_until") or 0))
-            reason = queue.get("pause_reason")
-            if reason and reason not in pause_reasons:
-                pause_reasons.append(str(reason))
+        # The durable queue outlives a runtime that never started its consumer,
+        # so the console reads pause state and counts from the store itself.
+        queue_store = self._queue_store(active_id)
+        paused_until, pause_reason = queue_store.get_pause()
 
         if self.stats_registry is not None:
             all_stats = (
@@ -343,9 +342,10 @@ class TelegramRuntimeRegistry:
                 "total": forwarded + filtered,
             },
             "queue": {
-                "counts": counts,
+                "counts": queue_store.counts(),
                 "paused_until": paused_until,
-                "pause_reason": "; ".join(pause_reasons) or None,
+                "pause_reason": pause_reason,
+                "paused": queue_store.is_paused(),
             },
         }
 
@@ -356,32 +356,14 @@ class TelegramRuntimeRegistry:
         offset: int = 0,
     ) -> dict[str, Any]:
         accounts = {account["id"]: account for account in self.account_store.list_public()}
-        with self._state_lock:
-            active_id = account_id or self.account_store.active_account_id
-            self.account_store.get_public(active_id)
-            runtime = self._runtimes.get(active_id)
-            runtimes = [(active_id, runtime)]
-        items = []
-        total = 0
-        for account_id, runtime in runtimes:
-            store = getattr(runtime, "forward_queue_store", None)
-            if not store:
-                store = ForwardQueueStore(self.queue_db_path(account_id))
-            account = accounts.get(account_id, {})
-            label = str(account.get("label") or account_id)
-            page_items, page_total = store.list_active_page(limit, offset)
-            total += page_total
-            for item in page_items:
-                items.append(BotManager._queue_item_data(item, account_id, label))
-        items.sort(
-            key=lambda item: (
-                item["status"] != "processing",
-                item["available_at"],
-                item["id"],
-            )
-        )
+        target = self._selected_account(account_id)
+        account = accounts.get(target, {})
+        label = str(account.get("label") or target)
+        page_items, total = self._queue_store(target).list_active_page(limit, offset)
         return {
-            "items": items[: max(1, min(int(limit), 100))],
+            "items": [
+                BotManager._queue_item_data(item, target, label) for item in page_items
+            ],
             "total": total,
             "limit": max(1, min(int(limit), 100)),
             "offset": max(0, int(offset)),
@@ -393,15 +375,39 @@ class TelegramRuntimeRegistry:
         account_id: str | None = None,
     ) -> bool:
         """Delete one active queue task belonging to the selected account."""
+        return self._queue_store(self._selected_account(account_id)).delete_item(item_id)
+
+    def clear_queue(self, account_id: str | None = None) -> int:
+        """Drop every active queue task of the selected account."""
+        target = self._selected_account(account_id)
+        cleared = self._queue_store(target).clear_active()
+        logger.info(t("log.forward_queue.cleared", account=target, cleared=cleared))
+        return cleared
+
+    def set_queue_pause(self, paused: bool, account_id: str | None = None) -> bool:
+        """Toggle the operator pause gate of the selected account's queue."""
+        return self._queue_store(self._selected_account(account_id)).set_paused(paused)
+
+    def _selected_account(self, account_id: str | None) -> str:
         target = account_id or self.account_store.active_account_id
         self.account_store.get_public(target)
+        return target
+
+    def _queue_store(self, account_id: str) -> ForwardQueueStore:
+        """Resolve an account queue store; the queue outlives a stopped runtime."""
         with self._state_lock:
-            runtime = self._runtimes.get(target)
+            runtime = self._runtimes.get(account_id)
+            cached = self._fallback_queue_stores.get(account_id)
         store = getattr(runtime, "forward_queue_store", None) if runtime is not None else None
-        if store is None:
-            # The queue is durable even while a runtime is stopped.
-            store = ForwardQueueStore(self.queue_db_path(target))
-        return store.delete_item(item_id)
+        if store is not None:
+            return store
+        if cached is None:
+            # Kept for the process lifetime so status polling does not reopen
+            # the database on every call.
+            cached = ForwardQueueStore(self.queue_db_path(account_id))
+            with self._state_lock:
+                cached = self._fallback_queue_stores.setdefault(account_id, cached)
+        return cached
 
     def reset_stats(self, account_id: str | None = None) -> None:
         active_id = account_id or self.account_store.active_account_id

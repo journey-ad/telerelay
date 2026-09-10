@@ -369,7 +369,16 @@
       "deleteConfirm": "Remove the forwarding task for rule “{{rule}}” from the queue?",
       "page": "Page {{current}} / {{total}}",
       "previous": "Previous page",
-      "next": "Next page"
+      "next": "Next page",
+      "paused": "Paused",
+      "actions": {
+        "label": "More actions",
+        "pause": "Pause queue",
+        "resume": "Resume queue",
+        "clear": "Clear queue",
+        "clearTitle": "Clear queue",
+        "clearConfirm": "Clear {{total}} tasks from the forwarding queue?"
+      }
     },
     "ruleRanking": "Rule performance ranking",
     "ruleRankingMeta": "{{count}} rules · cumulative data",

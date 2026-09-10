@@ -181,6 +181,69 @@ class ForwardQueueStoreTests(unittest.TestCase):
             self.assertEqual(store.active_count(), 0)
             self.assertEqual(store.counts(), {"completed": 1, "failed": 1})
 
+    def test_clear_active_drops_pending_and_cancels_processing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            pending, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=51,
+                sender_id=7,
+                grouped_id=None,
+            )
+            processing, _ = store.enqueue(
+                rule_data=rule_data(name="processing"),
+                source_chat_id=-1001,
+                source_message_id=52,
+                sender_id=7,
+                grouped_id=None,
+            )
+            completed, _ = store.enqueue(
+                rule_data=rule_data(name="completed"),
+                source_chat_id=-1001,
+                source_message_id=53,
+                sender_id=7,
+                grouped_id=None,
+            )
+            failed, _ = store.enqueue(
+                rule_data=rule_data(name="failed"),
+                source_chat_id=-1001,
+                source_message_id=54,
+                sender_id=7,
+                grouped_id=None,
+            )
+            self.assertEqual(store.claim_next().id, pending.id)
+            self.assertEqual(store.claim_next().id, processing.id)
+            store.mark_completed(completed.id)
+            store.mark_failed(failed.id, "failed")
+
+            self.assertEqual(store.clear_active(), 2)
+            self.assertEqual(store.active_count(), 0)
+            self.assertTrue(store.is_cancel_requested(pending.id))
+            self.assertTrue(store.is_cancel_requested(processing.id))
+            # Completed and failed rows survive as history and dedup tombstones.
+            self.assertEqual(store.counts(), {"completed": 1, "failed": 1})
+            self.assertEqual(store.clear_active(), 0)
+
+    def test_manual_pause_survives_reopen_and_migrates_older_databases(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "forward_queue.db"
+            store = ForwardQueueStore(db_path)
+            self.assertFalse(store.is_paused())
+
+            self.assertTrue(store.set_paused(True))
+            self.assertTrue(ForwardQueueStore(db_path).is_paused())
+
+            # Simulate a database written before the pause column existed.
+            with store.engine.begin() as connection:
+                connection.exec_driver_sql("ALTER TABLE forward_queue_state DROP COLUMN paused")
+            migrated = ForwardQueueStore(db_path)
+            self.assertFalse(migrated.is_paused())
+            self.assertTrue(migrated.set_paused(True))
+            self.assertTrue(ForwardQueueStore(db_path).is_paused())
+            self.assertFalse(migrated.set_paused(False))
+            self.assertFalse(ForwardQueueStore(db_path).is_paused())
+
     def test_media_group_updates_merge_and_extend_settle_window(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
@@ -520,6 +583,40 @@ class ForwardQueueStoreTests(unittest.TestCase):
 
 
 class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_manual_pause_blocks_claims_until_resumed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            item, _ = store.enqueue(
+                rule_data=rule_data(),
+                source_chat_id=-1001,
+                source_message_id=9,
+                sender_id=7,
+                grouped_id=None,
+            )
+            calls = []
+
+            async def processor(claimed):
+                calls.append(claimed.id)
+                return 0
+
+            store.set_paused(True)
+            queue = ForwardQueue(store, processor, poll_interval=0.02)
+            await queue.start()
+            await asyncio.sleep(0.1)
+
+            self.assertEqual(calls, [])
+            self.assertEqual(store.get_item(item.id).status, "pending")
+
+            store.set_paused(False)
+            for _ in range(100):
+                if calls:
+                    break
+                await asyncio.sleep(0.01)
+            await queue.stop()
+
+            self.assertEqual(calls, [item.id])
+            self.assertEqual(store.get_item(item.id).status, "completed")
+
     async def test_floodwait_pauses_all_items_and_survives_restart(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")

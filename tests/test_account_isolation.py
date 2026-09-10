@@ -252,6 +252,39 @@ class AccountIsolationTests(unittest.TestCase):
         self.assertEqual(page["total"], 1)
         self.assertEqual(page["items"][0]["rule_name"], "persisted")
 
+    def test_queue_pause_state_is_reported_without_a_started_runtime(self):
+        store = TelegramAccountStore(self.data_dir, paths=self.paths)
+        account = store.finalize_identity(
+            store.active_account_id,
+            {"telegram_user_id": 123},
+        )
+        queue_store = ForwardQueueStore(self.paths.for_account(account.id).queue_db)
+        queue_store.enqueue(
+            rule_data={"name": "persisted", "target_chats": [456]},
+            source_chat_id=-100,
+            source_message_id=1,
+            sender_id=2,
+            grouped_id=None,
+        )
+        runtimes = TelegramRuntimeRegistry(
+            Config(env_file=str(self.root / "missing.env"), config_file=str(self.root / "config.yaml")),
+            store,
+            bot_factory=FakeRuntime,
+            paths=self.paths,
+        )
+
+        self.assertFalse(runtimes.get_status(account.id)["queue"]["paused"])
+
+        self.assertTrue(runtimes.set_queue_pause(True, account.id))
+        status = runtimes.get_status(account.id)["queue"]
+        self.assertTrue(status["paused"])
+        self.assertEqual(status["counts"], {"pending": 1})
+
+        self.assertFalse(runtimes.set_queue_pause(False, account.id))
+        self.assertFalse(runtimes.get_status(account.id)["queue"]["paused"])
+        self.assertEqual(runtimes.clear_queue(account.id), 1)
+        self.assertEqual(runtimes.get_status(account.id)["queue"]["counts"], {})
+
     def test_account_configs_record_session_type(self):
         template_path = self.config_dir / "template.yaml"
         template_path.write_text("forwarding_rules: []\n", encoding="utf-8")

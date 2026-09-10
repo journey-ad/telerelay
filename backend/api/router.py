@@ -543,6 +543,16 @@ async def queue_items(
     return await asyncio.to_thread(context.bot.list_queue_items, limit, offset=offset)
 
 
+@router.delete("/queue/items", response_model=ApiMessage)
+async def clear_queue(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
+    scope = _account_scope(context)
+    if scope:
+        await asyncio.to_thread(context.bot.clear_queue, scope.account_id)
+    else:
+        await asyncio.to_thread(context.bot.clear_queue)
+    return ApiMessage(code="queue_cleared")
+
+
 @router.delete("/queue/items/{item_id}", response_model=ApiMessage)
 async def delete_queue_item(
     item_id: int,
@@ -561,6 +571,25 @@ async def delete_queue_item(
             404,
         )
     return ApiMessage(code="queue_item_deleted")
+
+
+@router.post("/queue/pause", response_model=ApiMessage)
+async def pause_queue(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
+    return await _set_queue_pause(context, True)
+
+
+@router.post("/queue/resume", response_model=ApiMessage)
+async def resume_queue(context: ApplicationContext = Depends(get_context)) -> ApiMessage:
+    return await _set_queue_pause(context, False)
+
+
+async def _set_queue_pause(context: ApplicationContext, paused: bool) -> ApiMessage:
+    scope = _account_scope(context)
+    if scope:
+        await asyncio.to_thread(context.bot.set_queue_pause, paused, scope.account_id)
+    else:
+        await asyncio.to_thread(context.bot.set_queue_pause, paused)
+    return ApiMessage(code="queue_paused" if paused else "queue_resumed")
 
 
 @router.post("/bot/start", response_model=ApiMessage)
