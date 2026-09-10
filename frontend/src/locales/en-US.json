@@ -354,7 +354,6 @@
       "empty": "No queued tasks",
       "emptyDetail": "Messages will appear here after they enter the forwarding queue.",
       "columns": {
-        "account": "Account",
         "rule": "Rule",
         "source": "Source message",
         "content": "Content preview",

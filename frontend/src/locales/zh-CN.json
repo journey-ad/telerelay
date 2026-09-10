@@ -354,7 +354,6 @@
       "empty": "当前没有积压任务",
       "emptyDetail": "待转发消息入队后会显示在这里",
       "columns": {
-        "account": "账号",
         "rule": "规则",
         "source": "来源消息",
         "content": "内容摘要",

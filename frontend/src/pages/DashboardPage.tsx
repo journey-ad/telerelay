@@ -803,8 +803,7 @@ export function DashboardPage() {
             ) : queueItems.length ? (
               <div className="overflow-x-auto">
                 <div className="min-w-225">
-                  <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_minmax(180px,1.2fr)_minmax(150px,1fr)_100px_110px_70px_minmax(160px,1fr)_70px] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
-                    <span>{t('dashboard.queuePreview.columns.account')}</span>
+                  <div className="grid grid-cols-[minmax(140px,1fr)_minmax(170px,1.1fr)_minmax(180px,1.2fr)_minmax(150px,1fr)_100px_110px_70px_minmax(160px,1fr)_70px] gap-3 border-b border-slate-100 pb-2 text-xs font-bold text-slate-400 uppercase">
                     <span>{t('dashboard.queuePreview.columns.rule')}</span>
                     <span>{t('dashboard.queuePreview.columns.source')}</span>
                     <span>{t('dashboard.queuePreview.columns.content')}</span>
@@ -823,17 +822,9 @@ export function DashboardPage() {
                     const state = queueState(item)
                     return (
                       <div
-                        className="grid grid-cols-[minmax(120px,0.8fr)_minmax(140px,1fr)_minmax(170px,1.1fr)_minmax(180px,1.2fr)_minmax(150px,1fr)_100px_110px_70px_minmax(160px,1fr)_70px] items-center gap-3 border-b border-slate-100 py-3 last:border-0"
+                        className="grid grid-cols-[minmax(140px,1fr)_minmax(170px,1.1fr)_minmax(180px,1.2fr)_minmax(150px,1fr)_100px_110px_70px_minmax(160px,1fr)_70px] items-center gap-3 border-b border-slate-100 py-3 last:border-0"
                         key={`${item.account_id}-${item.id}`}
                       >
-                        <div className="min-w-0">
-                          <strong className="block truncate text-[13px] text-slate-700">
-                            {item.account_label}
-                          </strong>
-                          <small className="mt-0.5 block truncate text-xs text-slate-400">
-                            {item.account_id}
-                          </small>
-                        </div>
                         <strong className="truncate text-[13px] text-slate-600">
                           {item.rule_name}
                         </strong>
