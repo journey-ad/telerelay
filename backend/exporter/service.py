@@ -849,11 +849,13 @@ class ExportService:
             raise ExportValidationError(
                 t("message.export.invalid_timezone", timezone=timezone_name)
             ) from exc
-        start = (
-            datetime(1970, 1, 1, tzinfo=task_timezone)
-            if all_history
-            else self.parse_datetime(initial_start_at, timezone_name)
-        )
+        if all_history:
+            start = datetime(1970, 1, 1, tzinfo=task_timezone)
+        elif initial_start_at:
+            start = self.parse_datetime(initial_start_at, timezone_name)
+        else:
+            # No explicit start: the task archives from now on.
+            start = datetime.now(task_timezone)
         formats = self.normalize_formats(formats)
         self._validated_directory(subdirectory)
         schedule_type = (schedule_type or "").lower()

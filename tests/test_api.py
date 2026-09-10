@@ -15,6 +15,7 @@ from backend.application import AccountScope, ApplicationContext
 from backend.auth_manager import AuthManager
 from backend.config import AccountConfigRegistry, Config
 from backend.events import EventBus
+from backend.exporter.models import ExportTask
 from backend.services import RuleService
 from backend.stats_db import AccountStatsRegistry
 from backend.telegram_accounts import (
@@ -208,6 +209,7 @@ class FakeTelegramChats:
 class FakeExports:
     def __init__(self):
         self.message_export = None
+        self.task_calls = []
 
     def start_message_export(self, **values):
         self.message_export = values
@@ -219,6 +221,34 @@ class FakeExports:
     def delete_run(self, run_id):
         if int(run_id) == 999:
             raise KeyError("missing")
+
+    def save_task(self, **values):
+        self.task_calls.append(values)
+        if values["task_id"] == 999:
+            raise KeyError("missing")
+        return ExportTask(
+            id=values["task_id"] or 7,
+            name=values["name"],
+            chat_id=values["chat_id"],
+            chat_title=values["chat_title"],
+            initial_start_at=values["initial_start_at"] or "2026-09-11T02:00:00+08:00",
+            formats=tuple(values["formats"]),
+            subdirectory=values["subdirectory"],
+            schedule_type=values["schedule_type"],
+            minute=values["minute"],
+            hour=values["hour"],
+            weekday=values["weekday"],
+            timezone=values["timezone_name"],
+            enabled=values["enabled"],
+            last_message_id=None,
+            last_success_at=None,
+            next_run_at=None,
+            created_at="2026-09-11T02:00:00+08:00",
+            updated_at="2026-09-11T02:00:00+08:00",
+        )
+
+    def list_tasks(self):
+        return []
 
 
 class FakeAccountRegistry:
@@ -447,6 +477,40 @@ class ApiContractTests(unittest.TestCase):
             body = self.client.get("/api/v1/update-check").json()
         self.assertFalse(body["update_available"])
         self.assertEqual(body["error"], "HTTP 403")
+
+    def test_export_task_create_and_update_contract(self):
+        payload = {
+            "name": "Daily archive",
+            "chat_id": -1001,
+            "formats": ["json", "csv"],
+            "subdirectory": "scheduled",
+            "schedule_type": "weekly",
+            "minute": 15,
+            "hour": 4,
+            "weekday": 3,
+            "timezone": "Asia/Shanghai",
+        }
+
+        created = self.client.post("/api/v1/exports/tasks", json=payload)
+        updated = self.client.put("/api/v1/exports/tasks/7", json=payload)
+
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["id"], 7)
+        self.assertEqual(updated.json()["schedule_type"], "weekly")
+        self.assertEqual(updated.json()["chat_title"], "Release Room")
+        self.assertIsNone(self.exports.task_calls[0]["task_id"])
+        self.assertEqual(self.exports.task_calls[1]["task_id"], 7)
+        self.assertEqual(self.exports.task_calls[1]["timezone_name"], "Asia/Shanghai")
+
+        missing = self.client.put("/api/v1/exports/tasks/999", json=payload)
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["detail"]["code"], "not_found")
+
+        invalid = self.client.put(
+            "/api/v1/exports/tasks/7", json={**payload, "hour": 99}
+        )
+        self.assertEqual(invalid.status_code, 422)
 
     def test_export_preview_token_contract(self):
         response = self.client.get(

@@ -5,6 +5,7 @@ import {
   CalendarClock,
   Database,
   Download,
+  Edit3,
   Eye,
   FileArchive,
   Globe2,
@@ -19,6 +20,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { accountRequest, json } from '../api/client'
 import { ChatSelect } from '../components/ChatSelect'
+import { TimezoneSelect } from '../components/TimezoneSelect'
 import { useTelegramChats } from '../hooks/useTelegramChats'
 import { useAccountScope } from '../hooks/useAccountScope'
 import { DownloadButton } from '../components/DownloadButton'
@@ -197,6 +199,7 @@ export function ExportsPage() {
   const accountId = useAccountScope()
   const [jobId, setJobId] = useState('')
   const [taskOpen, setTaskOpen] = useState(false)
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null)
   const [messageForm, setMessageForm] = useState({
     chat_id: '',
     start_at: '',
@@ -275,20 +278,37 @@ export function ExportsPage() {
       ),
     onSuccess: (data) => setJobId(data.job_id),
   })
+  function taskPayload() {
+    return {
+      ...taskForm,
+      chat_id: Number(taskForm.chat_id),
+      initial_start_at: taskForm.initial_start_at || null,
+    }
+  }
+  function createTask() {
+    return accountRequest(accountId, '/api/v1/exports/tasks', json('POST', taskPayload()))
+  }
+  function updateTask(taskId: number) {
+    return accountRequest(accountId, `/api/v1/exports/tasks/${taskId}`, json('PUT', taskPayload()))
+  }
   const saveTask = useMutation({
-    mutationFn: () =>
-      accountRequest(
-        accountId,
-        '/api/v1/exports/tasks',
-        json('POST', {
-          ...taskForm,
-          chat_id: Number(taskForm.chat_id),
-          initial_start_at: taskForm.initial_start_at || null,
-        }),
-      ),
+    mutationFn: () => (editingTaskId === null ? createTask() : updateTask(editingTaskId)),
     onSuccess: () => {
       setTaskOpen(false)
       void client.invalidateQueries({ queryKey: ['export-tasks'] })
+    },
+  })
+  const toggleTask = useMutation({
+    mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
+      accountRequest<ExportTask>(
+        accountId,
+        `/api/v1/exports/tasks/${id}`,
+        json('PATCH', { enabled }),
+      ),
+    onSuccess: (updated) => {
+      client.setQueryData<ExportTask[]>(['export-tasks', accountId], (current) =>
+        current?.map((task) => (task.id === updated.id ? updated : task)),
+      )
     },
   })
   const removeTask = useMutation({
@@ -337,10 +357,34 @@ export function ExportsPage() {
     saveTask.mutate()
   }
   function openTask() {
+    setEditingTaskId(null)
     setTaskForm((form) => ({
       ...form,
       chat_id: form.chat_id || String(chats.data?.[0]?.id ?? ''),
     }))
+    saveTask.reset()
+    setTaskOpen(true)
+  }
+
+  function editTask(task: ExportTask) {
+    setEditingTaskId(task.id)
+    setTaskForm({
+      name: task.name,
+      chat_id: String(task.chat_id),
+      // Kept as stored: the first-run cursor is derived from this value, so an
+      // edit must not reset it.
+      initial_start_at: task.initial_start_at ?? '',
+      formats: [...task.formats],
+      subdirectory: task.subdirectory,
+      schedule_type: task.schedule_type,
+      minute: task.minute,
+      hour: task.hour,
+      weekday: task.weekday,
+      timezone: task.timezone,
+      all_history: false,
+      enabled: task.enabled,
+    })
+    saveTask.reset()
     setTaskOpen(true)
   }
 
@@ -558,9 +602,10 @@ export function ExportsPage() {
         <TabsContent value="scheduled" className="outline-none">
           <section className={tableWrapClass}>
             <div className="overflow-x-auto">
-              <table className={cn(tableClass, 'max-md:min-w-195')}>
+              <table className={cn(tableClass, 'max-md:min-w-235')}>
                 <thead>
                   <tr>
+                    <th>{t('exports.columns.status')}</th>
                     <th>{t('exports.columns.task')}</th>
                     <th>{t('exports.columns.chat')}</th>
                     <th>{t('exports.columns.schedule')}</th>
@@ -573,12 +618,17 @@ export function ExportsPage() {
                   {(tasks.data ?? []).map((task) => (
                     <tr key={task.id}>
                       <td>
+                        <Switch
+                          checked={task.enabled}
+                          disabled={toggleTask.isPending}
+                          onCheckedChange={(enabled) => toggleTask.mutate({ id: task.id, enabled })}
+                          label={t('exports.enableTask')}
+                          showLabel={false}
+                          className="min-h-8 min-w-8 justify-center border-0 bg-transparent px-0 py-0"
+                        />
+                      </td>
+                      <td>
                         <strong className="block text-slate-700">{task.name}</strong>
-                        <small className="mt-1 block">
-                          <Badge tone={task.enabled ? 'green' : 'gray'}>
-                            {t(task.enabled ? 'exports.enabled' : 'exports.paused')}
-                          </Badge>
-                        </small>
                       </td>
                       <td>
                         {task.chat_title || task.chat_id}
@@ -597,6 +647,11 @@ export function ExportsPage() {
                       </td>
                       <td>
                         <div className="flex justify-end gap-1">
+                          <IconButton
+                            label={t('exports.editTask')}
+                            icon={Edit3}
+                            onClick={() => editTask(task)}
+                          />
                           <IconButton
                             label={t('exports.runNow')}
                             icon={Play}
@@ -696,7 +751,9 @@ export function ExportsPage() {
       <Dialog
         open={taskOpen}
         onOpenChange={setTaskOpen}
-        title={t('exports.newScheduledTitle')}
+        title={t(
+          editingTaskId === null ? 'exports.newScheduledTitle' : 'exports.editScheduledTitle',
+        )}
         description={t('exports.newScheduledDescription')}
       >
         <form onSubmit={submitTask}>
@@ -730,9 +787,9 @@ export function ExportsPage() {
             </label>
             <label className={fieldClass}>
               <span>{t('exports.timezone')}</span>
-              <input
+              <TimezoneSelect
                 value={taskForm.timezone}
-                onChange={(event) => setTaskForm({ ...taskForm, timezone: event.target.value })}
+                onValueChange={(timezone) => setTaskForm({ ...taskForm, timezone })}
               />
             </label>
             <label className={fieldClass}>
@@ -807,11 +864,13 @@ export function ExportsPage() {
               onCheckedChange={(enabled) => setTaskForm({ ...taskForm, enabled })}
               label={t('exports.enableTask')}
             />
-            <Switch
-              checked={taskForm.all_history}
-              onCheckedChange={(all_history) => setTaskForm({ ...taskForm, all_history })}
-              label={t('exports.firstRunAllHistory')}
-            />
+            {editingTaskId === null ? (
+              <Switch
+                checked={taskForm.all_history}
+                onCheckedChange={(all_history) => setTaskForm({ ...taskForm, all_history })}
+                label={t('exports.firstRunAllHistory')}
+              />
+            ) : null}
           </div>
           {saveTask.error ? (
             <p
