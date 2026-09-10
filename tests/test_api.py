@@ -196,10 +196,11 @@ class FakeTelegramChats:
             kind="supergroup",
             username="release_room",
         )
+        self.chats = [self.chat]
 
     def list_chats(self, account_id):
         self.calls.append(("list", account_id))
-        return [self.chat]
+        return list(self.chats)
 
     def get_chat(self, account_id, chat_id):
         self.calls.append(("get", account_id, chat_id))
@@ -1018,11 +1019,22 @@ class ApiContractTests(unittest.TestCase):
                     "title": "Release Room",
                     "kind": "supergroup",
                     "username": "release_room",
+                    "invalid_reason": None,
                 }
             ],
         )
         self.assertEqual(self.telegram_chats.calls, [("list", self.account_id)])
         self.assertEqual(self.client.get("/api/v1/exports/chats").status_code, 404)
+
+    def test_telegram_account_chats_report_invalid_chats(self):
+        self.telegram_chats.chats = [
+            TelegramChat(id=-1001, title="Gone", kind="channel", invalid_reason="left")
+        ]
+
+        response = self.client.get(f"/api/v1/telegram-accounts/{self.account_id}/chats")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()[0]["invalid_reason"], "left")
 
     def test_message_export_resolves_chat_title_without_listing_chats(self):
         response = self.client.post(

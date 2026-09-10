@@ -125,6 +125,13 @@
   },
   "chatInput": {
     "unknown": "未知会话 [{{id}}]",
+    "invalidReasons": {
+      "deleted": "已注销",
+      "deactivated": "已解散",
+      "left": "已退出",
+      "blocked": "已封禁",
+      "readonly": "禁言中"
+    },
     "remove": "移除 {{name}}",
     "addChat": "添加会话",
     "groups": "会话组",

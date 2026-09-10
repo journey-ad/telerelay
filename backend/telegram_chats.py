@@ -19,12 +19,41 @@ from backend.telegram_accounts import TelegramAccountError
 logger = get_logger()
 
 ChatKind = Literal["bot", "private", "group", "supergroup", "channel"]
+ChatInvalidReason = Literal["deleted", "deactivated", "left", "blocked", "readonly"]
 
 
 class TelegramChatError(RuntimeError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+def _chat_validity(entity: Any) -> ChatInvalidReason | None:
+    """Report a chat that Telegram itself already marks as unusable.
+
+    Reads only the flags carried by the dialog entity, so listing chats stays a
+    single request. ``default_banned_rights`` describes plain members, so it is
+    ignored for administrators of announcement-style channels.
+    """
+    if getattr(entity, "deleted", False):
+        return "deleted"
+    if getattr(entity, "deactivated", False):
+        return "deactivated"
+    if getattr(entity, "left", False):
+        return "left"
+
+    restrictions = [getattr(entity, "banned_rights", None)]
+    if getattr(entity, "admin_rights", None) is None:
+        restrictions.append(getattr(entity, "default_banned_rights", None))
+    for rights in restrictions:
+        if rights is None:
+            continue
+        if getattr(rights, "view_messages", False):
+            return "blocked"
+        if getattr(rights, "send_messages", False):
+            return "readonly"
+
+    return None
 
 
 def _chat_record(entity: Any, *, include_private: bool = False) -> TelegramChat | None:
@@ -38,6 +67,7 @@ def _chat_record(entity: Any, *, include_private: bool = False) -> TelegramChat 
         title=_display_name(entity),
         kind=_chat_kind(entity),
         username=getattr(entity, "username", None),
+        invalid_reason=_chat_validity(entity),
     )
 
 
@@ -47,6 +77,7 @@ class TelegramChat:
     title: str
     kind: ChatKind
     username: str | None = None
+    invalid_reason: ChatInvalidReason | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

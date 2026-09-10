@@ -6,6 +6,7 @@ import { useTelegramChats } from '../hooks/useTelegramChats'
 import type { ChatGroup, ChatRef, TelegramChat } from '../types'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
+import { ChatInvalidBadge } from './ChatInvalidBadge'
 
 interface ChatTagInputProps {
   value: ChatRef[]
@@ -139,6 +140,7 @@ export function ChatTagInput({
             >
               {unknown ? <TriangleAlert className="shrink-0" size={12} /> : null}
               {label}
+              {chat ? <ChatInvalidBadge chat={chat} /> : null}
               <button
                 type="button"
                 aria-label={t('chatInput.remove', { name: label })}
@@ -194,7 +196,7 @@ export function ChatTagInput({
       <Popover.Portal>
         <Popover.Content
           className={cn(
-            'z-100 w-64 overflow-hidden rounded-md border',
+            'z-100 w-80 overflow-hidden rounded-md border',
             'border-slate-200 bg-white shadow-xl',
           )}
           side="bottom"
@@ -297,9 +299,12 @@ export function ChatTagInput({
                     )}
                     onClick={() => toggleChat(chat.id)}
                   >
-                    <span className="min-w-0 flex-1 truncate">
-                      {chat.title}
-                      {chat.username ? ` (@${chat.username})` : ''}
+                    <span className="flex min-w-0 flex-1 items-center gap-1">
+                      <span className="truncate">
+                        {chat.title}
+                        {chat.username ? ` (@${chat.username})` : ''}
+                      </span>
+                      <ChatInvalidBadge chat={chat} />
                     </span>
                     <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
                     <span className="grid size-4 shrink-0 place-items-center text-blue-600">

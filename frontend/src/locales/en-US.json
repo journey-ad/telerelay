@@ -125,6 +125,13 @@
   },
   "chatInput": {
     "unknown": "Unknown chat [{{id}}]",
+    "invalidReasons": {
+      "deleted": "Deleted",
+      "deactivated": "Closed",
+      "blocked": "Banned",
+      "left": "Left chat",
+      "readonly": "Muted"
+    },
     "remove": "Remove {{name}}",
     "addChat": "Add chat",
     "groups": "Chat groups",

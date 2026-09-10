@@ -6,6 +6,7 @@ import { useTelegramChats } from '../hooks/useTelegramChats'
 import type { TelegramChat } from '../types'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
+import { ChatInvalidBadge } from './ChatInvalidBadge'
 
 interface ChatSelectProps {
   value: string
@@ -67,9 +68,13 @@ export function ChatSelect({
           )}
         >
           <span
-            className={cn('min-w-0 flex-1 truncate', value ? 'text-slate-700' : 'text-slate-400')}
+            className={cn(
+              'flex min-w-0 flex-1 items-center gap-1',
+              value ? 'text-slate-700' : 'text-slate-400',
+            )}
           >
-            {selectedLabel}
+            <span className="truncate">{selectedLabel}</span>
+            {selected ? <ChatInvalidBadge chat={selected} /> : null}
           </span>
           <ChevronDown size={15} className="shrink-0 text-slate-500" aria-hidden="true" />
         </button>
@@ -77,7 +82,7 @@ export function ChatSelect({
       <Popover.Portal>
         <Popover.Content
           className={cn(
-            'z-100 w-(--radix-popover-trigger-width) overflow-hidden rounded-md border',
+            'z-100 w-(--radix-popover-trigger-width) min-w-80 overflow-hidden rounded-md border',
             'border-slate-200 bg-white shadow-xl',
           )}
           side="bottom"
@@ -116,7 +121,10 @@ export function ChatSelect({
                     )}
                     onClick={() => selectChat(chat)}
                   >
-                    <span className="min-w-0 flex-1 truncate">{chatLabel(chat)}</span>
+                    <span className="flex min-w-0 flex-1 items-center gap-1">
+                      <span className="truncate">{chatLabel(chat)}</span>
+                      <ChatInvalidBadge chat={chat} />
+                    </span>
                     <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
                     <span className="grid size-4 shrink-0 place-items-center text-blue-600">
                       {isSelected ? <Check size={13} strokeWidth={2.5} /> : null}
