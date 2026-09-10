@@ -7,10 +7,24 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from telethon.errors import ChatForwardsRestrictedError, FloodWaitError
+from telethon.errors import (
+    ChannelPrivateError,
+    ChatForwardsRestrictedError,
+    ChatWriteForbiddenError,
+    FloodWaitError,
+    MediaEmptyError,
+    PeerIdInvalidError,
+    UserBannedInChannelError,
+)
 
 from backend.bot_manager import BotManager
-from backend.forward_queue import ForwardQueue, ForwardQueueStore
+from backend.forward_queue import (
+    ForwardQueue,
+    ForwardQueueStore,
+    MissingForwardTargets,
+    SourceMessageUnavailable,
+    TargetsUnavailable,
+)
 from backend.forwarder.forwarder import MessageForwarder
 from backend.rule import ForwardingRule
 
@@ -616,6 +630,109 @@ class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(calls, [item.id])
             self.assertEqual(store.get_item(item.id).status, "completed")
+
+    async def test_unavailable_source_message_fails_without_retrying(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            gone, _ = store.enqueue(
+                rule_data=rule_data("gone"),
+                source_chat_id=-1001,
+                source_message_id=11,
+                sender_id=7,
+                grouped_id=None,
+            )
+            following, _ = store.enqueue(
+                rule_data=rule_data("following"),
+                source_chat_id=-1001,
+                source_message_id=12,
+                sender_id=7,
+                grouped_id=None,
+            )
+            calls = []
+            outcomes = []
+
+            async def processor(item):
+                calls.append(item.id)
+                if item.id == gone.id:
+                    raise SourceMessageUnavailable(
+                        f"Source message {item.source_chat_id}/{item.source_message_id}"
+                        " is no longer available"
+                    )
+                return 0
+
+            queue = ForwardQueue(
+                store,
+                processor,
+                retry_base_seconds=0.01,
+                poll_interval=0.01,
+                on_outcome=lambda item, status, error: outcomes.append((item.id, status)),
+            )
+            await queue.start()
+            for _ in range(100):
+                if store.get_item(following.id).status == "completed":
+                    break
+                await asyncio.sleep(0.01)
+            await queue.stop()
+
+            failed = store.get_item(gone.id)
+            self.assertEqual(failed.status, "failed")
+            self.assertEqual(failed.attempt_count, 1)
+            self.assertIn("no longer available", failed.last_error)
+            self.assertEqual(store.get_item(following.id).status, "completed")
+            self.assertEqual(calls, [gone.id, following.id])
+            self.assertEqual(
+                outcomes, [(gone.id, "failed"), (following.id, "completed")]
+            )
+
+    async def test_permanent_errors_fail_without_retrying(self):
+        permanent = [
+            MissingForwardTargets("no target configured"),
+            TargetsUnavailable("all targets unavailable"),
+            ChatForwardsRestrictedError(request=None),
+            ChatWriteForbiddenError(request=None),
+            ChannelPrivateError(request=None),
+            UserBannedInChannelError(request=None),
+            PeerIdInvalidError(request=None),
+            MediaEmptyError(request=None),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            items = [
+                store.enqueue(
+                    rule_data=rule_data(f"permanent-{index}"),
+                    source_chat_id=-1001,
+                    source_message_id=100 + index,
+                    sender_id=7,
+                    grouped_id=None,
+                )[0]
+                for index in range(len(permanent))
+            ]
+            errors = {item.id: error for item, error in zip(items, permanent)}
+            calls = []
+
+            async def processor(item):
+                calls.append(item.id)
+                raise errors[item.id]
+
+            queue = ForwardQueue(
+                store,
+                processor,
+                retry_base_seconds=0.01,
+                poll_interval=0.01,
+            )
+            await queue.start()
+            for _ in range(200):
+                if all(store.get_item(item.id).status == "failed" for item in items):
+                    break
+                await asyncio.sleep(0.01)
+            await queue.stop()
+
+            # Every task tried exactly once, none waited for max_retries.
+            self.assertEqual(calls, [item.id for item in items])
+            for item in items:
+                saved = store.get_item(item.id)
+                self.assertEqual(saved.status, "failed")
+                self.assertEqual(saved.attempt_count, 1)
 
     async def test_floodwait_pauses_all_items_and_survives_restart(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1262,6 +1379,67 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
             forwarder.client.send_file.call_args.kwargs["caption"],
             "",
         )
+
+    async def test_unavailable_target_is_skipped_and_others_still_receive(self):
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.rule = SimpleNamespace(
+            name="queue-rule",
+            target_chats=["forbidden", "healthy"],
+            force_forward=False,
+            hide_sender=False,
+            hide_media_caption=False,
+            add_source_info=False,
+            delay=0,
+        )
+        forwarder._forward_normal = AsyncMock(
+            side_effect=[ChatWriteForbiddenError(request=None), None]
+        )
+        forwarder._log_result = lambda *args: None
+        delivered = []
+        checkpoints = []
+        forwarder.delivered_callback = delivered.append
+
+        await forwarder._do_forward(
+            [SimpleNamespace()],
+            SimpleNamespace(),
+            need_download=False,
+            is_noforwards=False,
+            on_target_success=checkpoints.append,
+        )
+
+        self.assertEqual(forwarder._forward_normal.await_count, 2)
+        self.assertEqual(delivered, ["healthy"])
+        # The checkpoint advances past the skipped target as well.
+        self.assertEqual(checkpoints, [1, 2])
+
+    async def test_all_targets_unavailable_fails_as_one_permanent_error(self):
+        forwarder = MessageForwarder.__new__(MessageForwarder)
+        forwarder.rule = SimpleNamespace(
+            name="queue-rule",
+            target_chats=["forbidden", "banned"],
+            force_forward=False,
+            hide_sender=False,
+            hide_media_caption=False,
+            add_source_info=False,
+            delay=0,
+        )
+        forwarder._forward_normal = AsyncMock(
+            side_effect=ChatWriteForbiddenError(request=None)
+        )
+        forwarder._log_result = lambda *args: None
+        checkpoints = []
+
+        with self.assertRaises(TargetsUnavailable):
+            await forwarder._do_forward(
+                [SimpleNamespace()],
+                SimpleNamespace(),
+                need_download=False,
+                is_noforwards=False,
+                on_target_success=checkpoints.append,
+            )
+
+        self.assertEqual(forwarder._forward_normal.await_count, 2)
+        self.assertEqual(checkpoints, [1, 2])
 
     async def test_restricted_forward_does_not_download_when_force_forward_disabled(self):
         forwarder = MessageForwarder.__new__(MessageForwarder)

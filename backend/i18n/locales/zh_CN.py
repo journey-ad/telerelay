@@ -117,6 +117,8 @@ TRANSLATIONS = {
             "success": "✅ 转发成功 - 规则={rule}, 来源={source}, {group_info}目标=[{targets}], 结果={success}/{total}, 内容={preview}",
             "all_failed": "❌ 转发失败: \"{preview}\" → 所有目标均失败",
             "suppressed_skipped": "跳过 {count} 个已退订目标（共 {total}）",
+            "target_skipped": "跳过不可投递的目标 - 规则={rule}, 目标={target}, 错误={error}",
+            "all_targets_unavailable": "全部 {count} 个目标均不可投递",
             "source_label": "📢 来源: https://t.me/{username}/{msg_id}",
             "source_private": "📢 来源: https://t.me/c/{channel_id}/{msg_id}",
             "source_unknown": "📢 来源: {chat_title}",

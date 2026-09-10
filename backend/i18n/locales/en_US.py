@@ -117,6 +117,8 @@ TRANSLATIONS = {
             "success": "✅ Forward succeeded - rule={rule}, source={source}, {group_info}targets=[{targets}], result={success}/{total}, content={preview}",
             "all_failed": "❌ Forward failed: \"{preview}\" → All targets failed",
             "suppressed_skipped": "Skipped {count} opted-out targets (out of {total})",
+            "target_skipped": "Target skipped - rule={rule}, target={target}, error={error}",
+            "all_targets_unavailable": "All {count} targets are unavailable",
             "source_label": "📢 Source: https://t.me/{username}/{msg_id}",
             "source_private": "📢 Source: https://t.me/c/{channel_id}/{msg_id}",
             "source_unknown": "📢 Source: {chat_title}",

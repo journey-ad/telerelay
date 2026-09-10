@@ -20,6 +20,7 @@ from backend.forward_queue import (
     ForwardQueue,
     ForwardQueueItem,
     ForwardQueueStore,
+    SourceMessageUnavailable,
     rule_fingerprint,
 )
 from backend.forwarder import MessageForwarder
@@ -636,7 +637,7 @@ class BotManager:
         if message is None:
             message = await client.get_messages(item.source_chat_id, ids=item.source_message_id)
         if message is None:
-            raise RuntimeError(
+            raise SourceMessageUnavailable(
                 f"Source message {item.source_chat_id}/{item.source_message_id} is no longer available"
             )
         if not item.source_chat_name:

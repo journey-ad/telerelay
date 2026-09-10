@@ -211,7 +211,7 @@ class ConfigExport(ConfigModel):
 
 class ConfigForwardQueue(ConfigModel):
     db_path: str = Field(default="data/forward_queue.db", json_schema_extra={"readOnly": True})
-    max_retries: int = Field(default=5, ge=1, le=100)
+    max_retries: int = Field(default=3, ge=1, le=100)
     retry_base_seconds: float = Field(default=5, ge=0.1, le=3600)
     flood_wait_buffer: float = Field(default=1, ge=0, le=60)
     poll_interval: float = Field(default=1, ge=0.05, le=60)

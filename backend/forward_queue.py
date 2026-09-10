@@ -19,7 +19,19 @@ from typing import Any, Awaitable, Callable, Optional
 
 from sqlalchemy import case, delete, func, inspect, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from telethon.errors import FloodWaitError
+from telethon.errors import (
+    ChatAdminRequiredError,
+    ChannelInvalidError,
+    ChannelPrivateError,
+    ChatForwardsRestrictedError,
+    ChatWriteForbiddenError,
+    FloodWaitError,
+    MediaEmptyError,
+    MessageIdInvalidError,
+    PeerIdInvalidError,
+    UserBannedInChannelError,
+    UserNotParticipantError,
+)
 
 from backend.database import (
     Base,
@@ -37,6 +49,49 @@ logger = get_logger()
 
 class QueueItemCancelled(Exception):
     """Raised when a queue item is cancelled while it is being processed."""
+
+
+class SourceMessageUnavailable(Exception):
+    """Raised when the queued source message can no longer be fetched.
+
+    Retrying cannot recover a deleted message, so the task fails immediately.
+    """
+
+
+class MissingForwardTargets(Exception):
+    """Raised when a queued rule snapshot has no target chat to send to."""
+
+
+class TargetsUnavailable(Exception):
+    """Raised when every target of a task permanently refused the message."""
+
+
+# Errors raised while sending to one target that retrying cannot resolve for
+# that chat: the task skips the target and keeps delivering to the others.
+TARGET_ERRORS: tuple[type[Exception], ...] = (
+    ChatWriteForbiddenError,
+    UserBannedInChannelError,
+    ChatAdminRequiredError,
+    UserNotParticipantError,
+    ChannelPrivateError,
+    ChannelInvalidError,
+    PeerIdInvalidError,
+)
+
+# Failures that retrying cannot resolve at all; a task raising one of these
+# fails on its first attempt. Target-level errors belong here too: they are
+# equally permanent when they surface outside a single-target send (for example
+# while reading the source chat). FloodWaitError is absent on purpose: it is
+# handled by pausing the whole queue instead.
+PERMANENT_ERRORS: tuple[type[Exception], ...] = (
+    SourceMessageUnavailable,
+    MissingForwardTargets,
+    TargetsUnavailable,
+    ChatForwardsRestrictedError,
+    MessageIdInvalidError,
+    MediaEmptyError,
+    *TARGET_ERRORS,
+)
 
 
 def rule_fingerprint(rule_data: dict[str, Any]) -> str:
@@ -651,7 +706,7 @@ class ForwardQueue:
         store: ForwardQueueStore,
         processor: Callable[[ForwardQueueItem], Awaitable[Optional[float]]],
         *,
-        max_retries: int = 5,
+        max_retries: int = 3,
         retry_base_seconds: float = 5.0,
         flood_wait_buffer: float = 1.0,
         poll_interval: float = 1.0,
@@ -821,7 +876,9 @@ class ForwardQueue:
                 self.store.remove_item(item.id)
                 return
             failure_count = item.failure_count + 1
-            if failure_count >= self.max_retries:
+            if failure_count >= self.max_retries or isinstance(exc, PERMANENT_ERRORS):
+                # Permanent failures (deleted source, lost access, bad config)
+                # never recover by retrying.
                 self.store.mark_failed(item.id, str(exc), increment_failure=True)
                 logger.error(
                     t(

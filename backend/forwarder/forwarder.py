@@ -18,7 +18,12 @@ from telethon.tl.types import (
 from backend.constants import FORWARD_PREVIEW_LENGTH
 from backend.dedup import DeduplicateCache
 from backend.filters import MessageFilter, get_media_type
-from backend.forward_queue import QueueItemCancelled
+from backend.forward_queue import (
+    TARGET_ERRORS,
+    MissingForwardTargets,
+    QueueItemCancelled,
+    TargetsUnavailable,
+)
 from backend.i18n import t
 from backend.logger import get_logger
 from backend.rule import ForwardingRule
@@ -99,7 +104,7 @@ class MessageForwarder:
         """
         targets = self.rule.target_chats
         if not targets:
-            raise RuntimeError(t("log.forward.no_target"))
+            raise MissingForwardTargets(t("log.forward.no_target"))
 
         # 1. Preprocess
         messages = (
@@ -173,6 +178,7 @@ class MessageForwarder:
         session_dir = None
         sent_count = 0
         skipped_count = 0
+        unavailable_targets = []
         try:
             if cancel_check and cancel_check():
                 raise QueueItemCancelled()
@@ -206,27 +212,46 @@ class MessageForwarder:
                         on_target_success(i + 1)
                     continue
                 try:
-                    if downloaded_files:
+                    try:
+                        if downloaded_files:
+                            await self._send_files(downloaded_files, messages, target, source_data, source_text)
+                        else:
+                            await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
+
+                    except ChatForwardsRestrictedError:
+                        # Only an explicitly enabled force-forward rule may turn a
+                        # restricted forward into a download + upload operation.
+                        # With force-forward disabled, preserve the restriction and
+                        # let the durable queue handle the failed delivery instead
+                        # of silently uploading protected media.
+                        if not self.rule.force_forward:
+                            raise
+
+                        # Forwarding restricted, fallback to download and resend
+                        logger.debug(t("log.forward.restricted_fallback"))
+                        if not downloaded_files:
+                            downloaded_files, session_dir = await self.downloader.download(messages)
+                        if not downloaded_files:
+                            raise RuntimeError(t("log.forward.download_failed"))
                         await self._send_files(downloaded_files, messages, target, source_data, source_text)
-                    else:
-                        await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
 
-                except ChatForwardsRestrictedError:
-                    # Only an explicitly enabled force-forward rule may turn a
-                    # restricted forward into a download + upload operation.
-                    # With force-forward disabled, preserve the restriction and
-                    # let the durable queue handle the failed delivery instead
-                    # of silently uploading protected media.
-                    if not self.rule.force_forward:
-                        raise
-
-                    # Forwarding restricted, fallback to download and resend
-                    logger.debug(t("log.forward.restricted_fallback"))
-                    if not downloaded_files:
-                        downloaded_files, session_dir = await self.downloader.download(messages)
-                    if not downloaded_files:
-                        raise RuntimeError(t("log.forward.download_failed"))
-                    await self._send_files(downloaded_files, messages, target, source_data, source_text)
+                except TARGET_ERRORS as exc:
+                    # This chat will never accept the message (forbidden, banned,
+                    # unreachable peer). Skip it and keep delivering to the rest;
+                    # the durable checkpoint advances with the skipped target so
+                    # a retry never waits on it again.
+                    unavailable_targets.append(target)
+                    logger.warning(
+                        t(
+                            "log.forward.target_skipped",
+                            rule=self.rule.name,
+                            target=target,
+                            error=exc,
+                        )
+                    )
+                    if on_target_success:
+                        on_target_success(i + 1)
+                    continue
 
                 sent_count += 1
                 if self.delivered_callback:
@@ -248,6 +273,12 @@ class MessageForwarder:
                     count=skipped_count,
                     total=len(targets),
                 )
+            )
+        if not sent_count and unavailable_targets:
+            # Nothing was delivered anywhere, so report one permanent failure
+            # instead of letting the queue retry every unavailable target.
+            raise TargetsUnavailable(
+                t("log.forward.all_targets_unavailable", count=len(unavailable_targets))
             )
         if sent_count or not skipped_count:
             # Report success/failure only when delivery was actually attempted.

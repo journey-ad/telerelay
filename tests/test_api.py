@@ -1275,6 +1275,10 @@ class ApiContractTests(unittest.TestCase):
             100,
         )
         self.assertEqual(
+            definitions["ConfigForwardQueue"]["properties"]["max_retries"]["default"],
+            3,
+        )
+        self.assertEqual(
             definitions["ConfigIgnore"]["properties"]["user_ids"]["x-item-control"],
             "integer-tags",
         )

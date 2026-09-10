@@ -309,9 +309,9 @@ class Config:
     def forward_queue_max_retries(self) -> int:
         queue_config = self.config_data.get("forward_queue", {}) or {}
         try:
-            value = int(queue_config.get("max_retries", 5))
+            value = int(queue_config.get("max_retries", 3))
         except (TypeError, ValueError):
-            value = 5
+            value = 3
         return max(1, min(value, 100))
 
     @property
