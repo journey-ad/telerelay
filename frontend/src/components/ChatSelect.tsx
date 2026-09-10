@@ -2,7 +2,7 @@ import * as Popover from '@radix-ui/react-popover'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useTelegramChats } from '../hooks/useTelegramChats'
+import { useReferencedChats, useTelegramChats } from '../hooks/useTelegramChats'
 import type { TelegramChat } from '../types'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
@@ -29,11 +29,16 @@ export function ChatSelect({
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const chats = useTelegramChats()
-  const selected = chats.data?.find((chat) => String(chat.id) === value)
+  const extras = useReferencedChats(chats.data, value ? [value] : [])
+  const directory = useMemo(
+    () => [...(chats.data ?? []), ...(extras.data ?? [])],
+    [chats.data, extras.data],
+  )
+  const selected = directory.find((chat) => String(chat.id) === value)
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
-    return (chats.data ?? []).filter((chat) => chatMatches(chat, term))
-  }, [chats.data, search])
+    return directory.filter((chat) => chatMatches(chat, term))
+  }, [directory, search])
 
   function handleOpenChange(next: boolean) {
     setOpen(next)

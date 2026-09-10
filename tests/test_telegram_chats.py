@@ -1,9 +1,13 @@
+import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
 
+from telethon import errors
 from telethon.tl import types
 
-from backend.telegram_chats import _chat_record
+from backend.telegram_chats import TelegramChat, TelegramChatService, _chat_record
 
 
 def _chat_ban(**flags):
@@ -92,6 +96,125 @@ class ChatValidityTests(unittest.TestCase):
         )
 
         self.assertEqual(_chat_record(entity).invalid_reason, "readonly")
+
+
+class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
+    def _service(self, temp_dir: str) -> TelegramChatService:
+        session = Path(temp_dir) / "101" / "telegram.session"
+        session.parent.mkdir(parents=True, exist_ok=True)
+        session.touch()
+        store = SimpleNamespace(session_name=lambda account_id: session)
+        return TelegramChatService(bot_manager=None, account_store=store)
+
+    def test_forbidden_entities_are_listed_as_blocked(self):
+        channel = _chat_record(
+            types.ChannelForbidden(id=9, access_hash=1, title="Banned channel", broadcast=True)
+        )
+        group = _chat_record(
+            types.ChannelForbidden(id=10, access_hash=1, title="Banned group", megagroup=True)
+        )
+        basic = _chat_record(types.ChatForbidden(id=11, title="Banned chat"))
+
+        self.assertEqual(channel.invalid_reason, "blocked")
+        self.assertEqual(channel.kind, "channel")
+        self.assertEqual(group.invalid_reason, "blocked")
+        self.assertEqual(group.kind, "supergroup")
+        self.assertEqual(basic.invalid_reason, "blocked")
+        self.assertEqual(basic.kind, "group")
+
+    def test_record_chat_refreshes_a_stored_chat(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.record_chat("101", types.Channel(id=9, title="Old name", photo=None, date=None))
+
+            # A later sighting with new flags must replace the stored entry.
+            service.record_chat(
+                "101",
+                types.Channel(id=9, title="New name", photo=None, date=None, left=True),
+            )
+            stored = service._known_chats("101")
+
+            self.assertEqual([chat.title for chat in stored], ["New name"])
+            self.assertEqual(stored[0].invalid_reason, "left")
+
+    def test_record_chat_updates_flags_of_a_known_chat(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.record_chat("101", types.Channel(id=9, title="Stored", photo=None, date=None))
+            service.record_chat(
+                "101",
+                types.ChannelForbidden(id=9, access_hash=1, title="Stored", broadcast=True),
+            )
+
+            stored = service._known_chats("101")
+
+            self.assertEqual(stored[0].title, "Stored")
+            self.assertEqual(stored[0].invalid_reason, "blocked")
+
+    def test_scrubbed_accounts_are_marked_deleted(self):
+        record = _chat_record(types.UserEmpty(id=4242))
+
+        self.assertEqual(record.invalid_reason, "deleted")
+        self.assertEqual(record.title, "4242")
+
+    async def test_referenced_chats_missing_from_telegram_are_marked(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+
+            async def get_entity(chat_id):
+                raise errors.PeerIdInvalidError(request=None)
+
+            listed = await service._with_referenced_chats(
+                SimpleNamespace(get_entity=get_entity), [], (-100123,)
+            )
+
+            self.assertEqual([chat.id for chat in listed], [-100123])
+            self.assertEqual(listed[0].invalid_reason, "blocked")
+
+    async def test_referenced_chats_are_resolved_and_kept(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+
+            async def get_entity(chat_id):
+                return types.ChannelForbidden(id=abs(chat_id), access_hash=1, title="Banned", broadcast=True)
+
+            listed = await service._with_referenced_chats(
+                SimpleNamespace(get_entity=get_entity), [], (-100123,)
+            )
+
+            self.assertEqual(listed[0].title, "Banned")
+            self.assertEqual(listed[0].invalid_reason, "blocked")
+
+    async def test_already_listed_chats_are_not_resolved_again(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            calls = []
+
+            async def get_entity(chat_id):
+                calls.append(chat_id)
+                return types.Channel(id=chat_id, title="Listed", photo=None, date=None)
+
+            listed = await service._with_referenced_chats(
+                SimpleNamespace(get_entity=get_entity),
+                [TelegramChat(id=-100123, title="Listed", kind="channel")],
+                (-100123,),
+            )
+
+            self.assertEqual(calls, [])
+            self.assertEqual(len(listed), 1)
+
+    def test_recording_a_scrubbed_account_keeps_the_stored_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.record_chat(
+                "101", types.User(id=12, access_hash=1, first_name="Alice", username="alice")
+            )
+            service.record_chat("101", types.UserEmpty(id=12))
+
+            stored = service._known_chats("101")
+
+            self.assertEqual(stored[0].title, "Alice")
+            self.assertEqual(stored[0].invalid_reason, "deleted")
 
 
 if __name__ == "__main__":

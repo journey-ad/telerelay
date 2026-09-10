@@ -130,7 +130,8 @@
       "deactivated": "Closed",
       "blocked": "Banned",
       "left": "Left chat",
-      "readonly": "Muted"
+      "readonly": "Muted",
+      "missing": "Not found"
     },
     "remove": "Remove {{name}}",
     "addChat": "Add chat",

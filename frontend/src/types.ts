@@ -332,7 +332,7 @@ export interface TelegramChat {
   kind: 'bot' | 'private' | 'group' | 'supergroup' | 'channel'
   username?: string | null
   /** Set when Telegram reports the chat as unusable (see chatInput.invalidReasons). */
-  invalid_reason?: 'deleted' | 'deactivated' | 'left' | 'blocked' | 'readonly' | null
+  invalid_reason?: 'deleted' | 'deactivated' | 'left' | 'blocked' | 'readonly' | 'missing' | null
 }
 export interface ExportTask {
   id: number

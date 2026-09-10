@@ -324,7 +324,9 @@ class TelegramChatResponse(StrictModel):
     title: str
     kind: Literal["bot", "private", "group", "supergroup", "channel"]
     username: str | None = None
-    invalid_reason: Literal["deleted", "deactivated", "left", "blocked", "readonly"] | None = None
+    invalid_reason: Literal[
+        "deleted", "deactivated", "left", "blocked", "readonly", "missing"
+    ] | None = None
 
 
 class GroupExportRequest(StrictModel):

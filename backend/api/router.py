@@ -112,6 +112,20 @@ def _telegram_chats(context: ApplicationContext):
     return context.telegram_chats
 
 
+def _chat_ids(raw: str | None) -> tuple[int, ...]:
+    """Parse the optional comma-separated chat ids a picker wants resolved."""
+    ids = []
+    for token in (raw or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            ids.append(int(token))
+        except ValueError:
+            continue
+    return tuple(ids)
+
+
 def _telegram_resource(context: ApplicationContext):
     if not context.telegram_resource:
         raise _error(
@@ -263,10 +277,15 @@ async def refresh_telegram_account(
 )
 async def telegram_account_chats(
     account_id: str,
+    include: str | None = Query(None, description="Comma-separated chat ids to resolve when unlisted"),
     context: ApplicationContext = Depends(get_context),
 ) -> list[dict]:
     try:
-        chats = await asyncio.to_thread(_telegram_chats(context).list_chats, account_id)
+        chats = await asyncio.to_thread(
+            _telegram_chats(context).list_chats,
+            account_id,
+            include=_chat_ids(include),
+        )
         return [chat.to_dict() for chat in chats]
     except TelegramChatError as exc:
         raise _telegram_chat_error(exc) from exc

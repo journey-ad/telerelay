@@ -130,7 +130,8 @@
       "deactivated": "已解散",
       "left": "已退出",
       "blocked": "已封禁",
-      "readonly": "禁言中"
+      "readonly": "禁言中",
+      "missing": "不存在"
     },
     "remove": "移除 {{name}}",
     "addChat": "添加会话",

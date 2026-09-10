@@ -2,7 +2,7 @@ import * as Popover from '@radix-ui/react-popover'
 import { Check, FolderKanban, Plus, Search, TriangleAlert, X } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useTelegramChats } from '../hooks/useTelegramChats'
+import { useReferencedChats, useTelegramChats } from '../hooks/useTelegramChats'
 import type { ChatGroup, ChatRef, TelegramChat } from '../types'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
@@ -48,11 +48,18 @@ export function ChatTagInput({
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
 
   const chats = useTelegramChats()
+  const extras = useReferencedChats(chats.data, value)
+  // Referenced chats that Telegram no longer lists stay visible here, marked by
+  // the badge component instead of showing up as unknown.
+  const directory = useMemo(
+    () => [...(chats.data ?? []), ...(extras.data ?? [])],
+    [chats.data, extras.data],
+  )
 
-  const filtered = useMemo(() => {
-    if (!chats.data) return []
-    return chats.data.filter((chat) => chatMatches(chat, search))
-  }, [chats.data, search])
+  const filtered = useMemo(
+    () => directory.filter((chat) => chatMatches(chat, search)),
+    [directory, search],
+  )
 
   const customChat = search.trim() ? parseChatRef(search.trim()) : null
   const customChatSelected = customChat !== null && value.some((item) => sameChat(item, customChat))
@@ -122,7 +129,7 @@ export function ChatTagInput({
           </span>
         ))}
         {value.map((chatId, index) => {
-          const chat = findChat(chats.data, chatId)
+          const chat = findChat(directory, chatId)
           const unknown = chats.isSuccess && !chat
           const label =
             chat?.title ?? (unknown ? t('chatInput.unknown', { id: chatId }) : String(chatId))

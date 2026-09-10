@@ -6,7 +6,7 @@ import { accountRequest, json } from '../api/client'
 import { ChatTagInput } from '../components/ChatTagInput'
 import { MultiValueInput } from '../components/MultiValueInput'
 import { RegexField, useRegexValidation } from '../components/RegexField'
-import { useTelegramChats } from '../hooks/useTelegramChats'
+import { useReferencedChats, useTelegramChats } from '../hooks/useTelegramChats'
 import { useAccountScope } from '../hooks/useAccountScope'
 import {
   Badge,
@@ -89,14 +89,26 @@ export function RulesPage() {
     queryFn: () => accountRequest<Stats>(accountId, '/api/v1/stats?date_limit=all'),
   })
   const chatsQuery = useTelegramChats()
+  // Chats the rules reference but Telegram no longer lists are resolved too, so
+  // banned or deleted ones keep their name here instead of showing as a bare id.
+  const referencedChats = useMemo(
+    () => (rulesQuery.data ?? []).flatMap((rule) => [...rule.source_chats, ...rule.target_chats]),
+    [rulesQuery.data],
+  )
+  const referencedQuery = useReferencedChats(chatsQuery.data, referencedChats)
   const groupsKey = ['chat-groups', accountId] as const
   const groupsQuery = useQuery({
     queryKey: groupsKey,
     queryFn: () => accountRequest<ChatGroup[]>(accountId, '/api/v1/chat-groups'),
   })
   const chatLabels = useMemo(
-    () => new Map((chatsQuery.data ?? []).map((chat) => [String(chat.id), chat.title] as const)),
-    [chatsQuery.data],
+    () =>
+      new Map(
+        [...(chatsQuery.data ?? []), ...(referencedQuery.data ?? [])].map(
+          (chat) => [String(chat.id), chat.title] as const,
+        ),
+      ),
+    [chatsQuery.data, referencedQuery.data],
   )
   const ruleStats = useMemo(
     () => new Map((statsQuery.data?.rules ?? []).map((item) => [item.rule_name, item] as const)),

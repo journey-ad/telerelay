@@ -198,8 +198,8 @@ class FakeTelegramChats:
         )
         self.chats = [self.chat]
 
-    def list_chats(self, account_id):
-        self.calls.append(("list", account_id))
+    def list_chats(self, account_id, timeout=90, include=()):
+        self.calls.append(("list", account_id, tuple(include)))
         return list(self.chats)
 
     def get_chat(self, account_id, chat_id):
@@ -1023,8 +1023,19 @@ class ApiContractTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertEqual(self.telegram_chats.calls, [("list", self.account_id)])
+        self.assertEqual(self.telegram_chats.calls, [("list", self.account_id, ())])
         self.assertEqual(self.client.get("/api/v1/exports/chats").status_code, 404)
+
+    def test_telegram_account_chats_pass_referenced_ids(self):
+        response = self.client.get(
+            f"/api/v1/telegram-accounts/{self.account_id}/chats",
+            params={"include": "-100123, -5267896688,bogus"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            self.telegram_chats.calls, [("list", self.account_id, (-100123, -5267896688))]
+        )
 
     def test_telegram_account_chats_report_invalid_chats(self):
         self.telegram_chats.chats = [

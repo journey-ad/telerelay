@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -19,7 +19,24 @@ from backend.telegram_accounts import TelegramAccountError
 logger = get_logger()
 
 ChatKind = Literal["bot", "private", "group", "supergroup", "channel"]
-ChatInvalidReason = Literal["deleted", "deactivated", "left", "blocked", "readonly"]
+ChatInvalidReason = Literal["deleted", "deactivated", "left", "blocked", "readonly", "missing"]
+
+# Resolution failures that mean the chat is gone rather than temporarily
+# unreachable, so a rate limit or connection error is not in this list.
+# Telethon raises ValueError when Telegram does not know the id at all.
+PERMANENT_RESOLVE_ERRORS = (
+    errors.ChannelPrivateError,
+    errors.ChannelInvalidError,
+    errors.PeerIdInvalidError,
+    ValueError,
+)
+
+# Referenced chats resolved per chat-directory request.
+MAX_RESOLVED_CHATS = 50
+
+
+def _resolve_reason(exc: Exception) -> ChatInvalidReason:
+    return "missing" if isinstance(exc, ValueError) else "blocked"
 
 
 class TelegramChatError(RuntimeError):
@@ -57,6 +74,23 @@ def _chat_validity(entity: Any) -> ChatInvalidReason | None:
 
 
 def _chat_record(entity: Any, *, include_private: bool = False) -> TelegramChat | None:
+    # Telegram replaces channels and groups the account was banned from with a
+    # "forbidden" variant, and scrubs deleted or banned accounts to an id-only
+    # user. Both are kept in the directory, marked, instead of being dropped.
+    if isinstance(entity, (types.ChannelForbidden, types.ChatForbidden)):
+        return TelegramChat(
+            id=int(utils.get_peer_id(entity)),
+            title=_display_name(entity),
+            kind=_chat_kind(entity),
+            invalid_reason="blocked",
+        )
+    if isinstance(entity, types.UserEmpty):
+        return TelegramChat(
+            id=int(entity.id),
+            title=str(entity.id),
+            kind="private",
+            invalid_reason="deleted",
+        )
     if isinstance(entity, types.User):
         if not include_private and not bool(getattr(entity, "bot", False)):
             return None
@@ -83,6 +117,15 @@ class TelegramChat:
         return asdict(self)
 
 
+def _record_from_dict(item: Any) -> TelegramChat | None:
+    if not isinstance(item, dict):
+        return None
+    try:
+        return TelegramChat(**item)
+    except (TypeError, ValueError):
+        return None
+
+
 def _display_name(entity: Any) -> str:
     title = getattr(entity, "title", None)
     if title:
@@ -101,11 +144,9 @@ def _display_name(entity: Any) -> str:
 def _chat_kind(entity: Any) -> ChatKind:
     if isinstance(entity, types.User):
         return "bot" if getattr(entity, "bot", False) else "private"
-    if isinstance(entity, types.Chat):
+    if isinstance(entity, (types.Chat, types.ChatForbidden)):
         return "group"
-    if isinstance(entity, types.Channel) and getattr(entity, "megagroup", False):
-        return "supergroup"
-    return "channel"
+    return "supergroup" if getattr(entity, "megagroup", False) else "channel"
 
 
 class TelegramChatService:
@@ -115,14 +156,21 @@ class TelegramChatService:
         self.bot_manager = bot_manager
         self.account_store = account_store
 
-    def list_chats(self, account_id: str, timeout: float = 90) -> list[TelegramChat]:
+    def list_chats(
+        self,
+        account_id: str,
+        timeout: float = 90,
+        include: tuple[int, ...] = (),
+    ) -> list[TelegramChat]:
         try:
             public = self.account_store.get_public(account_id)
         except TelegramAccountError as exc:
             raise TelegramChatError(exc.code, str(exc)) from exc
         if public.get("kind") == "bot":
+            # A bot gets no dialog list, so its picker reads the stored chats,
+            # refreshed whenever the runtime sees the chat again.
             return self._known_chats(account_id)
-        return self._result(account_id, self._list_chats, timeout=timeout)
+        return self._result(account_id, self._list_chats, include, timeout=timeout)
 
     def record_chat(self, account_id: str, entity: Any) -> None:
         """Persist one chat seen by a bot runtime so pickers can list it."""
@@ -132,8 +180,12 @@ class TelegramChatService:
             return
         path = self._known_chats_path(account_id)
         known = self._load_known_chats(path)
-        if str(chat.id) in known:
-            # already known, no need to update
+        if isinstance(entity, types.UserEmpty):
+            # Telegram only reports the id; keep the name already recorded.
+            stored = _record_from_dict(known.get(str(chat.id)))
+            if stored is not None:
+                chat = replace(stored, invalid_reason="deleted")
+        if known.get(str(chat.id)) == chat.to_dict():
             return
         known[str(chat.id)] = chat.to_dict()
         if len(known) > self.MAX_KNOWN_CHATS:
@@ -146,12 +198,7 @@ class TelegramChatService:
 
     def _known_chats(self, account_id: str) -> list[TelegramChat]:
         known = self._load_known_chats(self._known_chats_path(account_id))
-        chats = []
-        for item in known.values():
-            try:
-                chats.append(TelegramChat(**item))
-            except (TypeError, ValueError):
-                continue
+        chats = [chat for chat in map(_record_from_dict, known.values()) if chat]
         return sorted(chats, key=lambda chat: (chat.title.casefold(), chat.id))
 
     @staticmethod
@@ -207,13 +254,47 @@ class TelegramChatService:
         except RuntimeError as exc:
             raise TelegramChatError("telegram_not_connected", str(exc)) from exc
 
-    async def _list_chats(self, client) -> list[TelegramChat]:
+    async def _list_chats(
+        self, client, include: tuple[int, ...] = ()
+    ) -> list[TelegramChat]:
         chats = []
         async for dialog in client.iter_dialogs():
             chat = _chat_record(dialog.entity)
             if chat:
                 chats.append(chat)
-        return sorted(chats, key=lambda item: (item.title.casefold(), item.id))
+        return await self._with_referenced_chats(client, chats, include)
+
+    async def _with_referenced_chats(
+        self, client, chats: list[TelegramChat], include: tuple[int, ...]
+    ) -> list[TelegramChat]:
+        """Add referenced chats that Telegram no longer lists.
+
+        A banned or deleted chat often disappears from the dialog list (or is
+        scrubbed), so rules and exports referencing it would otherwise show as
+        merely "unknown" instead of invalid.
+        """
+        listed = {chat.id for chat in chats}
+        missing = [chat_id for chat_id in include if chat_id not in listed]
+        resolved = []
+        for chat_id in missing[:MAX_RESOLVED_CHATS]:
+            try:
+                entity = await client.get_entity(chat_id)
+            except PERMANENT_RESOLVE_ERRORS as exc:
+                resolved.append(
+                    TelegramChat(
+                        id=chat_id,
+                        title=str(chat_id),
+                        kind="private",
+                        invalid_reason=_resolve_reason(exc),
+                    )
+                )
+                continue
+            except errors.RPCError:
+                continue
+            record = _chat_record(entity, include_private=True)
+            if record:
+                resolved.append(record)
+        return sorted([*chats, *resolved], key=lambda item: (item.title.casefold(), item.id))
 
     async def _get_chat(self, client, chat_id: int) -> TelegramChat | None:
         try:

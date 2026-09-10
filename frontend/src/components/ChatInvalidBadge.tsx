@@ -12,6 +12,7 @@ const invalidVariants = {
   blocked: { tone: 'amber', label: 'chatInput.invalidReasons.blocked' },
   left: { tone: 'amber', label: 'chatInput.invalidReasons.left' },
   readonly: { tone: 'gray', label: 'chatInput.invalidReasons.readonly' },
+  missing: { tone: 'red', label: 'chatInput.invalidReasons.missing' },
 } as const
 
 export function ChatInvalidBadge({ chat }: { chat: TelegramChat }) {
