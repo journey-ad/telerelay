@@ -72,10 +72,14 @@ type TrendStat = {
   total: number
   /** Set on the still-running bucket, drawn hollow and closed by a dashed edge. */
   running?: boolean
-  /** Whether that dashed edge ends on a full-period estimate rather than on the measured value. */
-  estimated?: boolean
-  /** Cumulative stack tops of the dashed closing segment (last complete bucket + running one). */
-  edge?: { forwarded: number; filtered: number; total: number }
+  /** Full-period estimate for the running bucket, when one is available. */
+  projected?: { forwarded: number; filtered: number; failed: number }
+  /**
+   * Dashed closing segment, mirroring what each solid series plots: the stacked
+   * bands continue from their cumulative tops, while the failure line, which is
+   * not stacked, continues from its own count.
+   */
+  edge?: { forwarded: number; filtered: number; failed: number }
 }
 type TrendIntensityStat = TrendStat & { endDate?: string }
 type HourlyStat = NonNullable<Stats['hourly']>[number]
@@ -95,6 +99,8 @@ const metricTones = {
   green: 'bg-emerald-50 text-emerald-600',
   rose: 'bg-rose-50 text-rose-600',
 }
+// Reference days averaged into the running-bucket estimate.
+const trendShareDays = 3
 const chartTooltipStyle = {
   backgroundColor: '#ffffff',
   border: '1px solid #dbe6f4',
@@ -361,27 +367,54 @@ function allTimeDays(source: NonNullable<Stats['daily']>): number {
  * Share of yesterday's traffic that had already happened by this time of day.
  * Null when yesterday carries no traffic to scale against.
  */
-function elapsedShareOfYesterday(hourly: HourlyStat[], now: Date): number | null {
-  const yesterday = localDateKey(new Date(now.getTime() - 86_400_000))
-  const rows = hourly.filter((item) => item.hour.startsWith(yesterday))
-  const full = rows.reduce((sum, item) => sum + item.forwarded + item.filtered + item.failed, 0)
-  if (full <= 0) return null
+/**
+ * Average share of a day's traffic that has already happened by this time of
+ * day, over the last few recorded days. One reference day swings the projection
+ * too far: a night-heavy day collapses the estimate, an evening-heavy one
+ * inflates it.
+ */
+function elapsedShareOfRecentDays(
+  hourly: HourlyStat[],
+  now: Date,
+  days = trendShareDays,
+): number | null {
+  const today = localDateKey(now)
+  const byDay = new Map<string, HourlyStat[]>()
+  for (const item of hourly) {
+    const day = item.hour.slice(0, 10)
+    if (day >= today) continue
+    const rows = byDay.get(day)
+    if (rows) rows.push(item)
+    else byDay.set(day, [item])
+  }
 
   const currentHour = now.getHours()
   const minutesIntoHour = now.getMinutes() / 60
-  const elapsed = rows.reduce((sum, item) => {
-    const hour = Number(item.hour.slice(11, 13))
-    if (hour > currentHour) return sum
-    const total = item.forwarded + item.filtered + item.failed
-    return sum + (hour === currentHour ? total * minutesIntoHour : total)
-  }, 0)
-  return elapsed / full
+  const shares = [...byDay.keys()]
+    .sort()
+    .slice(-days)
+    .map((day) => {
+      const rows = byDay.get(day) ?? []
+      const full = rows.reduce((sum, item) => sum + item.forwarded + item.filtered + item.failed, 0)
+      if (full <= 0) return null
+      const elapsed = rows.reduce((sum, item) => {
+        const hour = Number(item.hour.slice(11, 13))
+        if (hour > currentHour) return sum
+        const total = item.forwarded + item.filtered + item.failed
+        return sum + (hour === currentHour ? total * minutesIntoHour : total)
+      }, 0)
+      return elapsed / full
+    })
+    .filter((share): share is number => share !== null)
+
+  if (!shares.length) return null
+  return shares.reduce((sum, share) => sum + share, 0) / shares.length
 }
 
 /**
  * Full-period estimate for the still-running bucket, or null when it is too
- * early to tell: the daily view scales by yesterday's same time of day, the
- * hourly view by the minutes elapsed in the current hour.
+ * early to tell: the daily view scales by the recent days' same time of day,
+ * the hourly view by the minutes elapsed in the current hour.
  */
 function estimateRunningTotal(
   runningTotal: number,
@@ -396,8 +429,8 @@ function estimateRunningTotal(
     return minutes >= 10 ? Math.round((runningTotal * 60) / minutes) : null
   }
 
-  const share = elapsedShareOfYesterday(hourly, now)
-  // Below a fifth of yesterday's day the ratio is too noisy to project.
+  const share = elapsedShareOfRecentDays(hourly, now)
+  // Below a fifth of a typical day the ratio is too noisy to project.
   return share !== null && share >= 0.2 ? Math.round(runningTotal / share) : null
 }
 
@@ -407,6 +440,64 @@ function estimateRunningTotal(
  * the full-period estimate when one is available and on the measured value
  * otherwise.
  */
+/** Values the dashed segment mirrors for one bucket: the stacked tops and the failure line. */
+function edgeOf(row: TrendStat) {
+  return {
+    forwarded: row.forwarded,
+    filtered: row.forwarded + row.filtered,
+    failed: row.failed,
+  }
+}
+
+/**
+ * Draw the dashed closing segment as a curve rather than a straight join.
+ *
+ * The bucket before the anchor is part of the line's data only to give the
+ * cubic the slope the solid line arrives with; only the final interval is drawn.
+ */
+function DashedSegment({
+  points,
+  stroke,
+  strokeWidth,
+  strokeDasharray,
+}: {
+  points?: ReadonlyArray<{ x: number | null; y: number | null }>
+  stroke?: string
+  strokeWidth?: number | string
+  strokeDasharray?: string | number
+}) {
+  const usable = (points ?? []).filter(
+    (point): point is { x: number; y: number } => point.x !== null && point.y !== null,
+  )
+  const end = usable.at(-1)
+  const start = usable.at(-2)
+  if (!end || !start) return null
+
+  const previous = usable.at(-3)
+  const dx = end.x - start.x
+  const incoming = previous
+    ? (start.y - previous.y) / (start.x - previous.x)
+    : (end.y - start.y) / dx
+  const outgoing = (end.y - start.y) / dx
+  const curve = [
+    `M${start.x},${start.y}`,
+    `C${start.x + dx / 3},${start.y + (incoming * dx) / 3}`,
+    `${end.x - dx / 3},${end.y - (outgoing * dx) / 3}`,
+    `${end.x},${end.y}`,
+  ].join(' ')
+
+  return (
+    <path
+      d={curve}
+      fill="none"
+      stroke={stroke}
+      strokeWidth={strokeWidth}
+      strokeDasharray={strokeDasharray}
+      strokeLinecap="round"
+    />
+  )
+}
+
 function withRunningBucket(series: TrendStat[], estimated: number | null): TrendStat[] {
   const last = series.at(-1)
   const anchor = series.at(-2)
@@ -417,19 +508,14 @@ function withRunningBucket(series: TrendStat[], estimated: number | null): Trend
   const filtered = Math.round(last.filtered * factor)
   const failed = Math.round(last.failed * factor)
   const rows = [...series]
-  rows[rows.length - 2] = {
-    ...anchor,
-    edge: {
-      forwarded: anchor.forwarded,
-      filtered: anchor.forwarded + anchor.filtered,
-      total: anchor.total,
-    },
+  for (const index of [rows.length - 3, rows.length - 2]) {
+    if (index >= 0) rows[index] = { ...rows[index], edge: edgeOf(rows[index]) }
   }
   rows[rows.length - 1] = {
     ...last,
     running: true,
-    estimated: estimated !== null,
-    edge: { forwarded, filtered: forwarded + filtered, total: forwarded + filtered + failed },
+    edge: { forwarded, filtered: forwarded + filtered, failed },
+    ...(estimated === null ? {} : { projected: { forwarded, filtered, failed } }),
   }
   return rows
 }
@@ -470,9 +556,13 @@ function TrendTooltip({
           </strong>
         </p>
       ))}
-      {row.estimated && row.edge ? (
+      {row.projected ? (
         <p className="mt-1 border-t border-slate-100 pt-1 text-slate-500">
-          {t('dashboard.trendProjected', { value: formatNumber(row.edge.total) })}
+          {t('dashboard.trendProjected', {
+            value: formatNumber(
+              row.projected.forwarded + row.projected.filtered + row.projected.failed,
+            ),
+          })}
         </p>
       ) : null}
     </div>
@@ -598,12 +688,12 @@ export function DashboardPage() {
     },
     refetchInterval: 15_000,
   })
-  // Daily reports scale the running bucket by yesterday's same time of day, which
-  // needs the hourly series; the 1-day view already fetches it as its own report.
+  // Daily reports scale the running bucket by recent days' same time of day,
+  // which needs several days of hourly history.
   const hourlyStatsQuery = useQuery({
-    queryKey: ['stats', accountId, '1day', trendRule],
+    queryKey: ['stats', accountId, 'hourly-profile', trendRule],
     queryFn: () => {
-      const params = new URLSearchParams({ date_limit: '1day', granularity: 'hour' })
+      const params = new URLSearchParams({ date_limit: '7day', granularity: 'hour' })
       if (trendRule !== 'all') params.set('rule_name', trendRule)
       return accountRequest<Stats>(accountId, `/api/v1/stats?${params}`)
     },
@@ -1266,10 +1356,10 @@ export function DashboardPage() {
                     fill="#e11d48"
                     fillOpacity={0.12}
                   />
-                  {/* Dashed closing segment for the still-running bucket. */}
+                  {/* Dashed closing segment, curved to continue the solid line. */}
                   <Line
-                    type="monotone"
                     dataKey="edge.forwarded"
+                    shape={DashedSegment}
                     stroke="#2563eb"
                     strokeWidth={2}
                     strokeDasharray="4 4"
@@ -1278,8 +1368,8 @@ export function DashboardPage() {
                     isAnimationActive={false}
                   />
                   <Line
-                    type="monotone"
                     dataKey="edge.filtered"
+                    shape={DashedSegment}
                     stroke="#f59e0b"
                     strokeWidth={1.5}
                     strokeDasharray="4 4"
@@ -1288,8 +1378,8 @@ export function DashboardPage() {
                     isAnimationActive={false}
                   />
                   <Line
-                    type="monotone"
-                    dataKey="edge.total"
+                    dataKey="edge.failed"
+                    shape={DashedSegment}
                     stroke="#e11d48"
                     strokeWidth={1.5}
                     strokeDasharray="4 4"
