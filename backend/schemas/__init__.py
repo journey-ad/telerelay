@@ -165,8 +165,12 @@ class ConfigForwardingRule(ConfigModel):
     target_chats: list[ChatRef] = Field(
         default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
     )
-    source_groups: list[str] = Field(default_factory=list)
-    target_groups: list[str] = Field(default_factory=list)
+    source_groups: list[str] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "group-ref"}
+    )
+    target_groups: list[str] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "group-ref"}
+    )
     filters: ConfigFilter = Field(default_factory=ConfigFilter)
     ignore: ConfigIgnore = Field(default_factory=ConfigIgnore)
     forwarding: ConfigForwarding = Field(default_factory=ConfigForwarding)

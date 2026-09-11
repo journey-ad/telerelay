@@ -1,7 +1,7 @@
 import { ChevronRight, LockKeyhole, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { ChatRef, JsonSchema } from '../types'
+import type { ChatGroup, ChatRef, JsonSchema } from '../types'
 import { cn } from '../utils/cn'
 import { lines } from '../utils/parse'
 import { ChatTagInput } from './ChatTagInput'
@@ -10,6 +10,27 @@ import { RegexField, useRegexValidation } from './RegexField'
 import { Button, IconButton, Select, Switch } from './ui'
 
 type ConfigObject = Record<string, unknown>
+
+/**
+ * Chat groups defined in the document being edited, so a rule's group
+ * references stay in step with renames that are not saved yet.
+ */
+const ChatGroupsContext = createContext<ChatGroup[]>([])
+
+/** A group-only picker never edits chats, so its chat props stay inert. */
+const NO_CHATS: ChatRef[] = []
+const ignoreChats = () => undefined
+
+function chatGroupsOf(value: unknown): ChatGroup[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter(isObject)
+    .map((group) => ({
+      name: typeof group.name === 'string' ? group.name.trim() : '',
+      chats: Array.isArray(group.chats) ? (group.chats as ChatRef[]) : [],
+    }))
+    .filter((group) => group.name.length > 0)
+}
 
 function isObject(value: unknown): value is ConfigObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -428,13 +449,18 @@ function ArrayField({
   depth: number
 }) {
   const { t } = useTranslation()
+  const chatGroups = useContext(ChatGroupsContext)
   const itemSchema =
     schema['x-item-control'] === 'chat-ref'
       ? { type: 'string', 'x-control': 'chat-ref' }
-      : typedSchema(schema.items, value[0], root)
+      : schema['x-item-control'] === 'group-ref'
+        ? { type: 'string', 'x-control': 'group-ref' }
+        : typedSchema(schema.items, value[0], root)
   const objectItems = itemSchema.type === 'object' || Boolean(itemSchema.properties)
   const itemControl = schema['x-item-control']
-  const managedInput = ['chat-ref', 'tags', 'integer-tags', 'regex'].includes(itemControl ?? '')
+  const managedInput = ['chat-ref', 'group-ref', 'tags', 'integer-tags', 'regex'].includes(
+    itemControl ?? '',
+  )
   return (
     <section
       className={cn(
@@ -466,6 +492,16 @@ function ArrayField({
             (item): item is ChatRef => typeof item === 'string' || typeof item === 'number',
           )}
           onChange={onChange}
+          className="min-h-8.5 py-1"
+        />
+      ) : itemControl === 'group-ref' ? (
+        <ChatTagInput
+          groupsOnly
+          value={NO_CHATS}
+          onChange={ignoreChats}
+          groups={chatGroups}
+          selectedGroups={value.filter((item): item is string => typeof item === 'string')}
+          onGroupsChange={onChange}
           className="min-h-8.5 py-1"
         />
       ) : itemControl === 'tags' || itemControl === 'integer-tags' ? (
@@ -628,7 +664,13 @@ export function ConfigTreeForm({
   schema: JsonSchema
   onChange: (next: ConfigObject) => void
 }) {
-  return <ObjectFields value={value} schema={schema} root={schema} depth={0} onChange={onChange} />
+  const groupsSource = value.chat_groups
+  const chatGroups = useMemo(() => chatGroupsOf(groupsSource), [groupsSource])
+  return (
+    <ChatGroupsContext.Provider value={chatGroups}>
+      <ObjectFields value={value} schema={schema} root={schema} depth={0} onChange={onChange} />
+    </ChatGroupsContext.Provider>
+  )
 }
 
 export function ConfigJsonEditor({

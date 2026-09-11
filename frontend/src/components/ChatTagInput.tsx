@@ -14,6 +14,8 @@ interface ChatTagInputProps {
   groups?: ChatGroup[]
   selectedGroups?: string[]
   onGroupsChange?: (value: string[]) => void
+  /** Render the chat-group picker alone; the chat directory is not shown or fetched. */
+  groupsOnly?: boolean
   className?: string
 }
 
@@ -40,6 +42,7 @@ export function ChatTagInput({
   groups = [],
   selectedGroups = [],
   onGroupsChange,
+  groupsOnly = false,
   className,
 }: ChatTagInputProps) {
   const { t } = useTranslation()
@@ -47,8 +50,8 @@ export function ChatTagInput({
   const [search, setSearch] = useState('')
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
 
-  const chats = useTelegramChats()
-  const extras = useReferencedChats(chats.data, value)
+  const chats = useTelegramChats({ enabled: !groupsOnly })
+  const extras = useReferencedChats(chats.data, groupsOnly ? [] : value)
   // Referenced chats that Telegram no longer lists stay visible here, marked by
   // the badge component instead of showing up as unknown.
   const directory = useMemo(
@@ -59,6 +62,10 @@ export function ChatTagInput({
   const filtered = useMemo(
     () => directory.filter((chat) => chatMatches(chat, search)),
     [directory, search],
+  )
+  const matchingGroups = useMemo(
+    () => groups.filter((group) => groupMatches(group, search)),
+    [groups, search],
   )
 
   const customChat = search.trim() ? parseChatRef(search.trim()) : null
@@ -108,58 +115,35 @@ export function ChatTagInput({
           className,
         )}
       >
-        {selectedGroups.map((name) => (
-          <span
-            key={`group-${name}`}
-            className="inline-flex h-6.5 items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 text-xs text-amber-800"
-          >
-            <FolderKanban className="shrink-0" size={12} />
-            {name}
-            <button
-              type="button"
-              aria-label={t('chatInput.remove', { name })}
-              className="grid size-4 place-items-center rounded-sm text-amber-500 hover:bg-amber-100"
-              onClick={(event) => {
-                event.stopPropagation()
-                toggleGroup(name)
-              }}
-            >
-              <X size={12} strokeWidth={2.5} />
-            </button>
-          </span>
-        ))}
-        {value.map((chatId, index) => {
-          const chat = findChat(directory, chatId)
-          const unknown = chats.isSuccess && !chat
-          const label =
-            chat?.title ?? (unknown ? t('chatInput.unknown', { id: chatId }) : String(chatId))
-
+        {selectedGroups.map((name) => {
+          const known = groups.some((group) => group.name === name)
           return (
             <span
-              key={`${String(chatId)}-${index}`}
+              key={`group-${name}`}
+              title={known ? undefined : t('chatInput.unknownGroup', { name })}
               className={cn(
-                'inline-flex h-6.5 items-center gap-1 rounded border px-1.5',
-                'text-xs',
-                unknown
-                  ? 'border-slate-200 bg-slate-100 text-slate-500'
-                  : 'border-blue-100 bg-blue-50 text-blue-700',
+                'inline-flex h-6.5 items-center gap-1 rounded border px-1.5 text-xs',
+                known
+                  ? 'border-amber-200 bg-amber-50 text-amber-800'
+                  : 'border-rose-200 bg-rose-50 text-rose-700',
               )}
             >
-              {unknown ? <TriangleAlert className="shrink-0" size={12} /> : null}
-              {label}
-              {chat ? <ChatInvalidBadge chat={chat} /> : null}
+              {known ? (
+                <FolderKanban className="shrink-0" size={12} />
+              ) : (
+                <TriangleAlert className="shrink-0" size={12} />
+              )}
+              {name}
               <button
                 type="button"
-                aria-label={t('chatInput.remove', { name: label })}
+                aria-label={t('chatInput.remove', { name })}
                 className={cn(
                   'grid size-4 place-items-center rounded-sm',
-                  unknown
-                    ? 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
-                    : 'text-blue-400 hover:bg-blue-100 hover:text-blue-700',
+                  known ? 'text-amber-500 hover:bg-amber-100' : 'text-rose-400 hover:bg-rose-100',
                 )}
                 onClick={(event) => {
                   event.stopPropagation()
-                  removeChat(index)
+                  toggleGroup(name)
                 }}
               >
                 <X size={12} strokeWidth={2.5} />
@@ -167,10 +151,51 @@ export function ChatTagInput({
             </span>
           )
         })}
+        {groupsOnly
+          ? null
+          : value.map((chatId, index) => {
+              const chat = findChat(directory, chatId)
+              const unknown = chats.isSuccess && !chat
+              const label =
+                chat?.title ?? (unknown ? t('chatInput.unknown', { id: chatId }) : String(chatId))
+
+              return (
+                <span
+                  key={`${String(chatId)}-${index}`}
+                  className={cn(
+                    'inline-flex h-6.5 items-center gap-1 rounded border px-1.5',
+                    'text-xs',
+                    unknown
+                      ? 'border-slate-200 bg-slate-100 text-slate-500'
+                      : 'border-blue-100 bg-blue-50 text-blue-700',
+                  )}
+                >
+                  {unknown ? <TriangleAlert className="shrink-0" size={12} /> : null}
+                  {label}
+                  {chat ? <ChatInvalidBadge chat={chat} /> : null}
+                  <button
+                    type="button"
+                    aria-label={t('chatInput.remove', { name: label })}
+                    className={cn(
+                      'grid size-4 place-items-center rounded-sm',
+                      unknown
+                        ? 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'
+                        : 'text-blue-400 hover:bg-blue-100 hover:text-blue-700',
+                    )}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      removeChat(index)
+                    }}
+                  >
+                    <X size={12} strokeWidth={2.5} />
+                  </button>
+                </span>
+              )
+            })}
         <Popover.Trigger asChild>
           <button
             type="button"
-            aria-label={t('chatInput.addChat')}
+            aria-label={t(groupsOnly ? 'chatInput.addGroup' : 'chatInput.addChat')}
             className={cn(
               'inline-flex h-7 items-center gap-1 rounded px-1.5 text-xs',
               'text-slate-400 outline-none hover:bg-slate-100 hover:text-blue-600',
@@ -189,7 +214,13 @@ export function ChatTagInput({
             }}
           >
             <Plus size={13} />
-            {value.length === 0 ? t('chatInput.addChat') : null}
+            {groupsOnly
+              ? selectedGroups.length === 0
+                ? t('chatInput.addGroup')
+                : null
+              : value.length === 0
+                ? t('chatInput.addChat')
+                : null}
           </button>
         </Popover.Trigger>
       </div>
@@ -215,7 +246,7 @@ export function ChatTagInput({
             <Search size={14} className="shrink-0 text-slate-400" />
             <input
               className="w-full border-0 bg-transparent text-[13px] text-slate-700 outline-none"
-              placeholder={t('chatInput.search')}
+              placeholder={t(groupsOnly ? 'chatInput.searchGroup' : 'chatInput.search')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(event) => {
@@ -228,98 +259,135 @@ export function ChatTagInput({
             />
           </div>
           <div className="max-h-52 overflow-y-auto overscroll-contain p-1">
-            {groups.length > 0 ? (
-              <>
-                <p className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  {t('chatInput.groups')}
+            {groupsOnly ? (
+              matchingGroups.length === 0 ? (
+                <p className="px-2 py-3 text-center text-xs text-slate-400">
+                  {t(groups.length === 0 ? 'chatInput.noGroups' : 'chatInput.noGroupMatches')}
                 </p>
-                {groups
-                  .filter(
-                    (group) => groupMatches(group, search) && !selectedGroups.includes(group.name),
+              ) : (
+                matchingGroups.map((group) => {
+                  const selected = selectedGroups.includes(group.name)
+                  return (
+                    <button
+                      key={`group-${group.name}`}
+                      type="button"
+                      aria-pressed={selected}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded px-2 py-1.5',
+                        'text-left text-xs text-amber-800 transition-colors hover:bg-amber-50',
+                        selected && 'bg-amber-50',
+                      )}
+                      onClick={() => toggleGroup(group.name)}
+                    >
+                      <FolderKanban size={13} className="shrink-0" />
+                      <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                      <span className="shrink-0 text-[10px] text-amber-500">
+                        {t('chatInput.itemCount', { count: group.chats.length })}
+                      </span>
+                      <span className="grid size-4 shrink-0 place-items-center text-amber-600">
+                        {selected ? <Check size={13} strokeWidth={2.5} /> : null}
+                      </span>
+                    </button>
                   )
-                  .map((group) => {
-                    const selected = selectedGroups.includes(group.name)
+                })
+              )
+            ) : (
+              <>
+                {groups.length > 0 ? (
+                  <>
+                    <p className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      {t('chatInput.groups')}
+                    </p>
+                    {groups
+                      .filter(
+                        (group) =>
+                          groupMatches(group, search) && !selectedGroups.includes(group.name),
+                      )
+                      .map((group) => {
+                        const selected = selectedGroups.includes(group.name)
+                        return (
+                          <button
+                            key={`group-${group.name}`}
+                            type="button"
+                            aria-pressed={selected}
+                            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-amber-800 transition-colors hover:bg-amber-50"
+                            onClick={() => toggleGroup(group.name)}
+                          >
+                            <FolderKanban size={13} className="shrink-0" />
+                            <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                            <span className="shrink-0 text-[10px] text-amber-500">
+                              {t('chatInput.itemCount', { count: group.chats.length })}
+                            </span>
+                            <span className="grid size-4 shrink-0 place-items-center text-amber-600">
+                              {selected ? <Check size={13} strokeWidth={2.5} /> : null}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    <div className="my-1 border-t border-slate-100" />
+                    <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                      {t('chatInput.chats')}
+                    </p>
+                  </>
+                ) : null}
+                {customChat !== null && !customChatSelected ? (
+                  <button
+                    type="button"
+                    className={cn(
+                      'flex w-full items-center gap-2 rounded px-2 py-1.5',
+                      'text-left text-xs text-blue-700 outline-none',
+                      'hover:bg-blue-50 focus:bg-blue-50',
+                    )}
+                    onClick={addCustomChat}
+                  >
+                    <Plus size={13} className="shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {t('chatInput.addId', { id: String(customChat) })}
+                    </span>
+                  </button>
+                ) : null}
+                {filtered.length === 0 ? (
+                  <p className="px-2 py-3 text-center text-xs text-slate-400">
+                    {t(
+                      chats.isLoading
+                        ? 'common.loadingWithDots'
+                        : customChat === null
+                          ? 'chatInput.noMatches'
+                          : 'chatInput.addManually',
+                    )}
+                  </p>
+                ) : (
+                  filtered.map((chat) => {
+                    const selected = value.some((item) => sameChat(item, chat.id))
+
                     return (
                       <button
-                        key={`group-${group.name}`}
+                        key={chat.id}
                         type="button"
                         aria-pressed={selected}
-                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-amber-800 transition-colors hover:bg-amber-50"
-                        onClick={() => toggleGroup(group.name)}
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded px-2 py-1.5',
+                          'text-left text-xs text-slate-600 transition-colors',
+                          'hover:bg-slate-50',
+                        )}
+                        onClick={() => toggleChat(chat.id)}
                       >
-                        <FolderKanban size={13} className="shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">{group.name}</span>
-                        <span className="shrink-0 text-[10px] text-amber-500">
-                          {t('chatInput.itemCount', { count: group.chats.length })}
+                        <span className="flex min-w-0 flex-1 items-center gap-1">
+                          <span className="truncate">
+                            {chat.title}
+                            {chat.username ? ` (@${chat.username})` : ''}
+                          </span>
+                          <ChatInvalidBadge chat={chat} />
                         </span>
-                        <span className="grid size-4 shrink-0 place-items-center text-amber-600">
+                        <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
+                        <span className="grid size-4 shrink-0 place-items-center text-blue-600">
                           {selected ? <Check size={13} strokeWidth={2.5} /> : null}
                         </span>
                       </button>
                     )
-                  })}
-                <div className="my-1 border-t border-slate-100" />
-                <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                  {t('chatInput.chats')}
-                </p>
+                  })
+                )}
               </>
-            ) : null}
-            {customChat !== null && !customChatSelected ? (
-              <button
-                type="button"
-                className={cn(
-                  'flex w-full items-center gap-2 rounded px-2 py-1.5',
-                  'text-left text-xs text-blue-700 outline-none',
-                  'hover:bg-blue-50 focus:bg-blue-50',
-                )}
-                onClick={addCustomChat}
-              >
-                <Plus size={13} className="shrink-0" />
-                <span className="min-w-0 flex-1 truncate">
-                  {t('chatInput.addId', { id: String(customChat) })}
-                </span>
-              </button>
-            ) : null}
-            {filtered.length === 0 ? (
-              <p className="px-2 py-3 text-center text-xs text-slate-400">
-                {t(
-                  chats.isLoading
-                    ? 'common.loadingWithDots'
-                    : customChat === null
-                      ? 'chatInput.noMatches'
-                      : 'chatInput.addManually',
-                )}
-              </p>
-            ) : (
-              filtered.map((chat) => {
-                const selected = value.some((item) => sameChat(item, chat.id))
-
-                return (
-                  <button
-                    key={chat.id}
-                    type="button"
-                    aria-pressed={selected}
-                    className={cn(
-                      'flex w-full items-center gap-2 rounded px-2 py-1.5',
-                      'text-left text-xs text-slate-600 transition-colors',
-                      'hover:bg-slate-50',
-                    )}
-                    onClick={() => toggleChat(chat.id)}
-                  >
-                    <span className="flex min-w-0 flex-1 items-center gap-1">
-                      <span className="truncate">
-                        {chat.title}
-                        {chat.username ? ` (@${chat.username})` : ''}
-                      </span>
-                      <ChatInvalidBadge chat={chat} />
-                    </span>
-                    <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
-                    <span className="grid size-4 shrink-0 place-items-center text-blue-600">
-                      {selected ? <Check size={13} strokeWidth={2.5} /> : null}
-                    </span>
-                  </button>
-                )
-              })
             )}
           </div>
         </Popover.Content>

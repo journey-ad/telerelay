@@ -1375,6 +1375,11 @@ class ApiContractTests(unittest.TestCase):
         )
         # Chat groups are always active, so the editor must not offer an enable toggle.
         self.assertNotIn("enabled", definitions["ConfigChatGroup"]["properties"])
+        for field in ("source_groups", "target_groups"):
+            self.assertEqual(
+                definitions["ConfigForwardingRule"]["properties"][field]["x-item-control"],
+                "group-ref",
+            )
         self.assertTrue(
             definitions["ConfigExport"]["properties"]["root_dir"]["readOnly"]
         )
