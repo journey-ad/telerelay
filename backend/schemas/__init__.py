@@ -189,7 +189,9 @@ class ConfigButtonActionRule(ConfigModel):
 
 class ConfigChatGroup(ConfigModel):
     name: str = Field(min_length=1, max_length=100)
-    chats: list[ChatRef] = Field(default_factory=list)
+    chats: list[ChatRef] = Field(
+        default_factory=list, json_schema_extra={"x-item-control": "chat-ref"}
+    )
 
 
 class ConfigExport(ConfigModel):

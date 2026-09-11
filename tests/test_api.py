@@ -1369,6 +1369,12 @@ class ApiContractTests(unittest.TestCase):
             definitions["ConfigIgnore"]["properties"]["user_ids"]["x-item-control"],
             "integer-tags",
         )
+        self.assertEqual(
+            definitions["ConfigChatGroup"]["properties"]["chats"]["x-item-control"],
+            "chat-ref",
+        )
+        # Chat groups are always active, so the editor must not offer an enable toggle.
+        self.assertNotIn("enabled", definitions["ConfigChatGroup"]["properties"])
         self.assertTrue(
             definitions["ConfigExport"]["properties"]["root_dir"]["readOnly"]
         )

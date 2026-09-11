@@ -341,6 +341,8 @@ function ObjectArray({
 }) {
   const { t } = useTranslation()
   const { labels } = useConfigCopy()
+  // Only entries that declare "enabled" get a toggle; a chat group is always active.
+  const togglesEnabled = Boolean(resolveSchema(itemSchema, root).properties?.enabled)
   if (value.length === 0) {
     return <p className="py-2 text-xs text-slate-400">{t('settings.listEmpty')}</p>
   }
@@ -365,18 +367,20 @@ function ObjectArray({
               <strong className="min-w-0 flex-1 truncate text-[13px] text-slate-700">
                 {itemName}
               </strong>
-              <Switch
-                checked={Boolean(objectValue.enabled)}
-                onCheckedChange={(enabled) => {
-                  const copy = value.slice()
-                  copy[index] = { ...objectValue, enabled }
-                  onChange(copy)
-                }}
-                onClick={(event) => event.stopPropagation()}
-                label={labels.enabled ?? 'enabled'}
-                showLabel={false}
-                className="min-h-0 border-transparent bg-transparent p-0"
-              />
+              {togglesEnabled ? (
+                <Switch
+                  checked={Boolean(objectValue.enabled)}
+                  onCheckedChange={(enabled) => {
+                    const copy = value.slice()
+                    copy[index] = { ...objectValue, enabled }
+                    onChange(copy)
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  label={labels.enabled ?? 'enabled'}
+                  showLabel={false}
+                  className="min-h-0 border-transparent bg-transparent p-0"
+                />
+              ) : null}
               <IconButton
                 icon={Trash2}
                 label={t('settings.listRemove')}
@@ -432,7 +436,12 @@ function ArrayField({
   const itemControl = schema['x-item-control']
   const managedInput = ['chat-ref', 'tags', 'integer-tags', 'regex'].includes(itemControl ?? '')
   return (
-    <section className={cn(depth === 0 ? 'py-4 first:pt-0 last:pb-0' : 'min-w-0')}>
+    <section
+      className={cn(
+        depth === 0 ? 'py-4 first:pt-0 last:pb-0' : 'min-w-0',
+        depth > 0 && managedInput && 'col-span-full',
+      )}
+    >
       <div className="mb-2 flex items-start justify-between gap-3">
         <FieldHeading name={name} schema={schema} compact={depth > 0} />
         {!schema.readOnly && !itemSchema.enum && !managedInput ? (
