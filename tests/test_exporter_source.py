@@ -51,7 +51,9 @@ class TelegramChatServiceTests(unittest.IsolatedAsyncioTestCase):
             broadcast=True,
         )
 
-        result = await TelegramChatService(None, None)._list_chats(FakeClient([user, bot, channel]))
+        result = await TelegramChatService(None, None)._list_chats(
+            FakeClient([user, bot, channel]), {}
+        )
 
         self.assertEqual([item.title for item in result], ["Alert Bot", "News"])
         self.assertEqual([item.id for item in result], [11, -1000000000013])
@@ -61,7 +63,7 @@ class TelegramChatServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result[1].username)
 
     async def test_get_chat_maps_telegram_lookup_errors_to_missing(self):
-        result = await TelegramChatService(None, None)._get_chat(MissingChatClient(), -1001)
+        result = await TelegramChatService(None, None)._get_chat(MissingChatClient(), {}, -1001)
 
         self.assertIsNone(result)
 

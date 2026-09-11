@@ -1,4 +1,4 @@
-import { Bot, CheckCircle2, Radio, UserRound, UsersRound } from 'lucide-react'
+import { CheckCircle2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TelegramPreviewDialog } from '../../types'
 import { avatarInitials } from '../../utils/avatar'
@@ -7,6 +7,7 @@ import { hashColor } from '../../utils/color'
 import { previewTime, serviceText } from '../../utils/preview'
 import { peerAvatarRef } from '../../utils/resource'
 import { AuthenticatedImage } from '../AuthenticatedImage'
+import { ChatKindIcon } from '../ChatKindPicker'
 
 export function ChatGlyph({
   kind,
@@ -15,9 +16,7 @@ export function ChatGlyph({
   kind: TelegramPreviewDialog['kind']
   size?: number
 }) {
-  const Icon =
-    kind === 'bot' ? Bot : kind === 'private' ? UserRound : kind === 'channel' ? Radio : UsersRound
-  return <Icon size={size} />
+  return <ChatKindIcon kind={kind} size={size} />
 }
 
 export function Avatar({

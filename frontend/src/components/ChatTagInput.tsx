@@ -4,10 +4,12 @@ import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useReferencedChats, useTelegramChats } from '../hooks/useTelegramChats'
 import type { ChatGroup, ChatRef, TelegramChat } from '../types'
+import { chatKindCounts, chatKindSections, type ChatKindFilter } from '../utils/chatKind'
 import { chatLabel, chatRowLabel } from '../utils/chatLabel'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 import { ChatInvalidBadge } from './ChatInvalidBadge'
+import { ChatKindFilterTabs, ChatKindHeading } from './ChatKindPicker'
 
 interface ChatTagInputProps {
   value: ChatRef[]
@@ -49,6 +51,7 @@ export function ChatTagInput({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [kindFilter, setKindFilter] = useState<ChatKindFilter>('all')
   const [anchor, setAnchor] = useState({ x: 0, y: 0 })
 
   const chats = useTelegramChats({ enabled: !groupsOnly })
@@ -64,6 +67,8 @@ export function ChatTagInput({
     () => directory.filter((chat) => chatMatches(chat, search)),
     [directory, search],
   )
+  const counts = useMemo(() => chatKindCounts(filtered), [filtered])
+  const sections = useMemo(() => chatKindSections(filtered, kindFilter), [filtered, kindFilter])
   const matchingGroups = useMemo(
     () => groups.filter((group) => groupMatches(group, search)),
     [groups, search],
@@ -75,7 +80,10 @@ export function ChatTagInput({
   const handleOpenChange = useCallback(
     (next: boolean) => {
       setOpen(next)
-      if (!next) setSearch('')
+      if (!next) {
+        setSearch('')
+        setKindFilter('all')
+      }
       if (next) void chats.refetch()
     },
     [chats.refetch],
@@ -264,6 +272,9 @@ export function ChatTagInput({
               autoFocus
             />
           </div>
+          {groupsOnly ? null : (
+            <ChatKindFilterTabs value={kindFilter} onChange={setKindFilter} counts={counts} />
+          )}
           <div className="max-h-52 overflow-y-auto overscroll-contain p-1">
             {groupsOnly ? (
               matchingGroups.length === 0 ? (
@@ -299,7 +310,7 @@ export function ChatTagInput({
               )
             ) : (
               <>
-                {groups.length > 0 ? (
+                {kindFilter === 'all' && groups.length > 0 ? (
                   <>
                     <p className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                       {t('chatInput.groups')}
@@ -331,9 +342,6 @@ export function ChatTagInput({
                         )
                       })}
                     <div className="my-1 border-t border-slate-100" />
-                    <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      {t('chatInput.chats')}
-                    </p>
                   </>
                 ) : null}
                 {customChat !== null && !customChatSelected ? (
@@ -352,7 +360,7 @@ export function ChatTagInput({
                     </span>
                   </button>
                 ) : null}
-                {filtered.length === 0 ? (
+                {sections.length === 0 ? (
                   <p className="px-2 py-3 text-center text-xs text-slate-400">
                     {t(
                       chats.isLoading
@@ -363,32 +371,37 @@ export function ChatTagInput({
                     )}
                   </p>
                 ) : (
-                  filtered.map((chat) => {
-                    const selected = value.some((item) => sameChat(item, chat.id))
+                  sections.map((section) => (
+                    <div key={section.kind}>
+                      <ChatKindHeading kind={section.kind} count={section.chats.length} />
+                      {section.chats.map((chat) => {
+                        const selected = value.some((item) => sameChat(item, chat.id))
 
-                    return (
-                      <button
-                        key={chat.id}
-                        type="button"
-                        aria-pressed={selected}
-                        className={cn(
-                          'flex w-full items-center gap-2 rounded px-2 py-1.5',
-                          'text-left text-xs text-slate-600 transition-colors',
-                          'hover:bg-slate-50',
-                        )}
-                        onClick={() => toggleChat(chat.id)}
-                      >
-                        <span className="flex min-w-0 flex-1 items-center gap-1">
-                          <span className="truncate">{chatRowLabel(chat, t)}</span>
-                          <ChatInvalidBadge chat={chat} />
-                        </span>
-                        <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
-                        <span className="grid size-4 shrink-0 place-items-center text-blue-600">
-                          {selected ? <Check size={13} strokeWidth={2.5} /> : null}
-                        </span>
-                      </button>
-                    )
-                  })
+                        return (
+                          <button
+                            key={chat.id}
+                            type="button"
+                            aria-pressed={selected}
+                            className={cn(
+                              'flex w-full items-center gap-2 rounded px-2 py-1.5',
+                              'text-left text-xs text-slate-600 transition-colors',
+                              'hover:bg-slate-50',
+                            )}
+                            onClick={() => toggleChat(chat.id)}
+                          >
+                            <span className="flex min-w-0 flex-1 items-center gap-1">
+                              <span className="truncate">{chatRowLabel(chat, t)}</span>
+                              <ChatInvalidBadge chat={chat} />
+                            </span>
+                            <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
+                            <span className="grid size-4 shrink-0 place-items-center text-blue-600">
+                              {selected ? <Check size={13} strokeWidth={2.5} /> : null}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ))
                 )}
               </>
             )}

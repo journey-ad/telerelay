@@ -218,7 +218,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dialogs_without_a_name_keep_the_cached_one(self):
         self.client.dialogs.append(FakeDialog(types.UserEmpty(id=404), None, archived=True))
-        self.service.names.merge("work", [(404, "Alice")])
+        self.service.names.merge("work", [(404, "Alice", "private")])
 
         archived = await self.service.list_dialogs(
             account_id="work", folder="archived", limit=40, cursor=None

@@ -138,7 +138,13 @@
     "addChat": "添加会话",
     "addGroup": "添加会话组",
     "groups": "会话组",
-    "chats": "普通会话",
+    "kind": {
+      "all": "全部",
+      "private": "用户",
+      "bot": "Bot",
+      "group": "群聊",
+      "channel": "频道"
+    },
     "itemCount": "{{count}} 个项目",
     "search": "搜索会话...",
     "searchGroup": "搜索会话组...",

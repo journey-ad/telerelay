@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from telethon import errors
 from telethon.tl import types
 
+from backend.chat_names import ChatPeer
 from backend.telegram_chats import TelegramChat, TelegramChatService, _chat_record
 
 
@@ -157,11 +158,25 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.invalid_reason, "deleted")
         # Telegram scrubs the peer to its id, which is not a name.
         self.assertEqual(record.title, "")
+        self.assertEqual(record.kind, "private")
+
+    def test_scrubbed_peers_keep_the_cached_name_and_kind(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.names.merge("101", [(4242, "Helper bot", "bot")])
+
+            record = _chat_record(
+                types.UserEmpty(id=4242), known=service.names.load("101").get(4242)
+            )
+
+            self.assertEqual(record.title, "Helper bot")
+            self.assertEqual(record.kind, "bot")
+            self.assertEqual(record.invalid_reason, "deleted")
 
     def test_listing_restores_the_name_telegram_no_longer_reports(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            service.names.merge("101", [(12, "Alice")])
+            service.names.merge("101", [(12, "Alice", "private")])
 
             restored = service._named("101", [_chat_record(types.UserEmpty(id=12))])
 
@@ -171,14 +186,25 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
     def test_listing_refreshes_a_cached_name(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            service.names.merge("101", [(9, "Old name")])
+            service.names.merge("101", [(9, "Old name", "channel")])
 
             restored = service._named(
                 "101", [TelegramChat(id=9, title="New name", kind="channel")]
             )
 
             self.assertEqual(restored[0].title, "New name")
-            self.assertEqual(service.names.merge("101", []), {9: "New name"})
+            self.assertEqual(
+                service.names.load("101"), {9: ChatPeer(name="New name", kind="channel")}
+            )
+
+    def test_a_peer_reported_without_a_name_keeps_the_cached_one(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.names.merge("101", [(12, "Alice", "private")])
+
+            service.names.merge("101", [(12, "", "bot")])
+
+            self.assertEqual(service.names.load("101"), {12: ChatPeer(name="Alice", kind="bot")})
 
     async def test_referenced_chats_missing_from_telegram_are_marked(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -188,22 +214,59 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
                 raise errors.PeerIdInvalidError(request=None)
 
             listed = await service._with_referenced_chats(
-                SimpleNamespace(get_entity=get_entity), [], (-100123,)
+                SimpleNamespace(get_entity=get_entity), [], (-100123,), {}
             )
 
             self.assertEqual([chat.id for chat in listed], [-100123])
             self.assertEqual(listed[0].invalid_reason, "blocked")
             self.assertEqual(listed[0].title, "")
 
+    async def test_unresolved_references_are_not_listed_as_users(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+
+            async def get_entity(chat_id):
+                raise ValueError("Cannot find any entity corresponding to")
+
+            listed = await service._with_referenced_chats(
+                SimpleNamespace(get_entity=get_entity),
+                [],
+                (-1001234567890, -195785875, 123456789),
+                {},
+            )
+
+            kinds = {chat.id: chat.kind for chat in listed}
+
+            self.assertEqual(kinds[-1001234567890], "channel")
+            self.assertEqual(kinds[-195785875], "group")
+            self.assertEqual(kinds[123456789], "private")
+
+    async def test_unresolved_references_keep_the_cached_kind(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            known = service.names.merge("101", [(-1001234567890, "Old supergroup", "supergroup")])
+
+            async def get_entity(chat_id):
+                raise errors.ChannelPrivateError(request=None)
+
+            listed = await service._with_referenced_chats(
+                SimpleNamespace(get_entity=get_entity), [], (-1001234567890,), known
+            )
+
+            self.assertEqual(listed[0].title, "Old supergroup")
+            self.assertEqual(listed[0].kind, "supergroup")
+
     async def test_referenced_chats_are_resolved_and_kept(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
 
             async def get_entity(chat_id):
-                return types.ChannelForbidden(id=abs(chat_id), access_hash=1, title="Banned", broadcast=True)
+                return types.ChannelForbidden(
+                    id=abs(chat_id), access_hash=1, title="Banned", broadcast=True
+                )
 
             listed = await service._with_referenced_chats(
-                SimpleNamespace(get_entity=get_entity), [], (-100123,)
+                SimpleNamespace(get_entity=get_entity), [], (-100123,), {}
             )
 
             self.assertEqual(listed[0].title, "Banned")
@@ -222,6 +285,7 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(get_entity=get_entity),
                 [TelegramChat(id=-100123, title="Listed", kind="channel")],
                 (-100123,),
+                {},
             )
 
             self.assertEqual(calls, [])

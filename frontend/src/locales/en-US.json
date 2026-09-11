@@ -138,7 +138,13 @@
     "addChat": "Add chat",
     "addGroup": "Add chat group",
     "groups": "Chat groups",
-    "chats": "Chats",
+    "kind": {
+      "all": "All",
+      "private": "Users",
+      "bot": "Bots",
+      "group": "Groups",
+      "channel": "Channels"
+    },
     "itemCount": "{{count}} items",
     "search": "Search chats...",
     "searchGroup": "Search chat groups...",

@@ -8,18 +8,19 @@ import tempfile
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from telethon import errors, utils
 from telethon.tl import types
 
-from backend.chat_names import ChatNameCache
+from backend.chat_names import ChatNameCache, ChatPeer
 from backend.logger import get_logger
 from backend.telegram_accounts import TelegramAccountError
 
 logger = get_logger()
 
 ChatKind = Literal["bot", "private", "group", "supergroup", "channel"]
+CHAT_KINDS: tuple[ChatKind, ...] = ("bot", "private", "group", "supergroup", "channel")
 ChatInvalidReason = Literal["deleted", "deactivated", "left", "blocked", "readonly", "missing"]
 
 # Resolution failures that mean the chat is gone rather than temporarily
@@ -74,22 +75,52 @@ def _chat_validity(entity: Any) -> ChatInvalidReason | None:
     return None
 
 
-def _chat_record(entity: Any, *, include_private: bool = False) -> TelegramChat | None:
+def _peer_id(entity: Any) -> int:
+    """The peer id of an entity, including one Telegram scrubbed to its id."""
+    if isinstance(entity, types.UserEmpty):
+        return int(entity.id)
+    return int(utils.get_peer_id(entity))
+
+
+def _known_kind(known: ChatPeer | None) -> ChatKind | None:
+    """The kind seen for a peer while Telegram still reported it."""
+    if known and known.kind in CHAT_KINDS:
+        return cast(ChatKind, known.kind)
+    return None
+
+
+def _peer_kind(chat_id: int) -> ChatKind:
+    """The kind a peer id alone implies once Telegram stops resolving it.
+
+    Users sit in the positive range, basic groups in the small negative range,
+    and channels and supergroups behind the -100 prefix. The prefix does not
+    tell a broadcast channel from a supergroup.
+    """
+    if chat_id >= 0:
+        return "private"
+    return "channel" if str(chat_id).startswith("-100") else "group"
+
+
+def _chat_record(
+    entity: Any, *, include_private: bool = False, known: ChatPeer | None = None
+) -> TelegramChat | None:
     # Telegram replaces channels and groups the account was banned from with a
     # "forbidden" variant, and scrubs deleted or banned accounts to an id-only
     # user. Both are kept in the directory, marked, instead of being dropped.
     if isinstance(entity, (types.ChannelForbidden, types.ChatForbidden)):
         return TelegramChat(
-            id=int(utils.get_peer_id(entity)),
+            id=_peer_id(entity),
             title=_display_name(entity),
             kind=_chat_kind(entity),
             invalid_reason="blocked",
         )
     if isinstance(entity, types.UserEmpty):
+        # An id-only peer carries neither its name nor its kind, so a scrubbed
+        # bot would otherwise be listed as a private user.
         return TelegramChat(
-            id=int(entity.id),
-            title="",
-            kind="private",
+            id=_peer_id(entity),
+            title=known.name if known else "",
+            kind=_known_kind(known) or "private",
             invalid_reason="deleted",
         )
     if isinstance(entity, types.User):
@@ -98,7 +129,7 @@ def _chat_record(entity: Any, *, include_private: bool = False) -> TelegramChat 
     elif not isinstance(entity, (types.Chat, types.Channel)):
         return None
     return TelegramChat(
-        id=int(utils.get_peer_id(entity)),
+        id=_peer_id(entity),
         title=_display_name(entity),
         kind=_chat_kind(entity),
         username=getattr(entity, "username", None),
@@ -174,7 +205,8 @@ class TelegramChatService:
             # A bot gets no dialog list, so its picker reads the stored chats,
             # refreshed whenever the runtime sees the chat again.
             return self._known_chats(account_id)
-        chats = self._result(account_id, self._list_chats, include, timeout=timeout)
+        known = self.names.load(account_id)
+        chats = self._result(account_id, self._list_chats, known, include, timeout=timeout)
         return self._named(account_id, chats)
 
     def record_chat(self, account_id: str, entity: Any) -> None:
@@ -240,7 +272,8 @@ class TelegramChatService:
     def get_chat(
         self, account_id: str, chat_id: int, timeout: float = 30
     ) -> TelegramChat:
-        chat = self._result(account_id, self._get_chat, int(chat_id), timeout=timeout)
+        known = self.names.load(account_id)
+        chat = self._result(account_id, self._get_chat, known, int(chat_id), timeout=timeout)
         if chat is None:
             raise TelegramChatError("chat_not_found", "Telegram chat does not exist")
         return self._named(account_id, [chat])[0]
@@ -248,11 +281,14 @@ class TelegramChatService:
     def _named(self, account_id: str, chats: list[TelegramChat]) -> list[TelegramChat]:
         """Give peers Telegram no longer names the name last seen for them.
 
-        Names reported by this listing refresh the cache, so a chat that is
-        deleted or banned afterwards keeps the name it had while it was usable.
+        Names and kinds reported by this listing refresh the cache, so a chat
+        that is deleted or banned afterwards keeps what it had while it was
+        usable.
         """
-        names = self.names.merge(account_id, ((chat.id, chat.title) for chat in chats))
-        restored = [replace(chat, title=chat.title or names.get(chat.id, "")) for chat in chats]
+        peers = self.names.merge(
+            account_id, ((chat.id, chat.title, chat.kind) for chat in chats)
+        )
+        restored = [replace(chat, title=chat.title or peers[chat.id].name) for chat in chats]
         return sorted(restored, key=lambda chat: (chat.title.casefold(), chat.id))
 
     def _result(self, account_id: str, callback, *args, timeout: float):
@@ -270,17 +306,22 @@ class TelegramChatService:
             raise TelegramChatError("telegram_not_connected", str(exc)) from exc
 
     async def _list_chats(
-        self, client, include: tuple[int, ...] = ()
+        self, client, known: dict[int, ChatPeer], include: tuple[int, ...] = ()
     ) -> list[TelegramChat]:
         chats = []
         async for dialog in client.iter_dialogs():
-            chat = _chat_record(dialog.entity)
+            entity = dialog.entity
+            chat = _chat_record(entity, known=known.get(_peer_id(entity)))
             if chat:
                 chats.append(chat)
-        return await self._with_referenced_chats(client, chats, include)
+        return await self._with_referenced_chats(client, chats, include, known)
 
     async def _with_referenced_chats(
-        self, client, chats: list[TelegramChat], include: tuple[int, ...]
+        self,
+        client,
+        chats: list[TelegramChat],
+        include: tuple[int, ...],
+        known: dict[int, ChatPeer],
     ) -> list[TelegramChat]:
         """Add referenced chats that Telegram no longer lists.
 
@@ -295,25 +336,28 @@ class TelegramChatService:
             try:
                 entity = await client.get_entity(chat_id)
             except PERMANENT_RESOLVE_ERRORS as exc:
+                stored = known.get(chat_id)
                 resolved.append(
                     TelegramChat(
                         id=chat_id,
-                        title="",
-                        kind="private",
+                        title=stored.name if stored else "",
+                        kind=_known_kind(stored) or _peer_kind(chat_id),
                         invalid_reason=_resolve_reason(exc),
                     )
                 )
                 continue
             except errors.RPCError:
                 continue
-            record = _chat_record(entity, include_private=True)
+            record = _chat_record(entity, include_private=True, known=known.get(chat_id))
             if record:
                 resolved.append(record)
         return sorted([*chats, *resolved], key=lambda item: (item.title.casefold(), item.id))
 
-    async def _get_chat(self, client, chat_id: int) -> TelegramChat | None:
+    async def _get_chat(
+        self, client, known: dict[int, ChatPeer], chat_id: int
+    ) -> TelegramChat | None:
         try:
             entity = await client.get_entity(chat_id)
         except (errors.RPCError, TypeError, ValueError):
             return None
-        return _chat_record(entity)
+        return _chat_record(entity, known=known.get(int(chat_id)))

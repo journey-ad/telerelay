@@ -4,10 +4,12 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useReferencedChats, useTelegramChats } from '../hooks/useTelegramChats'
 import type { TelegramChat } from '../types'
+import { chatKindCounts, chatKindSections, type ChatKindFilter } from '../utils/chatKind'
 import { chatLabel, chatRowLabel } from '../utils/chatLabel'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 import { ChatInvalidBadge } from './ChatInvalidBadge'
+import { ChatKindFilterTabs, ChatKindHeading } from './ChatKindPicker'
 
 interface ChatSelectProps {
   value: string
@@ -25,6 +27,7 @@ export function ChatSelect({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [kindFilter, setKindFilter] = useState<ChatKindFilter>('all')
   const chats = useTelegramChats()
   const extras = useReferencedChats(chats.data, value ? [value] : [])
   const directory = useMemo(
@@ -32,14 +35,19 @@ export function ChatSelect({
     [chats.data, extras.data],
   )
   const selected = directory.find((chat) => String(chat.id) === value)
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    return directory.filter((chat) => chatMatches(chat, term))
-  }, [directory, search])
+  const matched = useMemo(
+    () => directory.filter((chat) => chatMatches(chat, search)),
+    [directory, search],
+  )
+  const counts = useMemo(() => chatKindCounts(matched), [matched])
+  const sections = useMemo(() => chatKindSections(matched, kindFilter), [matched, kindFilter])
 
   function handleOpenChange(next: boolean) {
     setOpen(next)
-    if (!next) setSearch('')
+    if (!next) {
+      setSearch('')
+      setKindFilter('all')
+    }
     if (next) void chats.refetch()
   }
 
@@ -102,38 +110,44 @@ export function ChatSelect({
               autoFocus
             />
           </div>
+          <ChatKindFilterTabs value={kindFilter} onChange={setKindFilter} counts={counts} />
           <div className="max-h-58 overflow-y-auto overscroll-contain p-1" role="listbox">
-            {filtered.length === 0 ? (
+            {sections.length === 0 ? (
               <p className="px-2 py-4 text-center text-xs text-slate-400">
                 {t(chats.isLoading ? 'common.loadingWithDots' : 'chatInput.noMatches')}
               </p>
             ) : (
-              filtered.map((chat) => {
-                const isSelected = String(chat.id) === value
-                return (
-                  <button
-                    key={chat.id}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    className={cn(
-                      'flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5',
-                      'text-left text-xs text-slate-600 outline-none transition-colors',
-                      'hover:bg-slate-50 focus:bg-blue-50 focus:text-blue-700',
-                    )}
-                    onClick={() => selectChat(chat)}
-                  >
-                    <span className="flex min-w-0 flex-1 items-center gap-1">
-                      <span className="truncate">{chatRowLabel(chat, t)}</span>
-                      <ChatInvalidBadge chat={chat} />
-                    </span>
-                    <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
-                    <span className="grid size-4 shrink-0 place-items-center text-blue-600">
-                      {isSelected ? <Check size={13} strokeWidth={2.5} /> : null}
-                    </span>
-                  </button>
-                )
-              })
+              sections.map((section) => (
+                <div key={section.kind}>
+                  <ChatKindHeading kind={section.kind} count={section.chats.length} />
+                  {section.chats.map((chat) => {
+                    const isSelected = String(chat.id) === value
+                    return (
+                      <button
+                        key={chat.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        className={cn(
+                          'flex min-h-9 w-full items-center gap-2 rounded px-2 py-1.5',
+                          'text-left text-xs text-slate-600 outline-none transition-colors',
+                          'hover:bg-slate-50 focus:bg-blue-50 focus:text-blue-700',
+                        )}
+                        onClick={() => selectChat(chat)}
+                      >
+                        <span className="flex min-w-0 flex-1 items-center gap-1">
+                          <span className="truncate">{chatRowLabel(chat, t)}</span>
+                          <ChatInvalidBadge chat={chat} />
+                        </span>
+                        <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>
+                        <span className="grid size-4 shrink-0 place-items-center text-blue-600">
+                          {isSelected ? <Check size={13} strokeWidth={2.5} /> : null}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))
             )}
           </div>
         </Popover.Content>

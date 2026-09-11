@@ -77,8 +77,9 @@ def _chat_kind(entity: Any) -> str:
         return "supergroup"
     if isinstance(entity, types.Channel):
         return "channel"
-    if getattr(entity, "first_name", None) is not None:
-        return "bot" if getattr(entity, "bot", False) else "private"
+    if isinstance(entity, types.UserEmpty):
+        # Telegram reports the id alone, so the kind comes from the cache.
+        return ""
     if getattr(entity, "megagroup", False):
         return "supergroup"
     return "channel" if getattr(entity, "broadcast", False) else "group"
@@ -308,7 +309,7 @@ class TelegramPreviewService:
         has_more = len(dialogs) > limit
         visible = dialogs[:limit]
         items = [await self._dialog_data(dialog) for dialog in visible]
-        await asyncio.to_thread(self._restore_titles, active_id, items)
+        await asyncio.to_thread(self._restore_peers, active_id, items)
         return {
             "account_id": active_id,
             "folder": folder,
@@ -557,12 +558,18 @@ class TelegramPreviewService:
             ),
         }
 
-    def _restore_titles(self, account_id: str, items: list[dict[str, Any]]) -> None:
-        """Name the peers Telegram reports without one from the cached name."""
-        names = self.names.merge(account_id, ((item["id"], item["title"]) for item in items))
+    def _restore_peers(self, account_id: str, items: list[dict[str, Any]]) -> None:
+        """Restore the name and kind Telegram no longer reports for a peer."""
+        known = self.names.load(account_id)
         for item in items:
+            peer = known.get(item["id"])
             if not item["title"]:
-                item["title"] = names.get(item["id"], "")
+                item["title"] = peer.name if peer else ""
+            if not item["kind"]:
+                item["kind"] = (peer.kind if peer else "") or "private"
+        self.names.merge(
+            account_id, ((item["id"], item["title"], item["kind"]) for item in items)
+        )
 
     def _chat_data(self, entity: Any) -> dict[str, Any]:
         chat_id = _peer_id(entity)
