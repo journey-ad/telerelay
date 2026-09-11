@@ -5,13 +5,19 @@ import html
 import json
 import os
 import zipfile
+from array import array
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Sequence, Tuple
 
+from . import html_viewer
 from .html_viewer import (
+    ArchiveReplyIndex,
+    archive_chunk_entry,
+    archive_manifest,
     chunk_script,
+    compact_json,
     manifest_script,
-    prepare_archive,
+    preview_fields,
     render_index_html,
 )
 
@@ -107,6 +113,15 @@ HTML_MESSAGE_FIELDS = (
     "forwards",
     "replies_count",
 )
+
+
+# Records buffered in memory before the HTML archive spools them to disk.
+_SPOOL_FRAGMENT_RECORDS = 500
+
+
+def _message_id(value: Any) -> int:
+    """Telegram message ids are integers; 0 marks a record without one."""
+    return int(value) if isinstance(value, int) else 0
 
 
 def _spreadsheet_safe(value: Any) -> Any:
@@ -331,7 +346,11 @@ class _HtmlWriter(_AtomicWriter):
 
 
 class _HtmlArchiveWriter:
-    """Collect message records into a paginated, offline ZIP archive."""
+    """Stream message records into a paginated, offline ZIP archive.
+
+    Records are spooled to a private temporary file as they arrive, so an
+    archive of any size is written with bounded memory.
+    """
 
     def __init__(
         self,
@@ -341,74 +360,181 @@ class _HtmlArchiveWriter:
     ):
         self.final_path = Path(str(target_base) + ".html.zip")
         self.part_path = Path(str(self.final_path) + ".part")
+        self.spool_path = Path(str(self.part_path) + ".records")
         self._metadata = dict(metadata)
         self._labels = dict(labels)
-        self._records: List[Dict[str, Any]] = []
+        self._message_ids = array("q")
+        self._reply_ids = array("q")
+        self._fragment: List[Dict[str, Any]] = []
         self._closed = False
+        self._spool = _open_private_text(
+            self.spool_path,
+            encoding="utf-8",
+            newline="",
+        )
 
     def add(self, record: Mapping[str, Any]) -> None:
-        self._records.append(
-            {
-                field: record.get(field)
-                for field in HTML_MESSAGE_FIELDS
-                if field in record
-            }
-        )
+        filtered = {
+            field: record.get(field) for field in HTML_MESSAGE_FIELDS if field in record
+        }
+        self._fragment.append(filtered)
+        self._message_ids.append(_message_id(filtered.get("message_id")))
+        self._reply_ids.append(_message_id(filtered.get("reply_to_message_id")))
+        if len(self._fragment) >= _SPOOL_FRAGMENT_RECORDS:
+            self._spool_fragment()
 
     def finalize(self) -> Path:
         if self._closed:
             return self.final_path
-        manifest, chunks = prepare_archive(self._records, self._metadata, self._labels)
+        try:
+            self._spool_fragment()
+            self._close_spool()
+            self._write_archive()
+        except Exception:
+            self.part_path.unlink(missing_ok=True)
+            raise
+        finally:
+            self._close_spool()
+            self.spool_path.unlink(missing_ok=True)
+            self._fragment = []
+        self._closed = True
+        return self.final_path
+
+    def abort(self) -> None:
+        if self._closed:
+            return
+        self._close_spool()
+        self.spool_path.unlink(missing_ok=True)
+        self.part_path.unlink(missing_ok=True)
+        self._fragment = []
+        self._closed = True
+
+    def _spool_fragment(self) -> None:
+        if not self._fragment:
+            return
+        self._spool.write(compact_json(self._fragment))
+        self._spool.write("\n")
+        self._fragment = []
+
+    def _close_spool(self) -> None:
+        if not self._spool.closed:
+            self._spool.close()
+
+    def _iter_spooled_records(self) -> Iterator[Dict[str, Any]]:
+        with self.spool_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                yield from json.loads(line)
+
+    def _collect_previews(
+        self, wanted: frozenset[int]
+    ) -> Dict[int, Tuple[Any, Any, Any, Any]]:
+        previews: Dict[int, Tuple[Any, Any, Any, Any]] = {}
+        if not wanted:
+            return previews
+        for index, record in enumerate(self._iter_spooled_records()):
+            if index in wanted:
+                previews[index] = preview_fields(record)
+                if len(previews) == len(wanted):
+                    break
+        return previews
+
+    def _write_archive(self) -> None:
+        index = ArchiveReplyIndex(
+            self._message_ids,
+            self._reply_ids,
+            self._labels.get("unknown_sender", "Unknown sender"),
+        )
+        previews = self._collect_previews(index.preview_indices)
         archive_root = self.final_path.name.removesuffix(".html.zip")
         index_labels = dict(self._labels)
-        index_labels["title"] = str(self._metadata.get("title") or index_labels.get("title", "Message archive"))
+        index_labels["title"] = str(
+            self._metadata.get("title")
+            or index_labels.get("title", "Message archive")
+        )
         self.part_path.unlink(missing_ok=True)
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(self.part_path, flags, 0o600)
         os.close(fd)
-        try:
-            with zipfile.ZipFile(
-                self.part_path,
-                "w",
-                compression=zipfile.ZIP_DEFLATED,
-                compresslevel=6,
-            ) as archive:
-                archive.writestr(
-                    f"{archive_root}/index.html",
-                    render_index_html(index_labels, variant="ledger"),
-                )
-                archive.writestr(
-                    f"{archive_root}/manifest.js",
-                    manifest_script(manifest),
-                )
-                for chunk_id, records in enumerate(chunks):
-                    archive.writestr(
-                        f"{archive_root}/data/chunk-{chunk_id + 1:06d}.js",
-                        chunk_script(chunk_id, records),
+        with zipfile.ZipFile(
+            self.part_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+        ) as archive:
+            chunks, total = self._write_chunks(archive, archive_root, index, previews)
+            archive.writestr(
+                f"{archive_root}/index.html",
+                render_index_html(index_labels, variant="ledger"),
+            )
+            archive.writestr(
+                f"{archive_root}/manifest.js",
+                manifest_script(
+                    archive_manifest(
+                        self._metadata, self._labels, chunks, total
                     )
-                archive.writestr(
-                    f"{archive_root}/README.txt",
-                    self._labels.get(
-                        "archive_readme",
-                        "Extract the archive, then open index.html in a browser.\n",
-                    ),
-                )
-            with self.part_path.open("rb") as handle:
-                os.fsync(handle.fileno())
-            os.replace(self.part_path, self.final_path)
-            os.chmod(self.final_path, 0o600)
-            self._closed = True
-            self._records.clear()
-            return self.final_path
-        except Exception:
-            self.part_path.unlink(missing_ok=True)
-            raise
+                ),
+            )
+            archive.writestr(
+                f"{archive_root}/README.txt",
+                self._labels.get(
+                    "archive_readme",
+                    "Extract the archive, then open index.html in a browser.\n",
+                ),
+            )
+        with self.part_path.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(self.part_path, self.final_path)
+        os.chmod(self.final_path, 0o600)
 
-    def abort(self) -> None:
-        if not self._closed:
-            self.part_path.unlink(missing_ok=True)
-            self._records.clear()
-            self._closed = True
+    def _write_chunks(
+        self,
+        archive: zipfile.ZipFile,
+        archive_root: str,
+        index: ArchiveReplyIndex,
+        previews: Mapping[int, Tuple[Any, Any, Any, Any]],
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        chunks: List[Dict[str, Any]] = []
+        buffer: List[Dict[str, Any]] = []
+        buffer_bytes = 2
+        start_index = 0
+        total = 0
+        min_date = None
+        max_date = None
+        for record_index, record in enumerate(self._iter_spooled_records()):
+            annotated = dict(record)
+            annotated["_archive"] = index.annotation(record_index, record, previews)
+            size = len(compact_json(annotated).encode("utf-8")) + (1 if buffer else 0)
+            if buffer and (
+                len(buffer) >= html_viewer.ARCHIVE_MAX_RECORDS
+                or buffer_bytes + size > html_viewer.ARCHIVE_MAX_BYTES
+            ):
+                entry = archive_chunk_entry(
+                    len(chunks), len(buffer), start_index, min_date, max_date
+                )
+                archive.writestr(
+                    f"{archive_root}/{entry['file']}",
+                    chunk_script(len(chunks), buffer),
+                )
+                chunks.append(entry)
+                start_index += len(buffer)
+                buffer, buffer_bytes, min_date, max_date = [], 2, None, None
+            buffer.append(annotated)
+            buffer_bytes += size
+            date = str(record.get("date")) if record.get("date") else None
+            if date:
+                min_date = date if min_date is None or date < min_date else min_date
+                max_date = date if max_date is None or date > max_date else max_date
+            total += 1
+        if buffer:
+            entry = archive_chunk_entry(
+                len(chunks), len(buffer), start_index, min_date, max_date
+            )
+            archive.writestr(
+                f"{archive_root}/{entry['file']}",
+                chunk_script(len(chunks), buffer),
+            )
+            chunks.append(entry)
+        return chunks, total
 
 
 class ExportWriterSet:

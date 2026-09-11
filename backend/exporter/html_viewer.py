@@ -4,134 +4,167 @@ from __future__ import annotations
 
 import html
 import json
+from array import array
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 ARCHIVE_MAX_RECORDS = 2000
 ARCHIVE_MAX_BYTES = 8 * 1024 * 1024
 ARCHIVE_CACHE_CHUNKS = 3
 
+_SCRIPT_ESCAPES = str.maketrans(
+    {
+        "<": "\\u003c",
+        ">": "\\u003e",
+        "&": "\\u0026",
+        "\u2028": "\\u2028",
+        "\u2029": "\\u2029",
+    }
+)
 
-def _json_text(value: Any) -> str:
+
+def compact_json(value: Any) -> str:
+    """Serialize archive data compactly so it can be spooled and streamed."""
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def _script_json(value: Any) -> str:
     """Serialize data for an inline script without allowing a script end tag."""
+    return compact_json(value).translate(_SCRIPT_ESCAPES)
+
+
+def preview_fields(record: Mapping[str, Any]) -> Tuple[Any, Any, Any, Any]:
+    """Reply preview fields the viewer shows for a referenced message."""
     return (
-        _json_text(value)
-        .replace("<", "\\u003c")
-        .replace(">", "\\u003e")
-        .replace("&", "\\u0026")
-        .replace("\u2028", "\\u2028")
-        .replace("\u2029", "\\u2029")
+        record.get("sender_name"),
+        record.get("sender_id"),
+        record.get("date"),
+        record.get("content"),
     )
 
 
-def prepare_archive(
-    records: Sequence[Mapping[str, Any]],
-    metadata: Mapping[str, Any],
-    labels: Mapping[str, str],
-    *,
-    max_records: int = ARCHIVE_MAX_RECORDS,
-    max_bytes: int = ARCHIVE_MAX_BYTES,
-) -> Tuple[Dict[str, Any], List[List[Dict[str, Any]]]]:
-    """Add reply metadata and split records without changing the canonical export data."""
-    copied = [dict(record) for record in records]
-    locations = {
-        str(record.get("message_id")): index
-        for index, record in enumerate(copied)
-        if record.get("message_id") is not None
-    }
-    children: Dict[int, List[int]] = {}
-    parents: Dict[int, int] = {}
-    for child_index, record in enumerate(copied):
-        reply_id = record.get("reply_to_message_id")
-        if reply_id is not None:
-            parent_index = locations.get(str(reply_id))
-            if parent_index is not None and parent_index != child_index:
-                children.setdefault(parent_index, []).append(child_index)
-                parents[child_index] = parent_index
+class ArchiveReplyIndex:
+    """Reply graph of a whole archive, held as compact integer storage.
 
-    descendant_counts = [0] * len(copied)
-    remaining_children = [len(children.get(index, [])) for index in range(len(copied))]
-    ready = [index for index, count in enumerate(remaining_children) if count == 0]
-    cursor = 0
-    while cursor < len(ready):
-        index = ready[cursor]
-        cursor += 1
-        parent_index = parents.get(index)
-        if parent_index is None:
-            continue
-        descendant_counts[parent_index] += 1 + descendant_counts[index]
-        remaining_children[parent_index] -= 1
-        if remaining_children[parent_index] == 0:
-            ready.append(parent_index)
+    The archive is written while records stream past, so the records themselves
+    are never retained: only these small integer structures span the range.
+    """
 
-    # Handle malformed reply cycles without blocking archive creation.
-    for index, remaining in enumerate(remaining_children):
-        if remaining:
-            descendant_counts[index] = max(
-                descendant_counts[index],
-                len(children.get(index, [])),
-            )
+    def __init__(
+        self,
+        message_ids: Sequence[int],
+        reply_ids: Sequence[int],
+        unknown_sender: str = "Unknown sender",
+    ) -> None:
+        count = len(message_ids)
+        self._unknown_sender = unknown_sender
+        locations = {
+            message_ids[index]: index for index in range(count) if message_ids[index]
+        }
+        targets = array("q", [-1]) * count
+        parents = array("q", [-1]) * count
+        children: Dict[int, List[int]] = {}
+        for index in range(count):
+            reply_id = reply_ids[index]
+            if not reply_id:
+                continue
+            target_index = locations.get(reply_id, -1)
+            targets[index] = target_index
+            if target_index >= 0 and target_index != index:
+                parents[index] = target_index
+                children.setdefault(target_index, []).append(index)
 
-    unknown = labels.get("unknown_sender", "Unknown sender")
-    for index, record in enumerate(copied):
+        remaining = array("q", [0]) * count
+        for target_index, child_indices in children.items():
+            remaining[target_index] = len(child_indices)
+        descendants = array("q", [0]) * count
+        ready = array("q", (index for index in range(count) if not remaining[index]))
+        cursor = 0
+        while cursor < len(ready):
+            index = ready[cursor]
+            cursor += 1
+            parent_index = parents[index]
+            if parent_index < 0:
+                continue
+            descendants[parent_index] += 1 + descendants[index]
+            remaining[parent_index] -= 1
+            if not remaining[parent_index]:
+                ready.append(parent_index)
+        # Malformed reply cycles must not block archive creation.
+        for parent_index, child_indices in children.items():
+            if remaining[parent_index]:
+                descendants[parent_index] = max(
+                    descendants[parent_index], len(child_indices)
+                )
+
+        self._targets = targets
+        self._descendants = descendants
+        self._children = children
+        self.preview_indices = frozenset(
+            index for index in targets if index >= 0
+        )
+
+    def annotation(
+        self,
+        index: int,
+        record: Mapping[str, Any],
+        previews: Mapping[int, Tuple[Any, Any, Any, Any]],
+    ) -> Dict[str, Any]:
+        """Add reply metadata for one record without changing its own fields."""
         archive_data: Dict[str, Any] = {
             "index": index,
-            "reply_count": descendant_counts[index],
+            "reply_count": self._descendants[index],
         }
-        child_indices = children.get(index, [])
+        child_indices = self._children.get(index)
         if child_indices:
             archive_data["children"] = child_indices
         reply_id = record.get("reply_to_message_id")
         if reply_id is not None:
-            target_index = locations.get(str(reply_id))
-            target = copied[target_index] if target_index is not None else None
+            target_index = self._targets[index]
+            preview = previews.get(target_index) if target_index >= 0 else None
             archive_data["reply"] = {
                 "message_id": reply_id,
-                "target_index": target_index,
+                "target_index": target_index if target_index >= 0 else None,
                 "sender": (
-                    str(target.get("sender_name") or target.get("sender_id") or unknown)
-                    if target
+                    str(
+                        preview[0]
+                        or preview[1]
+                        or self._unknown_sender
+                    )
+                    if preview
                     else None
                 ),
-                "date": str(target.get("date") or "") if target else None,
-                "content": str(target.get("content") or "")[:240] if target else None,
+                "date": str(preview[2] or "") if preview else None,
+                "content": str(preview[3] or "")[:240] if preview else None,
             }
-        record["_archive"] = archive_data
+        return archive_data
 
-    chunks: List[List[Dict[str, Any]]] = []
-    current: List[Dict[str, Any]] = []
-    current_bytes = 2
-    for record in copied:
-        record_bytes = len(_json_text(record).encode("utf-8")) + (1 if current else 0)
-        if current and (len(current) >= max_records or current_bytes + record_bytes > max_bytes):
-            chunks.append(current)
-            current = []
-            current_bytes = 2
-        current.append(record)
-        current_bytes += record_bytes
-    if current:
-        chunks.append(current)
 
-    chunk_manifest = []
-    start_index = 0
-    for chunk_id, chunk in enumerate(chunks):
-        dates = [str(row.get("date")) for row in chunk if row.get("date")]
-        chunk_manifest.append(
-            {
-                "id": chunk_id,
-                "file": f"data/chunk-{chunk_id + 1:06d}.js",
-                "count": len(chunk),
-                "start_index": start_index,
-                "min_date": min(dates)[:10] if dates else None,
-                "max_date": max(dates)[:10] if dates else None,
-            }
-        )
-        start_index += len(chunk)
+def archive_chunk_entry(
+    chunk_id: int,
+    count: int,
+    start_index: int,
+    min_date: Any,
+    max_date: Any,
+) -> Dict[str, Any]:
+    """Describe one viewer chunk for the archive manifest."""
+    return {
+        "id": chunk_id,
+        "file": f"data/chunk-{chunk_id + 1:06d}.js",
+        "count": count,
+        "start_index": start_index,
+        "min_date": min_date[:10] if min_date else None,
+        "max_date": max_date[:10] if max_date else None,
+    }
 
-    manifest = {
+
+def archive_manifest(
+    metadata: Mapping[str, Any],
+    labels: Mapping[str, str],
+    chunks: Sequence[Mapping[str, Any]],
+    total: int,
+) -> Dict[str, Any]:
+    """Describe the archive so the offline viewer can page it."""
+    return {
         "schema_version": 1,
         "title": str(metadata.get("title") or labels.get("title", "Message archive")),
         "exported_at": str(metadata.get("exported_at") or ""),
@@ -139,14 +172,13 @@ def prepare_archive(
         "range_start": str(metadata.get("range_start") or ""),
         "range_end": str(metadata.get("range_end") or ""),
         "timezone": str(metadata.get("timezone") or ""),
-        "total": len(copied),
+        "total": total,
         "default_page_size": 100,
         "page_sizes": [100, 500, 1000, 2000],
         "cache_chunks": ARCHIVE_CACHE_CHUNKS,
-        "chunks": chunk_manifest,
+        "chunks": [dict(chunk) for chunk in chunks],
         "labels": dict(labels),
     }
-    return manifest, chunks
 
 
 def manifest_script(manifest: Mapping[str, Any]) -> str:

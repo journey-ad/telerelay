@@ -8,17 +8,21 @@ import os
 import sqlite3
 import tempfile
 import threading
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.database import ArchiveMetadata, Base, MessageArchiveRecord, create_sqlite_engine, session_factory, session_scope
 
 SCHEMA_VERSION = 1
+
+# Rows read from the archive per statement. Export writers consume records one
+# at a time, so the range is never held in memory as a whole.
+RECORD_BATCH_SIZE = 250
 
 MESSAGE_COLUMNS = (
     "message_id",
@@ -263,45 +267,78 @@ class MessageArchiveStore:
         os.chmod(self.path, 0o600)
         return len(rows)
 
-    def list_records(
+    def iter_records(
         self,
         *,
         start_at: datetime,
         end_at: datetime,
         output_timezone,
-    ) -> List[Dict[str, Any]]:
+        batch_size: int = RECORD_BATCH_SIZE,
+    ) -> Iterator[Dict[str, Any]]:
+        """Yield records of a range in order, one bounded batch at a time."""
         start_text = _utc_text(start_at)
         end_text = _utc_text(end_at)
-        with self._lock, self._session() as session:
-            rows = session.scalars(
+        cursor: Optional[tuple[str, int]] = None
+        while True:
+            statement = (
                 select(MessageArchiveRecord)
                 .where(
                     MessageArchiveRecord.chat_id == self.chat_id,
                     MessageArchiveRecord.date_utc >= start_text,
                     MessageArchiveRecord.date_utc <= end_text,
                 )
-                .order_by(MessageArchiveRecord.date_utc, MessageArchiveRecord.message_id)
-            ).all()
+                .order_by(
+                    MessageArchiveRecord.date_utc,
+                    MessageArchiveRecord.message_id,
+                )
+                .limit(max(1, batch_size))
+            )
+            if cursor is not None:
+                cursor_date, cursor_id = cursor
+                statement = statement.where(
+                    or_(
+                        MessageArchiveRecord.date_utc > cursor_date,
+                        and_(
+                            MessageArchiveRecord.date_utc == cursor_date,
+                            MessageArchiveRecord.message_id > cursor_id,
+                        ),
+                    )
+                )
+            with self._lock, self._session() as session:
+                rows = session.scalars(statement).all()
+                batch = []
+                for row in rows:
+                    record = json.loads(row.record_json)
+                    record["date_utc"] = row.date_utc
+                    record["date"] = _localized_text(row.date_utc, output_timezone)
+                    record["edited_at_utc"] = row.edited_at_utc
+                    record["edited_at"] = _localized_text(
+                        row.edited_at_utc, output_timezone
+                    )
+                    record["forward_date_utc"] = row.forward_date_utc
+                    record["forward_date"] = _localized_text(
+                        row.forward_date_utc, output_timezone
+                    )
+                    if row.raw_json:
+                        record["raw"] = json.loads(row.raw_json)
+                    if row.sender_json:
+                        record["sender_raw"] = json.loads(row.sender_json)
+                    batch.append(record)
+                next_cursor = (
+                    (rows[-1].date_utc, rows[-1].message_id) if rows else None
+                )
+            if not batch:
+                return
+            yield from batch
+            cursor = next_cursor
 
-        records: List[Dict[str, Any]] = []
-        for row in rows:
-            record = json.loads(row.record_json)
-            record["date_utc"] = row.date_utc
-            record["date"] = _localized_text(row.date_utc, output_timezone)
-            record["edited_at_utc"] = row.edited_at_utc
-            record["edited_at"] = _localized_text(
-                row.edited_at_utc, output_timezone
-            )
-            record["forward_date_utc"] = row.forward_date_utc
-            record["forward_date"] = _localized_text(
-                row.forward_date_utc, output_timezone
-            )
-            if row.raw_json:
-                record["raw"] = json.loads(row.raw_json)
-            if row.sender_json:
-                record["sender_raw"] = json.loads(row.sender_json)
-            records.append(record)
-        return records
+    def close(self) -> None:
+        """Release pooled connections without closing the archive itself.
+
+        The store stays usable: later reads simply open fresh connections.
+        """
+        with self._lock:
+            self.engine.dispose()
 
     def count(self) -> int:
         with self._lock, self._session() as session:

@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 import zipfile
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -57,6 +58,9 @@ def _date_text(value: datetime) -> str:
 
 PREVIEW_TOKEN_TTL = 300.0
 
+# Per-chat archive stores kept open per account; each one holds a connection.
+MESSAGE_STORE_CACHE_LIMIT = 16
+
 
 class ExportService:
     def __init__(
@@ -89,7 +93,7 @@ class ExportService:
         self._jobs: Dict[str, ExportJobState] = {}
         self._cancel_events: Dict[str, threading.Event] = {}
         self._active_task_ids = set()
-        self._message_stores: Dict[int, MessageArchiveStore] = {}
+        self._message_stores: "OrderedDict[int, MessageArchiveStore]" = OrderedDict()
         self._preview_tokens: Dict[str, Tuple[str, float]] = {}
         self.scheduler = None
 
@@ -170,6 +174,10 @@ class ExportService:
             if store is None:
                 store = MessageArchiveStore(self.message_db_root, chat_id)
                 self._message_stores[chat_id] = store
+            self._message_stores.move_to_end(chat_id)
+            if len(self._message_stores) > MESSAGE_STORE_CACHE_LIMIT:
+                _, stale = self._message_stores.popitem(last=False)
+                stale.close()
             return store
 
     @staticmethod
@@ -631,12 +639,13 @@ class ExportService:
                         task.initial_start_at,
                         task.timezone,
                     )
-                    archive_records = message_store.list_records(
+                    stored_records = message_store.iter_records(
                         start_at=archive_start,
                         end_at=end_at,
                         output_timezone=output_timezone,
                     )
-                    if archive_records:
+                    first_record = next(stored_records, None)
+                    if first_record is not None:
                         self._update_job(job_id, phase="writing_files")
                         archive_metadata = dict(metadata)
                         archive_metadata["range_start"] = _date_text(archive_start)
@@ -647,7 +656,8 @@ class ExportService:
                             archive_metadata,
                             self._html_labels(),
                         )
-                        for record in archive_records:
+                        writers.add(first_record)
+                        for record in stored_records:
                             writers.add(record)
                         files.extend(
                             str(path.resolve()) for path in writers.finalize()
@@ -658,12 +668,13 @@ class ExportService:
                     fmt for fmt in formats if fmt in {"json", "csv", "html"}
                 )
                 if rebuild_formats:
-                    archive_records = message_store.list_records(
+                    stored_records = message_store.iter_records(
                         start_at=start_at,
                         end_at=end_at,
                         output_timezone=output_timezone,
                     )
-                    if archive_records:
+                    first_record = next(stored_records, None)
+                    if first_record is not None:
                         self._update_job(job_id, phase="writing_files")
                         writers = create_writer_set(
                             directory / stem,
@@ -672,7 +683,8 @@ class ExportService:
                             metadata,
                             self._html_labels(),
                         )
-                        for record in archive_records:
+                        writers.add(first_record)
+                        for record in stored_records:
                             writers.add(record)
                         files.extend(
                             str(path.resolve()) for path in writers.finalize()
@@ -1074,4 +1086,8 @@ class ExportService:
         with self._lock:
             for event in self._cancel_events.values():
                 event.set()
+            stores = list(self._message_stores.values())
+            self._message_stores.clear()
+        for store in stores:
+            store.close()
         self._executor.shutdown(wait=False, cancel_futures=True)
