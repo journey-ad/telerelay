@@ -1,0 +1,2 @@
+# Markdown hard line breaks use two trailing spaces; they are intentional here.
+CHANGELOG.md whitespace=-blank-at-eol
