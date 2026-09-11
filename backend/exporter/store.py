@@ -218,6 +218,22 @@ class ExportStore:
                 )
             )
 
+    def update_run_progress(self, run_id: int, message_count: int) -> None:
+        """Publish the count of a run that is still executing.
+
+        Only a run that is still `running` is touched: a late progress write
+        must never overwrite the count a terminal state already recorded.
+        """
+        with self._lock, self._session() as session:
+            session.execute(
+                update(ExportRunRow)
+                .where(
+                    ExportRunRow.id == int(run_id),
+                    ExportRunRow.status == "running",
+                )
+                .values(message_count=int(message_count))
+            )
+
     def list_runs(self, limit: int = 50) -> List[ExportRun]:
         with self._lock, self._session() as session:
             rows = session.scalars(

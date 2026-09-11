@@ -61,6 +61,46 @@ PREVIEW_TOKEN_TTL = 300.0
 # Per-chat archive stores kept open per account; each one holds a connection.
 MESSAGE_STORE_CACHE_LIMIT = 16
 
+# A running export mirrors its count into the run row so the console's run
+# history grows while the job is still working. Writes are rate limited: one
+# SQLite transaction per message would cost more than the export itself.
+RUN_PROGRESS_INTERVAL_SECONDS = 2.0
+
+
+class _RunProgressWriter:
+    """Persist a running export's message count at a bounded rate."""
+
+    def __init__(
+        self,
+        store: ExportStore,
+        run_id: int,
+        *,
+        interval: Optional[float] = None,
+    ):
+        self._store = store
+        self._run_id = run_id
+        self._interval = (
+            RUN_PROGRESS_INTERVAL_SECONDS if interval is None else interval
+        )
+        self._count = 0
+        self._at = time.monotonic()
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+    def update(self, count: int, *, force: bool = False) -> bool:
+        """Store `count` when the rate limit allows it; report whether it stored."""
+        if count <= self._count:
+            return False
+        now = time.monotonic()
+        if not force and now - self._at < self._interval:
+            return False
+        self._store.update_run_progress(self._run_id, message_count=count)
+        self._count = count
+        self._at = now
+        return True
+
 
 class ExportService:
     def __init__(
@@ -314,6 +354,7 @@ class ExportService:
     def _run_group_export(self, job_id: str, formats, directory: Path) -> None:
         cancel_event = self._cancel_events[job_id]
         run_id = self.store.start_run(task_id=None, run_type="groups")
+        progress = _RunProgressWriter(self.store, run_id)
         self._update_job(
             job_id,
             status="running",
@@ -328,6 +369,7 @@ class ExportService:
         try:
             def update_progress(processed, total):
                 self._update_job(job_id, processed=processed, total=total)
+                progress.update(processed, force=processed == 1)
                 if processed == 1 or processed % 25 == 0 or processed == total:
                     logger.debug(
                         t(
@@ -525,6 +567,7 @@ class ExportService:
             run_id=run_id,
             started_at=_date_text(_now_utc()),
         )
+        progress = _RunProgressWriter(self.store, run_id)
         logger.debug(
             t(
                 "log.export.message_started",
@@ -606,6 +649,7 @@ class ExportService:
                     int(last_message_id or record.message_id),
                     int(record.message_id),
                 )
+                progress.update(count, force=count == 1)
                 if count == 1 or count % 25 == 0:
                     self._update_job(
                         job_id,
