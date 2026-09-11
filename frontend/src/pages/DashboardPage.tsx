@@ -479,10 +479,15 @@ function DashedSegment({
     ? (start.y - previous.y) / (start.x - previous.x)
     : (end.y - start.y) / dx
   const outgoing = (end.y - start.y) / dx
+  // Handles stay inside the segment's own vertical span, so a steep approach
+  // slope cannot bend the curve below the axis floor.
+  const top = Math.min(start.y, end.y)
+  const bottom = Math.max(start.y, end.y)
+  const handle = (value: number) => Math.min(Math.max(value, top), bottom)
   const curve = [
     `M${start.x},${start.y}`,
-    `C${start.x + dx / 3},${start.y + (incoming * dx) / 3}`,
-    `${end.x - dx / 3},${end.y - (outgoing * dx) / 3}`,
+    `C${start.x + dx / 3},${handle(start.y + (incoming * dx) / 3)}`,
+    `${end.x - dx / 3},${handle(end.y - (outgoing * dx) / 3)}`,
     `${end.x},${end.y}`,
   ].join(' ')
 
