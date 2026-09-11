@@ -29,6 +29,14 @@ CHAT_KINDS: tuple[ChatKind, ...] = (
     "unknown",
 )
 ChatInvalidReason = Literal["deleted", "deactivated", "left", "blocked", "readonly", "missing"]
+CHAT_INVALID_REASONS: tuple[ChatInvalidReason, ...] = (
+    "deleted",
+    "deactivated",
+    "left",
+    "blocked",
+    "readonly",
+    "missing",
+)
 
 # Resolution failures that mean the chat is gone rather than temporarily
 # unreachable, so a rate limit or connection error is not in this list.
@@ -96,6 +104,27 @@ def _known_kind(known: ChatPeer | None) -> ChatKind | None:
     return None
 
 
+def _known_reason(known: ChatPeer | None) -> ChatInvalidReason | None:
+    """The usability seen for a peer while Telegram still reported it."""
+    if known and known.invalid_reason in CHAT_INVALID_REASONS:
+        return cast(ChatInvalidReason, known.invalid_reason)
+    return None
+
+
+def _known_username(known: ChatPeer | None) -> str | None:
+    return known.username or None if known else None
+
+
+def _peer_snapshot(chat: TelegramChat) -> ChatPeer:
+    """What the cache remembers about a chat Telegram still reports."""
+    return ChatPeer(
+        name=chat.title,
+        kind=chat.kind,
+        username=chat.username or "",
+        invalid_reason=chat.invalid_reason or "",
+    )
+
+
 def _peer_kind(chat_id: int) -> ChatKind:
     """The kind a peer id alone implies once Telegram stops resolving it.
 
@@ -128,7 +157,8 @@ def _chat_record(
             id=_peer_id(entity),
             title=known.name if known else "",
             kind=_known_kind(known) or _peer_kind(_peer_id(entity)),
-            invalid_reason="deleted",
+            username=_known_username(known),
+            invalid_reason=_known_reason(known) or "deleted",
         )
     if isinstance(entity, types.User):
         if not include_private and not bool(getattr(entity, "bot", False)):
@@ -293,13 +323,19 @@ class TelegramChatService:
         usable.
         """
         peers = self.names.merge(
-            account_id, ((chat.id, chat.title, chat.kind) for chat in chats)
+            account_id, ((chat.id, _peer_snapshot(chat)) for chat in chats)
         )
         restored = []
         for chat in chats:
-            # A peer with no name of its own is not cached, so it has none here.
+            # A peer Telegram names nowhere is not cached, so it has nothing here.
             peer = peers.get(chat.id)
-            restored.append(replace(chat, title=chat.title or (peer.name if peer else "")))
+            restored.append(
+                replace(
+                    chat,
+                    title=chat.title or (peer.name if peer else ""),
+                    username=chat.username or _known_username(peer),
+                )
+            )
         return sorted(restored, key=lambda chat: (chat.title.casefold(), chat.id))
 
     def _result(self, account_id: str, callback, *args, timeout: float):
@@ -353,7 +389,8 @@ class TelegramChatService:
                         id=chat_id,
                         title=stored.name if stored else "",
                         kind=_known_kind(stored) or _peer_kind(chat_id),
-                        invalid_reason=_resolve_reason(exc),
+                        username=_known_username(stored),
+                        invalid_reason=_known_reason(stored) or _resolve_reason(exc),
                     )
                 )
                 continue

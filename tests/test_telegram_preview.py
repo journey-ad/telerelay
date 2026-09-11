@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from telethon.errors import ChatWriteForbiddenError, FloodWaitError
 from telethon.tl import functions, types
 
+from backend.chat_names import ChatPeer
 from backend.telegram_preview import TelegramPreviewError, TelegramPreviewService
 
 
@@ -218,7 +219,7 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dialogs_without_a_name_keep_the_cached_one(self):
         self.client.dialogs.append(FakeDialog(types.UserEmpty(id=404), None, archived=True))
-        self.service.names.merge("work", [(404, "Alice", "private")])
+        self.service.names.merge("work", [(404, ChatPeer(name="Alice", kind="private"))])
 
         archived = await self.service.list_dialogs(
             account_id="work", folder="archived", limit=40, cursor=None

@@ -165,7 +165,7 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
     def test_scrubbed_peers_keep_the_cached_name_and_kind(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            service.names.merge("101", [(4242, "Helper bot", "bot")])
+            service.names.merge("101", [(4242, ChatPeer(name="Helper bot", kind="bot"))])
 
             record = _chat_record(
                 types.UserEmpty(id=4242), known=service.names.load("101").get(4242)
@@ -175,10 +175,41 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(record.kind, "bot")
             self.assertEqual(record.invalid_reason, "deleted")
 
+    def test_scrubbed_peers_keep_the_cached_username(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.names.merge(
+                "101",
+                [(4242, ChatPeer(name="Helper", kind="bot", username="helper_bot"))],
+            )
+
+            record = _chat_record(
+                types.UserEmpty(id=4242), known=service.names.load("101").get(4242)
+            )
+
+            # The username is what tells a scrubbed bot from a private user.
+            self.assertEqual(record.username, "helper_bot")
+            self.assertEqual(record.kind, "bot")
+
+    def test_scrubbed_peers_keep_the_cached_usability(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.names.merge(
+                "101",
+                [(4242, ChatPeer(name="Muted", kind="channel", invalid_reason="readonly"))],
+            )
+
+            record = _chat_record(
+                types.UserEmpty(id=4242), known=service.names.load("101").get(4242)
+            )
+
+            # Telegram only says the peer is gone, not why it stopped working.
+            self.assertEqual(record.invalid_reason, "readonly")
+
     def test_listing_restores_the_name_telegram_no_longer_reports(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            service.names.merge("101", [(12, "Alice", "private")])
+            service.names.merge("101", [(12, ChatPeer(name="Alice", kind="private"))])
 
             restored = service._named("101", [_chat_record(types.UserEmpty(id=12))])
 
@@ -188,7 +219,7 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
     def test_listing_refreshes_a_cached_name(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            service.names.merge("101", [(9, "Old name", "channel")])
+            service.names.merge("101", [(9, ChatPeer(name="Old name", kind="channel"))])
 
             restored = service._named(
                 "101", [TelegramChat(id=9, title="New name", kind="channel")]
@@ -202,9 +233,9 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
     def test_a_peer_reported_without_a_name_keeps_the_cached_one(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            service.names.merge("101", [(12, "Alice", "private")])
+            service.names.merge("101", [(12, ChatPeer(name="Alice", kind="private"))])
 
-            service.names.merge("101", [(12, "", "bot")])
+            service.names.merge("101", [(12, ChatPeer(kind="bot"))])
 
             self.assertEqual(service.names.load("101"), {12: ChatPeer(name="Alice", kind="bot")})
 
@@ -213,7 +244,7 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
             service = self._service(temp_dir)
 
             # Its kind would only be a guess, so there is nothing to remember.
-            self.assertEqual(service.names.merge("101", [(12, "", "unknown")]), {})
+            self.assertEqual(service.names.merge("101", [(12, ChatPeer(kind="unknown"))]), {})
             self.assertEqual(service.names.load("101"), {})
 
     def test_listing_a_peer_without_a_name_does_not_fail(self):
@@ -272,7 +303,9 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_unresolved_references_keep_the_cached_kind(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
-            known = service.names.merge("101", [(-1001234567890, "Old supergroup", "supergroup")])
+            known = service.names.merge(
+                "101", [(-1001234567890, ChatPeer(name="Old supergroup", kind="supergroup"))]
+            )
 
             async def get_entity(chat_id):
                 raise errors.ChannelPrivateError(request=None)
@@ -283,6 +316,36 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(listed[0].title, "Old supergroup")
             self.assertEqual(listed[0].kind, "supergroup")
+
+    async def test_unresolved_references_keep_the_last_known_usability(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            known = service.names.merge(
+                "101",
+                [
+                    (
+                        4242,
+                        ChatPeer(
+                            name="Helper",
+                            kind="bot",
+                            username="helper_bot",
+                            invalid_reason="blocked",
+                        ),
+                    )
+                ],
+            )
+
+            async def get_entity(chat_id):
+                raise ValueError("Cannot find any entity corresponding to")
+
+            listed = await service._with_referenced_chats(
+                SimpleNamespace(get_entity=get_entity), [], (4242,), known
+            )
+
+            # "missing" only says Telegram cannot resolve the id any more.
+            self.assertEqual(listed[0].invalid_reason, "blocked")
+            self.assertEqual(listed[0].username, "helper_bot")
+            self.assertEqual(listed[0].kind, "bot")
 
     async def test_referenced_chats_are_resolved_and_kept(self):
         with tempfile.TemporaryDirectory() as temp_dir:

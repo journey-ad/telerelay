@@ -1,4 +1,4 @@
-"""Last known chat names and kinds, kept for peers Telegram scrubs to an id."""
+"""Last known chat names, kinds and usernames, kept for peers Telegram scrubs."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ import os
 import tempfile
 import threading
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ MAX_NAMES = 2000
 
 # Bumped whenever the stored shape changes, so an older file is dropped and
 # rebuilt instead of being migrated.
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -26,14 +27,19 @@ class ChatPeer:
 
     name: str = ""
     kind: str = ""
+    username: str = ""
+    invalid_reason: str = ""
+    # Metadata rather than identity, so it stays out of equality checks.
+    seen_at: str = field(default="", compare=False)
 
 
 class ChatNameCache:
     """Remember the last name and kind Telegram reported for each peer.
 
     Deleted accounts arrive as ``UserEmpty`` and banned chats stop resolving, so
-    a listing can only report their id. Cached peers let those keep the name and
-    the kind they had while Telegram still reported them.
+    a listing can only report their id. Cached peers let those keep the name,
+    the username and the kind they had while Telegram still reported them — the
+    username being what tells a scrubbed bot apart from a private user.
     """
 
     def __init__(self, account_store: Any):
@@ -46,31 +52,34 @@ class ChatNameCache:
             return self._read(account_id)
 
     def merge(
-        self, account_id: str, entries: Iterable[tuple[int, str, str]]
+        self, account_id: str, entries: Iterable[tuple[int, ChatPeer]]
     ) -> dict[int, ChatPeer]:
         """Store the peers seen now and return every peer known for the account."""
+        seen_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self._lock:
             peers = self._read(account_id)
-            changed = False
-            for chat_id, title, kind in entries:
-                name = title.strip()
+            seen = False
+            for chat_id, entry in entries:
                 stored = peers.get(chat_id)
-                if not name and stored is None:
-                    # A peer Telegram reports without a name carries no kind of
-                    # its own, so caching it would only store a guess.
+                if not entry.name and stored is None:
+                    # A peer Telegram names nowhere carries no kind of its own,
+                    # so caching it would only store a guess.
                     continue
-                if stored is not None and stored.kind == kind and (not name or stored.name == name):
-                    continue
-                # A scrubbed peer reports no title, which must not erase the name.
+                # A scrubbed peer reports no name, which must not erase the one
+                # already known; every sighting refreshes the timestamp.
                 peers.pop(chat_id, None)
-                peers[chat_id] = ChatPeer(name=name or stored.name, kind=kind)
-                changed = True
+                peers[chat_id] = replace(
+                    entry, name=entry.name or stored.name, seen_at=seen_at
+                )
+                seen = True
             overflow = len(peers) - MAX_NAMES
             if overflow > 0:
-                for stale in list(peers)[:overflow]:
+                for stale in sorted(peers, key=lambda chat_id: peers[chat_id].seen_at)[
+                    :overflow
+                ]:
                     peers.pop(stale, None)
-                changed = True
-            if changed:
+                seen = True
+            if seen:
                 self._save(account_id, peers)
             return peers
 
@@ -99,6 +108,9 @@ class ChatNameCache:
             peers[chat_id] = ChatPeer(
                 name=str(value.get("name") or ""),
                 kind=str(value.get("kind") or ""),
+                username=str(value.get("username") or ""),
+                invalid_reason=str(value.get("invalid_reason") or ""),
+                seen_at=str(value.get("seen_at") or ""),
             )
         return peers
 

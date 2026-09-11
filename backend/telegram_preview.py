@@ -16,7 +16,7 @@ from telethon import events, functions, utils
 from telethon.errors import RPCError
 from telethon.tl import types
 
-from backend.chat_names import ChatNameCache
+from backend.chat_names import ChatNameCache, ChatPeer
 from backend.telegram_accounts import TelegramAccountError
 from backend.telegram_entities import serialize_entities
 
@@ -559,7 +559,7 @@ class TelegramPreviewService:
         }
 
     def _restore_peers(self, account_id: str, items: list[dict[str, Any]]) -> None:
-        """Restore the name and kind Telegram no longer reports for a peer."""
+        """Restore the name, username and kind Telegram no longer reports."""
         known = self.names.load(account_id)
         for item in items:
             peer = known.get(item["id"])
@@ -567,8 +567,21 @@ class TelegramPreviewService:
                 item["title"] = peer.name if peer else ""
             if not item["kind"]:
                 item["kind"] = (peer.kind if peer else "") or "unknown"
+            if not item["username"]:
+                item["username"] = (peer.username or None) if peer else None
         self.names.merge(
-            account_id, ((item["id"], item["title"], item["kind"]) for item in items)
+            account_id,
+            (
+                (
+                    item["id"],
+                    ChatPeer(
+                        name=item["title"],
+                        kind=item["kind"],
+                        username=item["username"] or "",
+                    ),
+                )
+                for item in items
+            ),
         )
 
     def _chat_data(self, entity: Any) -> dict[str, Any]:
