@@ -117,6 +117,13 @@ function runFormats(files: string[]): string[] {
   return [...formats]
 }
 
+function runStatusTone(status: string): 'green' | 'red' | 'amber' | 'blue' {
+  if (status === 'completed') return 'green'
+  if (status === 'failed') return 'red'
+  if (status === 'interrupted') return 'amber'
+  return 'blue'
+}
+
 function jobProgress(job: ExportJob): number {
   if (job.status === 'completed') return 100
   if (job.total) return Math.min(100, (job.processed / job.total) * 100)
@@ -740,15 +747,7 @@ export function ExportsPage() {
                       </td>
                       <td>{run.chat_title || run.chat_id || '-'}</td>
                       <td>
-                        <Badge
-                          tone={
-                            run.status === 'completed'
-                              ? 'green'
-                              : run.status === 'failed'
-                                ? 'red'
-                                : 'blue'
-                          }
-                        >
+                        <Badge tone={runStatusTone(run.status)}>
                           {t(`exports.status.${run.status}`, { defaultValue: run.status })}
                         </Badge>
                       </td>

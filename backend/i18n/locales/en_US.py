@@ -246,6 +246,8 @@ TRANSLATIONS = {
             "task_saved": "Scheduled export task saved: task_id={task_id}, name={name}, chat={chat_title} ({chat_id}), schedule={schedule}, enabled={enabled}, next_run={next_run}",
             "task_state_changed": "Scheduled export task state updated: task_id={task_id}, name={name}, enabled={enabled}, next_run={next_run}",
             "task_deleted": "Scheduled export task deleted: task_id={task_id}, name={name}",
+            "runs_interrupted": "Closed export runs left running by a previous process: account_id={account_id}, count={count}, run_ids={run_ids}",
+            "partial_files_removed": "Removed staged export files left by a previous process: account_id={account_id}, files={count}, size={size}",
             "scheduler_started": "Export scheduler started: tasks={count}",
             "scheduler_stopped": "Export scheduler stopped",
             "task_scheduled": "Scheduled export task registered: task_id={task_id}, name={name}, next_run={next_run}",

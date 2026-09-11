@@ -25,7 +25,12 @@ from .models import (
     ExportJobState,
     ExportTask,
 )
-from .paths import ExportPathError, resolve_export_directory, safe_filename
+from .paths import (
+    ExportPathError,
+    purge_partial_files,
+    resolve_export_directory,
+    safe_filename,
+)
 from .source import TelegramExportSource
 from .store import ExportStore
 
@@ -1125,6 +1130,41 @@ class ExportService:
             "archive_readme",
         )
         return {key: t(f"export.html.{key}") for key in keys}
+
+    def recover_interrupted_runs(self) -> List[int]:
+        """Close runs an earlier process left `running`; returns their ids.
+
+        Called once at startup, before the scheduler is started, so no run of
+        this process can be mistaken for an orphan.
+        """
+        run_ids = self.store.interrupt_running_runs()
+        if run_ids:
+            logger.warning(
+                t(
+                    "log.export.runs_interrupted",
+                    account_id=self.account_id or "-",
+                    count=len(run_ids),
+                    run_ids=", ".join(str(run_id) for run_id in run_ids),
+                )
+            )
+        return run_ids
+
+    def purge_partial_exports(self) -> int:
+        """Delete staged export files an earlier process left behind.
+
+        Called once at startup, while no export of this process can hold one.
+        """
+        removed, freed = purge_partial_files(self.export_root)
+        if removed:
+            logger.info(
+                t(
+                    "log.export.partial_files_removed",
+                    account_id=self.account_id or "-",
+                    count=removed,
+                    size=f"{freed / 1048576:.1f}MB",
+                )
+            )
+        return removed
 
     def shutdown(self) -> None:
         with self._lock:

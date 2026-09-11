@@ -234,6 +234,32 @@ class ExportStore:
                 .values(message_count=int(message_count))
             )
 
+    def interrupt_running_runs(self) -> List[int]:
+        """Close runs a previous process left `running`.
+
+        An export only ever executes inside the serving process, so at startup
+        every `running` row is an orphan: the container was restarted or killed
+        while it was working. The count reached so far is kept for the record.
+        """
+        now = _utc_now_text()
+        with self._lock, self._session() as session:
+            run_ids = [
+                int(run_id)
+                for run_id in session.scalars(
+                    select(ExportRunRow.id)
+                    .where(ExportRunRow.status == "running")
+                    .order_by(ExportRunRow.id)
+                ).all()
+            ]
+            if not run_ids:
+                return []
+            session.execute(
+                update(ExportRunRow)
+                .where(ExportRunRow.status == "running")
+                .values(status="interrupted", finished_at=now)
+            )
+            return run_ids
+
     def list_runs(self, limit: int = 50) -> List[ExportRun]:
         with self._lock, self._session() as session:
             rows = session.scalars(

@@ -246,6 +246,8 @@ TRANSLATIONS = {
             "task_saved": "定时导出任务已保存: task_id={task_id}, name={name}, chat={chat_title} ({chat_id}), schedule={schedule}, enabled={enabled}, next_run={next_run}",
             "task_state_changed": "定时导出任务状态已更新: task_id={task_id}, name={name}, enabled={enabled}, next_run={next_run}",
             "task_deleted": "定时导出任务已删除: task_id={task_id}, name={name}",
+            "runs_interrupted": "已中断上一次进程遗留的导出运行: account_id={account_id}, count={count}, run_ids={run_ids}",
+            "partial_files_removed": "已清理上次遗留的导出临时文件: account_id={account_id}, files={count}, size={size}",
             "scheduler_started": "导出调度器已启动: tasks={count}",
             "scheduler_stopped": "导出调度器已停止",
             "task_scheduled": "定时导出任务已注册: task_id={task_id}, name={name}, next_run={next_run}",

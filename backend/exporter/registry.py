@@ -56,19 +56,25 @@ class AccountExportRegistry:
         return self._schedulers[account_id]
 
     def start(self) -> None:
+        for account in self.runtimes.account_store.list_public():
+            if not is_telegram_user_id(account["id"]):
+                continue
+            try:
+                service = self.for_account(account["id"])
+            except TelegramAccountError as exc:
+                logger.warning(
+                    "Skipped export scope for account %s: %s",
+                    account["id"],
+                    exc,
+                )
+                continue
+            # Close run rows and remove staged files a previous process left
+            # behind before anything can schedule new work, so only real
+            # leftovers are touched.
+            service.recover_interrupted_runs()
+            service.purge_partial_exports()
         with self._lock:
             self._started = True
-        for account in self.runtimes.account_store.list_public():
-            if is_telegram_user_id(account["id"]):
-                try:
-                    self.for_account(account["id"])
-                except TelegramAccountError as exc:
-                    logger.warning(
-                        "Skipped export scope for account %s: %s",
-                        account["id"],
-                        exc,
-                    )
-        with self._lock:
             schedulers = list(self._schedulers.values())
         for scheduler in schedulers:
             scheduler.start()

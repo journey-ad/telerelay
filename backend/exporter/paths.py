@@ -2,10 +2,41 @@
 
 import re
 from pathlib import Path
+from typing import Tuple
 
 
 class ExportPathError(ValueError):
     """Raised when an export path escapes the configured root."""
+
+
+# Writers stage `<final>.part` and the HTML archive keeps its record spool in
+# `<final>.part.records`; both are renamed or deleted when a run finishes.
+PARTIAL_FILE_SUFFIXES = (".part", ".part.records")
+
+
+def purge_partial_files(root: Path) -> Tuple[int, int]:
+    """Remove staged export files and report `(removed, bytes)`.
+
+    A writer publishes its file only in `finalize()`, so a killed process
+    leaves the staged copy behind. Call this when no export can be running.
+    """
+    removed = 0
+    freed = 0
+    if not root.is_dir():
+        return 0, 0
+    for path in root.rglob("*"):
+        # Directories are never staged files, and a symlink is unlinked rather
+        # than followed, so nothing outside the root can be touched.
+        if path.is_dir() or not path.name.endswith(PARTIAL_FILE_SUFFIXES):
+            continue
+        try:
+            size = path.stat().st_size
+            path.unlink()
+        except OSError:
+            continue
+        removed += 1
+        freed += size
+    return removed, freed
 
 
 def resolve_export_directory(root: Path, subdirectory: str) -> Path:
