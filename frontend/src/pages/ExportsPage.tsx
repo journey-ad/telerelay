@@ -9,6 +9,7 @@ import {
   Eye,
   FileArchive,
   Globe2,
+  LoaderCircle,
   Play,
   Plus,
   Table2,
@@ -18,7 +19,7 @@ import {
 import type { TFunction } from 'i18next'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { accountRequest, json } from '../api/client'
+import { accountRequest, ApiError, json } from '../api/client'
 import { ChatSelect } from '../components/ChatSelect'
 import { TimezoneSelect } from '../components/TimezoneSelect'
 import { useTelegramChats } from '../hooks/useTelegramChats'
@@ -32,6 +33,7 @@ import {
   EmptyState,
   fieldClass,
   IconButton,
+  notify,
   PageHeader,
   Panel,
   Select,
@@ -198,6 +200,8 @@ export function ExportsPage() {
   const client = useQueryClient()
   const accountId = useAccountScope()
   const [jobId, setJobId] = useState('')
+  const [tab, setTab] = useState('instant')
+  const [runningTaskId, setRunningTaskId] = useState<number | null>(null)
   const [taskOpen, setTaskOpen] = useState(false)
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null)
   const [messageForm, setMessageForm] = useState({
@@ -328,13 +332,37 @@ export function ExportsPage() {
       onConfirm: () => removeTask.mutateAsync(id),
     })
   }
-  async function runTask(id: number) {
-    const result = await accountRequest<{ job_id: string }>(
-      accountId,
-      `/api/v1/exports/tasks/${id}/run`,
-      json('POST'),
-    )
-    setJobId(result.job_id)
+  async function runTask(task: ExportTask) {
+    setRunningTaskId(task.id)
+    try {
+      const result = await accountRequest<{ job_id: string }>(
+        accountId,
+        `/api/v1/exports/tasks/${task.id}/run`,
+        json('POST'),
+      )
+      setJobId(result.job_id)
+      notify({
+        tone: 'success',
+        title: t('exports.runStarted', { name: task.name }),
+        description: t('exports.runStartedDetail', { name: task.name }),
+        action: { label: t('exports.viewProgress'), onClick: () => setTab('instant') },
+      })
+      // The run row is created by the export worker just after this response,
+      // so refresh once more to pick it up before the polling interval does.
+      window.setTimeout(() => void client.invalidateQueries({ queryKey: ['export-runs'] }), 1500)
+    } catch (error) {
+      notify({
+        tone: 'error',
+        title: t('exports.runFailed'),
+        description:
+          error instanceof ApiError && error.code === 'already_running'
+            ? t('exports.runAlreadyRunning')
+            : messageFrom(error),
+      })
+    } finally {
+      setRunningTaskId(null)
+      void client.invalidateQueries({ queryKey: ['export-runs'] })
+    }
   }
   function selectFormat(name: string, selected: boolean, target: 'message' | 'task') {
     if (target === 'message')
@@ -400,7 +428,7 @@ export function ExportsPage() {
           </Button>
         }
       />
-      <Tabs defaultValue="instant">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className={tabsListClass}>
           <TabsTrigger value="instant">
             <FileArchive size={16} />
@@ -653,9 +681,15 @@ export function ExportsPage() {
                             onClick={() => editTask(task)}
                           />
                           <IconButton
-                            label={t('exports.runNow')}
-                            icon={Play}
-                            onClick={() => void runTask(task.id)}
+                            label={
+                              runningTaskId === task.id
+                                ? t('exports.starting')
+                                : t('exports.runNow')
+                            }
+                            icon={runningTaskId === task.id ? LoaderCircle : Play}
+                            className={runningTaskId === task.id ? '[&>svg]:animate-spin' : ''}
+                            disabled={runningTaskId === task.id}
+                            onClick={() => void runTask(task)}
                           />
                           <IconButton
                             label={t('exports.deleteTask')}
