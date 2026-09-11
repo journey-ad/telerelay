@@ -49,7 +49,11 @@ jobs:
         run: |
           describe="$(git describe --tags --abbrev=0 2>/dev/null)" || describe="unknown"
           describe="${describe%^*}"
-          echo "version=${describe#v}" >> "$GITHUB_OUTPUT"
+          version="${describe#v}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            version="${version}-${GITHUB_REF_NAME}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7
