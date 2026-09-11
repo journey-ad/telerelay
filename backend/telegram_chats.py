@@ -19,8 +19,15 @@ from backend.telegram_accounts import TelegramAccountError
 
 logger = get_logger()
 
-ChatKind = Literal["bot", "private", "group", "supergroup", "channel"]
-CHAT_KINDS: tuple[ChatKind, ...] = ("bot", "private", "group", "supergroup", "channel")
+ChatKind = Literal["bot", "private", "group", "supergroup", "channel", "unknown"]
+CHAT_KINDS: tuple[ChatKind, ...] = (
+    "bot",
+    "private",
+    "group",
+    "supergroup",
+    "channel",
+    "unknown",
+)
 ChatInvalidReason = Literal["deleted", "deactivated", "left", "blocked", "readonly", "missing"]
 
 # Resolution failures that mean the chat is gone rather than temporarily
@@ -92,12 +99,12 @@ def _known_kind(known: ChatPeer | None) -> ChatKind | None:
 def _peer_kind(chat_id: int) -> ChatKind:
     """The kind a peer id alone implies once Telegram stops resolving it.
 
-    Users sit in the positive range, basic groups in the small negative range,
-    and channels and supergroups behind the -100 prefix. The prefix does not
-    tell a broadcast channel from a supergroup.
+    Basic groups sit in the small negative range and channels and supergroups
+    behind the -100 prefix. Users and bots share the positive range, so an id
+    there says nothing about which of the two a peer was.
     """
     if chat_id >= 0:
-        return "private"
+        return "unknown"
     return "channel" if str(chat_id).startswith("-100") else "group"
 
 
@@ -116,11 +123,11 @@ def _chat_record(
         )
     if isinstance(entity, types.UserEmpty):
         # An id-only peer carries neither its name nor its kind, so a scrubbed
-        # bot would otherwise be listed as a private user.
+        # bot cannot be told apart from a private user by its id alone.
         return TelegramChat(
             id=_peer_id(entity),
             title=known.name if known else "",
-            kind=_known_kind(known) or "private",
+            kind=_known_kind(known) or _peer_kind(_peer_id(entity)),
             invalid_reason="deleted",
         )
     if isinstance(entity, types.User):
@@ -288,7 +295,11 @@ class TelegramChatService:
         peers = self.names.merge(
             account_id, ((chat.id, chat.title, chat.kind) for chat in chats)
         )
-        restored = [replace(chat, title=chat.title or peers[chat.id].name) for chat in chats]
+        restored = []
+        for chat in chats:
+            # A peer with no name of its own is not cached, so it has none here.
+            peer = peers.get(chat.id)
+            restored.append(replace(chat, title=chat.title or (peer.name if peer else "")))
         return sorted(restored, key=lambda chat: (chat.title.casefold(), chat.id))
 
     def _result(self, account_id: str, callback, *args, timeout: float):

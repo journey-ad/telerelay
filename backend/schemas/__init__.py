@@ -328,7 +328,7 @@ class TelegramTextMessageRequest(StrictModel):
 class TelegramChatResponse(StrictModel):
     id: int
     title: str
-    kind: Literal["bot", "private", "group", "supergroup", "channel"]
+    kind: Literal["bot", "private", "group", "supergroup", "channel", "unknown"]
     username: str | None = None
     invalid_reason: Literal[
         "deleted", "deactivated", "left", "blocked", "readonly", "missing"

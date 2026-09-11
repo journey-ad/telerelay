@@ -143,7 +143,8 @@
       "private": "用户",
       "bot": "Bot",
       "group": "群聊",
-      "channel": "频道"
+      "channel": "频道",
+      "unknown": "未知"
     },
     "itemCount": "{{count}} 个项目",
     "search": "搜索会话...",
@@ -878,7 +879,8 @@
       "bot": "机器人",
       "channel": "频道",
       "group": "群组",
-      "supergroup": "超级群组"
+      "supergroup": "超级群组",
+      "unknown": "未知类型"
     },
     "searchCurrent": "搜索当前会话",
     "clearMessageSearch": "清除消息搜索",

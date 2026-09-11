@@ -1,4 +1,4 @@
-import { Bot, Radio, UserRound, UsersRound } from 'lucide-react'
+import { Bot, CircleHelp, Radio, UserRound, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { TelegramChat } from '../types'
 import { chatKindFilters, type ChatKind, type ChatKindFilter } from '../utils/chatKind'
@@ -10,6 +10,7 @@ const kindIcons: Record<TelegramChat['kind'], typeof Bot> = {
   group: UsersRound,
   supergroup: UsersRound,
   channel: Radio,
+  unknown: CircleHelp,
 }
 
 type KindLabelKey =
@@ -18,6 +19,7 @@ type KindLabelKey =
   | 'chatInput.kind.bot'
   | 'chatInput.kind.group'
   | 'chatInput.kind.channel'
+  | 'chatInput.kind.unknown'
 
 const kindLabels: Record<ChatKindFilter, KindLabelKey> = {
   all: 'chatInput.kind.all',
@@ -25,6 +27,7 @@ const kindLabels: Record<ChatKindFilter, KindLabelKey> = {
   bot: 'chatInput.kind.bot',
   group: 'chatInput.kind.group',
   channel: 'chatInput.kind.channel',
+  unknown: 'chatInput.kind.unknown',
 }
 
 export function ChatKindIcon({ kind, size = 13 }: { kind: TelegramChat['kind']; size?: number }) {

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from datetime import datetime
@@ -158,7 +159,8 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record.invalid_reason, "deleted")
         # Telegram scrubs the peer to its id, which is not a name.
         self.assertEqual(record.title, "")
-        self.assertEqual(record.kind, "private")
+        # A positive id is shared by users and bots, so the kind stays unknown.
+        self.assertEqual(record.kind, "unknown")
 
     def test_scrubbed_peers_keep_the_cached_name_and_kind(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -206,6 +208,32 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(service.names.load("101"), {12: ChatPeer(name="Alice", kind="bot")})
 
+    def test_a_peer_telegram_names_nowhere_is_not_cached(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+
+            # Its kind would only be a guess, so there is nothing to remember.
+            self.assertEqual(service.names.merge("101", [(12, "", "unknown")]), {})
+            self.assertEqual(service.names.load("101"), {})
+
+    def test_listing_a_peer_without_a_name_does_not_fail(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+
+            restored = service._named("101", [TelegramChat(id=9, title="", kind="unknown")])
+
+            self.assertEqual(restored[0].title, "")
+
+    def test_a_cache_file_without_the_current_version_is_dropped(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            (Path(temp_dir) / "101" / "chat_names.json").write_text(
+                json.dumps({"peers": {"12": {"name": "Alice", "kind": "private"}}}),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(service.names.load("101"), {})
+
     async def test_referenced_chats_missing_from_telegram_are_marked(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
@@ -239,7 +267,7 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(kinds[-1001234567890], "channel")
             self.assertEqual(kinds[-195785875], "group")
-            self.assertEqual(kinds[123456789], "private")
+            self.assertEqual(kinds[123456789], "unknown")
 
     async def test_unresolved_references_keep_the_cached_kind(self):
         with tempfile.TemporaryDirectory() as temp_dir:

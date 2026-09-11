@@ -26,7 +26,7 @@ export interface TelegramAccount {
 export interface TelegramPreviewChat {
   id: number
   title: string
-  kind: 'private' | 'bot' | 'group' | 'supergroup' | 'channel'
+  kind: 'private' | 'bot' | 'group' | 'supergroup' | 'channel' | 'unknown'
   username?: string | null
   is_self: boolean
   verified: boolean
@@ -329,7 +329,7 @@ export interface HistoryPage {
 export interface TelegramChat {
   id: number
   title: string
-  kind: 'bot' | 'private' | 'group' | 'supergroup' | 'channel'
+  kind: 'bot' | 'private' | 'group' | 'supergroup' | 'channel' | 'unknown'
   username?: string | null
   /** Set when Telegram reports the chat as unusable (see chatInput.invalidReasons). */
   invalid_reason?: 'deleted' | 'deactivated' | 'left' | 'blocked' | 'readonly' | 'missing' | null

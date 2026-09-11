@@ -143,7 +143,8 @@
       "private": "Users",
       "bot": "Bots",
       "group": "Groups",
-      "channel": "Channels"
+      "channel": "Channels",
+      "unknown": "Unknown"
     },
     "itemCount": "{{count}} items",
     "search": "Search chats...",
@@ -878,7 +879,8 @@
       "bot": "Bot",
       "channel": "Channel",
       "group": "Group",
-      "supergroup": "Supergroup"
+      "supergroup": "Supergroup",
+      "unknown": "Unknown type"
     },
     "searchCurrent": "Search this chat",
     "clearMessageSearch": "Clear message search",

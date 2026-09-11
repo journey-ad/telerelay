@@ -566,7 +566,7 @@ class TelegramPreviewService:
             if not item["title"]:
                 item["title"] = peer.name if peer else ""
             if not item["kind"]:
-                item["kind"] = (peer.kind if peer else "") or "private"
+                item["kind"] = (peer.kind if peer else "") or "unknown"
         self.names.merge(
             account_id, ((item["id"], item["title"], item["kind"]) for item in items)
         )

@@ -1,10 +1,17 @@
 import type { TelegramChat } from '../types'
 
 /** Picker buckets: Telegram's supergroup shares the group bucket. */
-export type ChatKind = 'private' | 'bot' | 'group' | 'channel'
+export type ChatKind = 'private' | 'bot' | 'group' | 'channel' | 'unknown'
 export type ChatKindFilter = 'all' | ChatKind
 
-export const chatKindFilters: ChatKindFilter[] = ['all', 'private', 'bot', 'group', 'channel']
+export const chatKindFilters: ChatKindFilter[] = [
+  'all',
+  'private',
+  'bot',
+  'group',
+  'channel',
+  'unknown',
+]
 
 export function chatKind(kind: TelegramChat['kind']): ChatKind {
   return kind === 'supergroup' ? 'group' : kind
@@ -40,6 +47,7 @@ export function chatKindCounts<T extends Pick<TelegramChat, 'kind'>>(
     bot: 0,
     group: 0,
     channel: 0,
+    unknown: 0,
   }
   for (const chat of chats) counts[chatKind(chat.kind)] += 1
   return counts

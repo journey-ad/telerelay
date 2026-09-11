@@ -15,6 +15,10 @@ from typing import Any
 # by least recent use and the peers touched most keep their place.
 MAX_NAMES = 2000
 
+# Bumped whenever the stored shape changes, so an older file is dropped and
+# rebuilt instead of being migrated.
+CACHE_VERSION = 2
+
 
 @dataclass(frozen=True)
 class ChatPeer:
@@ -51,11 +55,15 @@ class ChatNameCache:
             for chat_id, title, kind in entries:
                 name = title.strip()
                 stored = peers.get(chat_id)
+                if not name and stored is None:
+                    # A peer Telegram reports without a name carries no kind of
+                    # its own, so caching it would only store a guess.
+                    continue
                 if stored is not None and stored.kind == kind and (not name or stored.name == name):
                     continue
                 # A scrubbed peer reports no title, which must not erase the name.
                 peers.pop(chat_id, None)
-                peers[chat_id] = ChatPeer(name=name or (stored.name if stored else ""), kind=kind)
+                peers[chat_id] = ChatPeer(name=name or stored.name, kind=kind)
                 changed = True
             overflow = len(peers) - MAX_NAMES
             if overflow > 0:
@@ -75,10 +83,13 @@ class ChatNameCache:
             payload = json.loads(self._path(account_id).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or payload.get("version") != CACHE_VERSION:
+            return {}
+        stored = payload.get("peers")
+        if not isinstance(stored, dict):
             return {}
         peers: dict[int, ChatPeer] = {}
-        for key, value in payload.items():
+        for key, value in stored.items():
             if not isinstance(value, dict):
                 continue
             try:
@@ -102,7 +113,12 @@ class ChatNameCache:
         try:
             with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
                 json.dump(
-                    {str(chat_id): asdict(peer) for chat_id, peer in peers.items()},
+                    {
+                        "version": CACHE_VERSION,
+                        "peers": {
+                            str(chat_id): asdict(peer) for chat_id, peer in peers.items()
+                        },
+                    },
                     handle,
                     ensure_ascii=False,
                 )
