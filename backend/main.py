@@ -27,6 +27,7 @@ from backend.account_paths import AccountPathRegistry
 from backend.account_migration import AccountMigration
 from backend.api import router
 from backend.application import AccountScopeRegistry, ApplicationContext
+from backend.chat_names import ChatNameCache
 from backend.config import AccountConfigRegistry, create_config
 from backend.events import EventBus, EventLogHandler
 from backend.forwarder.downloader import MediaDownloader
@@ -84,9 +85,10 @@ async def lifespan(app: FastAPI):
     )
     bot.bind_loop(asyncio.get_running_loop())
     accounts = TelegramAccountService(account_store, bot)
-    telegram_chats = TelegramChatService(bot, account_store)
+    chat_names = ChatNameCache(account_store)
+    telegram_chats = TelegramChatService(bot, account_store, chat_names)
     bot.chat_recorder = telegram_chats.record_chat
-    telegram_preview = TelegramPreviewService(bot, account_store)
+    telegram_preview = TelegramPreviewService(bot, account_store, chat_names)
     telegram_resource = TelegramResourceService(bot, account_store, config)
     bot.on_user_authenticated = accounts.update_identity
     account_registry = AccountScopeRegistry(

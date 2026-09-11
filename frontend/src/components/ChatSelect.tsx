@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useReferencedChats, useTelegramChats } from '../hooks/useTelegramChats'
 import type { TelegramChat } from '../types'
+import { chatLabel, chatRowLabel } from '../utils/chatLabel'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 import { ChatInvalidBadge } from './ChatInvalidBadge'
@@ -13,10 +14,6 @@ interface ChatSelectProps {
   onValueChange: (value: string) => void
   placeholder?: string
   disabled?: boolean
-}
-
-function chatLabel(chat: TelegramChat) {
-  return chat.username ? `${chat.title} (@${chat.username})` : chat.title
 }
 
 export function ChatSelect({
@@ -52,7 +49,7 @@ export function ChatSelect({
   }
 
   const selectedLabel = selected
-    ? chatLabel(selected)
+    ? chatLabel(selected, t)
     : value
       ? t('chatInput.unknown', { id: value })
       : (placeholder ?? t('common.pleaseSelect'))
@@ -127,7 +124,7 @@ export function ChatSelect({
                     onClick={() => selectChat(chat)}
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-1">
-                      <span className="truncate">{chatLabel(chat)}</span>
+                      <span className="truncate">{chatRowLabel(chat, t)}</span>
                       <ChatInvalidBadge chat={chat} />
                     </span>
                     <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>

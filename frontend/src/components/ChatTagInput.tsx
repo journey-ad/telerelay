@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useReferencedChats, useTelegramChats } from '../hooks/useTelegramChats'
 import type { ChatGroup, ChatRef, TelegramChat } from '../types'
+import { chatLabel, chatRowLabel } from '../utils/chatLabel'
 import { chatMatches } from '../utils/chatMatch'
 import { cn } from '../utils/cn'
 import { ChatInvalidBadge } from './ChatInvalidBadge'
@@ -155,9 +156,14 @@ export function ChatTagInput({
           ? null
           : value.map((chatId, index) => {
               const chat = findChat(directory, chatId)
-              const unknown = chats.isSuccess && !chat
-              const label =
-                chat?.title ?? (unknown ? t('chatInput.unknown', { id: chatId }) : String(chatId))
+              // A chat Telegram stopped naming is as unknown here as one the
+              // directory does not list, so both keep the muted warning chip.
+              const unknown = chat ? !chat.title : chats.isSuccess
+              const label = unknown
+                ? t('chatInput.unknown', { id: chatId })
+                : chat
+                  ? chatLabel(chat, t)
+                  : String(chatId)
 
               return (
                 <span
@@ -373,10 +379,7 @@ export function ChatTagInput({
                         onClick={() => toggleChat(chat.id)}
                       >
                         <span className="flex min-w-0 flex-1 items-center gap-1">
-                          <span className="truncate">
-                            {chat.title}
-                            {chat.username ? ` (@${chat.username})` : ''}
-                          </span>
+                          <span className="truncate">{chatRowLabel(chat, t)}</span>
                           <ChatInvalidBadge chat={chat} />
                         </span>
                         <span className="shrink-0 text-xs text-slate-400">{chat.id}</span>

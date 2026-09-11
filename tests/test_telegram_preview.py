@@ -189,6 +189,7 @@ def preview_dependencies(client, data_dir):
     store = SimpleNamespace(
         active_account_id="work",
         data_dir=data_dir,
+        session_name=lambda account_id: Path(data_dir) / account_id / "telegram",
         get_public=lambda account_id: {"id": account_id},
     )
     return registry, store
@@ -214,6 +215,18 @@ class TelegramPreviewServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(main["items"][0]["kind"], "supergroup")
         self.assertTrue(main["items"][0]["pinned"])
         self.assertEqual([item["title"] for item in archived["items"]], ["通知频道"])
+
+    async def test_dialogs_without_a_name_keep_the_cached_one(self):
+        self.client.dialogs.append(FakeDialog(types.UserEmpty(id=404), None, archived=True))
+        self.service.names.merge("work", [(404, "Alice")])
+
+        archived = await self.service.list_dialogs(
+            account_id="work", folder="archived", limit=40, cursor=None
+        )
+
+        self.assertEqual(
+            [item["title"] for item in archived["items"]], ["通知频道", "Alice"]
+        )
 
     async def test_dialog_list_reconnects_a_stale_client(self):
         self.client.connected = False

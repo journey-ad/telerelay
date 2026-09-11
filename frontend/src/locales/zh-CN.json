@@ -19,6 +19,7 @@
     "editNamed": "编辑 {{name}}",
     "delaySeconds": "{{seconds}}s 延迟",
     "chatCount": "{{count}} 个会话",
+    "unknownChat": "未知会话",
     "conditionCount": "{{count}} 个条件",
     "patternCount": "{{count}} 个模式",
     "requestFailed": "请求失败，请稍后重试"

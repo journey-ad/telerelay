@@ -579,6 +579,9 @@ export function TelegramPreviewPage() {
   }
 
   const connected = Boolean(active?.connected)
+  const selectedTitle = selected
+    ? selected.title || t('chatInput.unknown', { id: selected.id })
+    : ''
   return (
     <div className="flex min-h-0 flex-1 flex-col [&>header]:shrink-0">
       <PageHeader
@@ -723,14 +726,12 @@ export function TelegramPreviewPage() {
                   accountId={accountId}
                   peerId={selected.id}
                   inlineSource={selected.inline_avatar}
-                  title={selected.title}
+                  title={selectedTitle}
                   kind={selected.kind}
                   className="size-9"
                 />
                 <div className="min-w-0 flex-1 overflow-hidden">
-                  <strong className="block truncate text-sm text-slate-700">
-                    {selected.title}
-                  </strong>
+                  <strong className="block truncate text-sm text-slate-700">{selectedTitle}</strong>
                   <span className="mt-0.5 flex min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-slate-400">
                     <span className="shrink-0">
                       <ChatGlyph kind={selected.kind} size={11} />

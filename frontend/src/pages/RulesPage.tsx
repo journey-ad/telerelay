@@ -23,6 +23,7 @@ import {
   tableWrapClass,
 } from '../components/ui'
 import type { ChatGroup, ChatRef, ForwardingRule, Stats } from '../types'
+import { chatLabel } from '../utils/chatLabel'
 import { cn } from '../utils/cn'
 import { formatNumber, messageFrom } from '../utils/format'
 import { lines } from '../utils/parse'
@@ -105,10 +106,10 @@ export function RulesPage() {
     () =>
       new Map(
         [...(chatsQuery.data ?? []), ...(referencedQuery.data ?? [])].map(
-          (chat) => [String(chat.id), chat.title] as const,
+          (chat) => [String(chat.id), chatLabel(chat, t)] as const,
         ),
       ),
-    [chatsQuery.data, referencedQuery.data],
+    [chatsQuery.data, referencedQuery.data, t],
   )
   const ruleStats = useMemo(
     () => new Map((statsQuery.data?.rules ?? []).map((item) => [item.rule_name, item] as const)),

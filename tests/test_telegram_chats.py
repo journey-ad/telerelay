@@ -155,7 +155,30 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
         record = _chat_record(types.UserEmpty(id=4242))
 
         self.assertEqual(record.invalid_reason, "deleted")
-        self.assertEqual(record.title, "4242")
+        # Telegram scrubs the peer to its id, which is not a name.
+        self.assertEqual(record.title, "")
+
+    def test_listing_restores_the_name_telegram_no_longer_reports(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.names.merge("101", [(12, "Alice")])
+
+            restored = service._named("101", [_chat_record(types.UserEmpty(id=12))])
+
+            self.assertEqual(restored[0].title, "Alice")
+            self.assertEqual(restored[0].invalid_reason, "deleted")
+
+    def test_listing_refreshes_a_cached_name(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = self._service(temp_dir)
+            service.names.merge("101", [(9, "Old name")])
+
+            restored = service._named(
+                "101", [TelegramChat(id=9, title="New name", kind="channel")]
+            )
+
+            self.assertEqual(restored[0].title, "New name")
+            self.assertEqual(service.names.merge("101", []), {9: "New name"})
 
     async def test_referenced_chats_missing_from_telegram_are_marked(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -170,6 +193,7 @@ class ChatDirectoryTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual([chat.id for chat in listed], [-100123])
             self.assertEqual(listed[0].invalid_reason, "blocked")
+            self.assertEqual(listed[0].title, "")
 
     async def test_referenced_chats_are_resolved_and_kept(self):
         with tempfile.TemporaryDirectory() as temp_dir:

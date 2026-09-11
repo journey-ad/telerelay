@@ -16,6 +16,7 @@ from telethon import events, functions, utils
 from telethon.errors import RPCError
 from telethon.tl import types
 
+from backend.chat_names import ChatNameCache
 from backend.telegram_accounts import TelegramAccountError
 from backend.telegram_entities import serialize_entities
 
@@ -35,6 +36,7 @@ def _date_text(value: datetime | None) -> str | None:
 
 
 def _display_name(entity: Any) -> str:
+    """The name Telegram reported, empty when the peer carries none."""
     if entity is None:
         return ""
     title = getattr(entity, "title", None)
@@ -49,7 +51,7 @@ def _display_name(entity: Any) -> str:
         if part
     )
     username = getattr(entity, "username", None)
-    return name or (f"@{username}" if username else "") or str(getattr(entity, "id", ""))
+    return name or (f"@{username}" if username else "")
 
 
 def _peer_id(value: Any) -> int | None:
@@ -182,9 +184,10 @@ class TelegramPreviewService:
 
     CLIENT_RECONNECT_TIMEOUT = 10.0
 
-    def __init__(self, bot_manager: Any, account_store: Any):
+    def __init__(self, bot_manager: Any, account_store: Any, names: ChatNameCache | None = None):
         self.bot_manager = bot_manager
         self.account_store = account_store
+        self.names = names or ChatNameCache(account_store)
         self._client_connection_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -305,6 +308,7 @@ class TelegramPreviewService:
         has_more = len(dialogs) > limit
         visible = dialogs[:limit]
         items = [await self._dialog_data(dialog) for dialog in visible]
+        await asyncio.to_thread(self._restore_titles, active_id, items)
         return {
             "account_id": active_id,
             "folder": folder,
@@ -553,13 +557,20 @@ class TelegramPreviewService:
             ),
         }
 
+    def _restore_titles(self, account_id: str, items: list[dict[str, Any]]) -> None:
+        """Name the peers Telegram reports without one from the cached name."""
+        names = self.names.merge(account_id, ((item["id"], item["title"]) for item in items))
+        for item in items:
+            if not item["title"]:
+                item["title"] = names.get(item["id"], "")
+
     def _chat_data(self, entity: Any) -> dict[str, Any]:
         chat_id = _peer_id(entity)
         if chat_id is None:
             raise TelegramPreviewError("invalid_dialog", "Telegram chat has no peer ID")
         return {
             "id": chat_id,
-            "title": _display_name(entity) or str(chat_id),
+            "title": _display_name(entity),
             "kind": _chat_kind(entity),
             "username": getattr(entity, "username", None),
             "is_self": bool(getattr(entity, "is_self", False)),

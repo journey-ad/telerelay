@@ -67,6 +67,7 @@ export function DialogRow({
 }) {
   const { t, i18n } = useTranslation()
   const locale = i18n.resolvedLanguage ?? 'zh-CN'
+  const title = dialog.title || t('chatInput.unknown', { id: dialog.id })
   return (
     <button
       data-testid={`dialog-${dialog.id}`}
@@ -81,13 +82,13 @@ export function DialogRow({
         accountId={accountId}
         peerId={dialog.id}
         inlineSource={dialog.inline_avatar}
-        title={dialog.title}
+        title={title}
         kind={dialog.kind}
         className="size-10.5"
       />
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-1.5">
-          <strong className="truncate text-sm text-slate-700">{dialog.title}</strong>
+          <strong className="truncate text-sm text-slate-700">{title}</strong>
           {dialog.verified ? <CheckCircle2 size={12} className="shrink-0 text-blue-500" /> : null}
         </span>
         <span className="mt-1 flex min-w-0 items-center gap-1 text-xs text-slate-400">

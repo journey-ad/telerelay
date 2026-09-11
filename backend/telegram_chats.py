@@ -13,6 +13,7 @@ from typing import Any, Literal
 from telethon import errors, utils
 from telethon.tl import types
 
+from backend.chat_names import ChatNameCache
 from backend.logger import get_logger
 from backend.telegram_accounts import TelegramAccountError
 
@@ -87,7 +88,7 @@ def _chat_record(entity: Any, *, include_private: bool = False) -> TelegramChat 
     if isinstance(entity, types.UserEmpty):
         return TelegramChat(
             id=int(entity.id),
-            title=str(entity.id),
+            title="",
             kind="private",
             invalid_reason="deleted",
         )
@@ -127,6 +128,7 @@ def _record_from_dict(item: Any) -> TelegramChat | None:
 
 
 def _display_name(entity: Any) -> str:
+    """The name Telegram reported, empty when the peer carries none."""
     title = getattr(entity, "title", None)
     if title:
         return str(title)
@@ -138,7 +140,8 @@ def _display_name(entity: Any) -> str:
         )
         if part
     )
-    return name or str(getattr(entity, "id", ""))
+    username = getattr(entity, "username", None)
+    return name or (f"@{username}" if username else "")
 
 
 def _chat_kind(entity: Any) -> ChatKind:
@@ -152,9 +155,10 @@ def _chat_kind(entity: Any) -> ChatKind:
 class TelegramChatService:
     MAX_KNOWN_CHATS = 1000
 
-    def __init__(self, bot_manager: Any, account_store: Any):
+    def __init__(self, bot_manager: Any, account_store: Any, names: ChatNameCache | None = None):
         self.bot_manager = bot_manager
         self.account_store = account_store
+        self.names = names or ChatNameCache(account_store)
 
     def list_chats(
         self,
@@ -170,7 +174,8 @@ class TelegramChatService:
             # A bot gets no dialog list, so its picker reads the stored chats,
             # refreshed whenever the runtime sees the chat again.
             return self._known_chats(account_id)
-        return self._result(account_id, self._list_chats, include, timeout=timeout)
+        chats = self._result(account_id, self._list_chats, include, timeout=timeout)
+        return self._named(account_id, chats)
 
     def record_chat(self, account_id: str, entity: Any) -> None:
         """Persist one chat seen by a bot runtime so pickers can list it."""
@@ -238,7 +243,17 @@ class TelegramChatService:
         chat = self._result(account_id, self._get_chat, int(chat_id), timeout=timeout)
         if chat is None:
             raise TelegramChatError("chat_not_found", "Telegram chat does not exist")
-        return chat
+        return self._named(account_id, [chat])[0]
+
+    def _named(self, account_id: str, chats: list[TelegramChat]) -> list[TelegramChat]:
+        """Give peers Telegram no longer names the name last seen for them.
+
+        Names reported by this listing refresh the cache, so a chat that is
+        deleted or banned afterwards keeps the name it had while it was usable.
+        """
+        names = self.names.merge(account_id, ((chat.id, chat.title) for chat in chats))
+        restored = [replace(chat, title=chat.title or names.get(chat.id, "")) for chat in chats]
+        return sorted(restored, key=lambda chat: (chat.title.casefold(), chat.id))
 
     def _result(self, account_id: str, callback, *args, timeout: float):
         try:
@@ -283,7 +298,7 @@ class TelegramChatService:
                 resolved.append(
                     TelegramChat(
                         id=chat_id,
-                        title=str(chat_id),
+                        title="",
                         kind="private",
                         invalid_reason=_resolve_reason(exc),
                     )

@@ -19,6 +19,7 @@
     "editNamed": "Edit {{name}}",
     "delaySeconds": "{{seconds}}s delay",
     "chatCount": "{{count}} chats",
+    "unknownChat": "Unknown chat",
     "conditionCount": "{{count}} conditions",
     "patternCount": "{{count}} patterns",
     "requestFailed": "Request failed. Please try again later."
