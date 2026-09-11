@@ -248,7 +248,7 @@ export function ChatTagInput({
       <Popover.Portal>
         <Popover.Content
           className={cn(
-            'z-100 w-80 overflow-hidden rounded-md border',
+            'z-100 w-[28rem] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-md border',
             'border-slate-200 bg-white shadow-xl',
           )}
           side="bottom"
