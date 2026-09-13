@@ -24,6 +24,7 @@ from backend.forward_queue import (
     rule_fingerprint,
 )
 from backend.forwarder import MessageForwarder
+from backend.forwarder.downloader import MediaDownloader
 from backend.i18n import t
 from backend.logger import account_log_context, get_logger
 from backend.rule import ForwardingRule
@@ -214,9 +215,12 @@ class BotManager:
                 flood_wait_buffer=self.config.forward_queue_flood_wait_buffer,
                 poll_interval=self.config.forward_queue_poll_interval,
                 completed_retention_days=self.config.forward_queue_completed_retention_days,
+                slow_concurrency=self.config.forward_queue_slow_concurrency,
                 on_outcome=self._queue_outcome,
             )
             await self.forward_queue.start()
+            # A previous hard stop may have left download directories behind.
+            MediaDownloader.purge_stale_job_dirs()
 
             await self.reload_rules()
 
@@ -659,8 +663,19 @@ class BotManager:
                 item.id, index
             ),
             cancel_check=lambda: self.forward_queue_store.is_cancel_requested(item.id),
+            download_required=item.needs_download,
+            idempotency_key=str(item.id),
+            download_dir=(
+                MediaDownloader.download_dir(item.id) if item.needs_download else None
+            ),
         )
         return max(0.0, float(forwarder.rule.delay))
+
+    def _drop_download_dir(self, item: ForwardQueueItem) -> None:
+        """Remove the job's download directory once the job reaches a terminal state."""
+        if not item.needs_download:
+            return
+        MediaDownloader.cleanup(MediaDownloader.download_dir(item.id))
 
     def _queue_outcome(
         self, item: ForwardQueueItem, status: str, error: Exception | None
@@ -673,6 +688,10 @@ class BotManager:
                 item_exists = True
             except KeyError:
                 pass
+        # A terminal job owns no further retry, so its downloaded bytes are
+        # released here; retrying and delayed jobs keep them for reuse.
+        if status in ("completed", "failed") and item_exists:
+            self._drop_download_dir(current_item)
         if status == "failed" and item_exists:
             increment_failed = getattr(self.stats_db, "increment_failed", None)
             if callable(increment_failed):
@@ -844,6 +863,9 @@ class BotManager:
             raise RuntimeError("Forward queue is not running")
 
         # Media group events share one durable key with a settle window.
+        # The download decision is taken here because the update handler already
+        # holds the source chat, so the consumer never has to read it up front.
+        chat_noforwards = bool(getattr(chat, "noforwards", False))
         for rule, forwarder in matched_rules:
             _, inserted = self.forward_queue.enqueue(
                 rule_data=rule.to_dict(),
@@ -858,6 +880,7 @@ class BotManager:
                 content_preview=message_preview,
                 media_files=media_files,
                 media_size=file_size,
+                needs_download=chat_noforwards and bool(rule.force_forward),
             )
             source = self._message_source_label(chat_title, chat_id, message.id)
             if message.grouped_id:

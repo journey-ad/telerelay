@@ -1,4 +1,5 @@
 import asyncio
+import os
 import stat
 import tempfile
 import time
@@ -940,6 +941,168 @@ class ForwardQueueWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertLess(calls[1][1] - calls[0][1], 0.13)
 
 
+class ForwardQueueSlowLaneTests(unittest.IsolatedAsyncioTestCase):
+    """Download/upload jobs must not block plain forwarding jobs."""
+
+    @staticmethod
+    def _enqueue(store, name, message_id, *, needs_download=False):
+        return store.enqueue(
+            rule_data=rule_data(name),
+            source_chat_id=-1001,
+            source_message_id=message_id,
+            sender_id=7,
+            grouped_id=None,
+            needs_download=needs_download,
+        )[0]
+
+    async def test_deferred_claims_hide_claimed_and_download_jobs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            download_job = self._enqueue(store, "download", 1, needs_download=True)
+            self._enqueue(store, "plain", 2)
+
+            # The download lane is full, so only the plain job may be claimed.
+            claimed = store.claim_next(allow_download=False)
+            self.assertEqual(claimed.rule_name, "plain")
+
+            # A withheld id is never handed out twice.
+            held = self._enqueue(store, "held", 3)
+            self.assertEqual(
+                store.claim_next(exclude_ids={held.id}).id,
+                download_job.id,
+            )
+            self.assertIsNone(store.claim_next(exclude_ids={held.id, download_job.id}))
+
+            self.assertTrue(store.get_item(download_job.id).needs_download)
+            self.assertFalse(store.get_item(claimed.id).needs_download)
+
+    async def test_download_job_does_not_block_plain_job(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            slow = self._enqueue(store, "slow", 1, needs_download=True)
+            started = asyncio.Event()
+            calls = []
+
+            async def processor(item):
+                calls.append(item.id)
+                if item.id == slow.id:
+                    started.set()
+                    await asyncio.sleep(0.5)
+                return 0
+
+            queue = ForwardQueue(store, processor, poll_interval=0.01)
+            await queue.start()
+            await asyncio.wait_for(started.wait(), timeout=2)
+            plain = self._enqueue(store, "plain", 2)
+            for _ in range(200):
+                if plain.id in calls:
+                    break
+                await asyncio.sleep(0.01)
+            await queue.stop()
+
+            self.assertIn(plain.id, calls)
+            self.assertEqual(store.get_item(plain.id).status, "completed")
+            self.assertEqual(store.get_item(slow.id).status, "completed")
+
+    async def test_slow_lane_respects_concurrency_budget(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            items = [self._enqueue(store, "slow", index, needs_download=True) for index in range(1, 5)]
+            release = asyncio.Event()
+            active = 0
+            peak = 0
+
+            async def processor(item):
+                nonlocal active, peak
+                active += 1
+                peak = max(peak, active)
+                try:
+                    await release.wait()
+                finally:
+                    active -= 1
+                return 0
+
+            queue = ForwardQueue(store, processor, poll_interval=0.01, slow_concurrency=2)
+            await queue.start()
+            for _ in range(200):
+                if active == 2:
+                    break
+                await asyncio.sleep(0.01)
+
+            self.assertEqual(active, 2)
+            pending = [item.id for item in items if store.get_item(item.id).status == "pending"]
+            self.assertEqual(len(pending), 2)
+
+            release.set()
+            for _ in range(200):
+                if all(store.get_item(item.id).status == "completed" for item in items):
+                    break
+                await asyncio.sleep(0.01)
+            await queue.stop()
+
+            self.assertEqual(peak, 2)
+            for item in items:
+                self.assertEqual(store.get_item(item.id).status, "completed")
+
+    async def test_plain_job_runs_while_slow_budget_is_full(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            slow = self._enqueue(store, "slow", 1, needs_download=True)
+            release = asyncio.Event()
+            calls = []
+
+            async def processor(item):
+                calls.append(item.id)
+                if item.id == slow.id:
+                    await release.wait()
+                return 0
+
+            queue = ForwardQueue(store, processor, poll_interval=0.01, slow_concurrency=1)
+            await queue.start()
+            for _ in range(200):
+                if calls == [slow.id]:
+                    break
+                await asyncio.sleep(0.01)
+
+            plain = self._enqueue(store, "plain", 2)
+            for _ in range(200):
+                if plain.id in calls:
+                    break
+                await asyncio.sleep(0.01)
+
+            self.assertIn(plain.id, calls)
+            release.set()
+            await queue.stop()
+
+    async def test_retryable_slow_failure_keeps_job_resumable(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ForwardQueueStore(Path(temp_dir) / "forward_queue.db")
+            slow = self._enqueue(store, "slow", 1, needs_download=True)
+            attempts = []
+
+            async def processor(item):
+                attempts.append(item.id)
+                raise RuntimeError("network blip")
+
+            statuses = []
+            queue = ForwardQueue(
+                store,
+                processor,
+                retry_base_seconds=0.01,
+                poll_interval=0.01,
+                on_outcome=lambda item, status, error: statuses.append(status),
+            )
+            await queue.start()
+            for _ in range(200):
+                if len(attempts) >= 2:
+                    break
+                await asyncio.sleep(0.01)
+            await queue.stop()
+
+            self.assertGreaterEqual(len(attempts), 2)
+            self.assertEqual(set(statuses), {"retrying"})
+
+
 class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_message_handler_only_enqueues_without_entity_requests(self):
         class FakeConfig:
@@ -1466,6 +1629,91 @@ class ForwardingIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         forwarder.downloader.download.assert_not_awaited()
         forwarder._send_files.assert_not_awaited()
+
+
+class IdempotentDeliveryTests(unittest.IsolatedAsyncioTestCase):
+    """A retried delivery must reuse the same random_id and the same download."""
+
+    async def test_random_id_is_stable_per_job_target_and_file(self):
+        from backend.forwarder.forwarder import _idempotent_random_id
+
+        self.assertIsNone(_idempotent_random_id(None, 0))
+        first = _idempotent_random_id("42", 1)
+        self.assertEqual(first, _idempotent_random_id("42", 1))
+        self.assertNotEqual(first, _idempotent_random_id("42", 2))
+        self.assertNotEqual(first, _idempotent_random_id("43", 1))
+        self.assertNotEqual(
+            _idempotent_random_id("42", 1, 0),
+            _idempotent_random_id("42", 1, 1),
+        )
+        self.assertLess(first, 1 << 63)
+
+    async def test_completed_download_is_reused_instead_of_downloaded_again(self):
+        from backend.forwarder.downloader import MediaDownloader
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_dir = Path(temp_dir) / "job-1"
+            session_dir.mkdir()
+            (session_dir / "payload.bin").write_bytes(b"already-here")
+
+            client = SimpleNamespace(download_media=AsyncMock())
+            downloader = MediaDownloader(client, "rule")
+            message = SimpleNamespace(media=SimpleNamespace(), id=5)
+
+            paths, returned_dir = await downloader.download(
+                [message], session_dir=str(session_dir)
+            )
+
+            self.assertEqual(paths, [str(session_dir / "payload.bin")])
+            self.assertEqual(returned_dir, str(session_dir))
+            client.download_media.assert_not_awaited()
+
+    async def test_incomplete_download_dir_is_refetched(self):
+        from backend.forwarder.downloader import MediaDownloader
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_dir = Path(temp_dir) / "job-2"
+            session_dir.mkdir()
+            (session_dir / "truncated.bin").write_bytes(b"")
+
+            async def fake_download(message, file=None):
+                path = os.path.join(file, "fresh.bin")
+                with open(path, "wb") as handle:
+                    handle.write(b"payload")
+                return path
+
+            client = SimpleNamespace(download_media=AsyncMock(side_effect=fake_download))
+            downloader = MediaDownloader(client, "rule")
+
+            paths, _ = await downloader.download(
+                [SimpleNamespace(media=SimpleNamespace(), id=6)], session_dir=str(session_dir)
+            )
+
+            client.download_media.assert_awaited_once()
+            self.assertEqual(len(paths), 1)
+            self.assertTrue(paths[0].endswith("fresh.bin"))
+            self.assertTrue(os.path.isfile(paths[0]))
+            self.assertFalse(os.path.exists(f"{session_dir}.partial"))
+
+    async def test_stale_job_dirs_are_purged_but_fresh_ones_survive(self):
+        from backend.forwarder import downloader as downloader_module
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fresh = Path(temp_dir) / "job-11"
+            stale = Path(temp_dir) / "job-12"
+            untouched = Path(temp_dir) / "other-abc"
+            for path in (fresh, stale, untouched):
+                path.mkdir()
+            old = time.time() - downloader_module.JOB_DIR_TTL_SECONDS - 60
+            os.utime(stale, (old, old))
+
+            with patch.object(downloader_module, "TEMP_DIR", temp_dir):
+                removed = downloader_module.MediaDownloader.purge_stale_job_dirs()
+
+            self.assertEqual(removed, 1)
+            self.assertTrue(fresh.is_dir())
+            self.assertFalse(stale.exists())
+            self.assertTrue(untouched.is_dir())
 
 
 if __name__ == "__main__":

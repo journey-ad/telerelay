@@ -9,6 +9,7 @@ state transition durable.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import threading
@@ -45,6 +46,9 @@ from backend.i18n import t
 from backend.logger import get_logger
 
 logger = get_logger()
+
+# Floor for the consumer idle wait, so an unclaimable-but-due row cannot spin.
+MIN_POLL_SECONDS = 0.05
 
 
 class QueueItemCancelled(Exception):
@@ -150,6 +154,7 @@ class ForwardQueueItem:
     content_preview: str
     media_files: tuple[dict[str, Any], ...]
     media_size: int
+    needs_download: bool
 
 
 class ForwardQueueStore:
@@ -182,6 +187,7 @@ class ForwardQueueStore:
                 "media_files": "TEXT NOT NULL DEFAULT '[]'",
                 "media_size": "INTEGER NOT NULL DEFAULT 0",
                 "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
+                "needs_download": "INTEGER NOT NULL DEFAULT 0",
             }
             state_columns = {
                 column["name"] for column in inspector.get_columns("forward_queue_state")
@@ -234,6 +240,7 @@ class ForwardQueueStore:
             content_preview=row.content_preview or "",
             media_files=tuple(media_files),
             media_size=int(row.media_size or 0),
+            needs_download=bool(row.needs_download),
         )
 
     def _get(self, session, item_id: int) -> ForwardQueueItem:
@@ -323,6 +330,7 @@ class ForwardQueueStore:
         content_preview: str = "",
         media_files: Optional[list[dict[str, Any]]] = None,
         media_size: int = 0,
+        needs_download: bool = False,
     ) -> tuple[ForwardQueueItem, bool]:
         """Insert a message, merging subsequent updates from the same album.
 
@@ -362,6 +370,7 @@ class ForwardQueueStore:
                 "content_preview": str(content_preview or "")[:500],
                 "media_files": media_json,
                 "media_size": max(0, int(media_size or 0)),
+                "needs_download": bool(needs_download),
                 "status": "pending",
                 "available_at": available_at,
                 "created_at": now,
@@ -399,6 +408,7 @@ class ForwardQueueStore:
                             existing.content_preview = existing.content_preview or str(content_preview or "")[:500]
                             existing.media_files = json.dumps(merged_media, ensure_ascii=False)
                             existing.media_size = merged_size
+                            existing.needs_download = bool(existing.needs_download or needs_download)
                             existing.updated_at = now
                     elif existing.status in ("completed", "failed") and not already_member:
                         # Late member: the album already shipped, so resend the
@@ -494,9 +504,12 @@ class ForwardQueueStore:
         *,
         blocked_rule_fingerprints: Optional[set[str]] = None,
         deprioritize_rule: Optional[str] = None,
+        exclude_ids: Optional[set[int]] = None,
+        allow_download: bool = True,
     ) -> Optional[ForwardQueueItem]:
         now = time.time() if now is None else now
         blocked = sorted(blocked_rule_fingerprints or set())
+        excluded = sorted(int(item_id) for item_id in (exclude_ids or set()))
         with self._lock, self._session() as session:
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             statement = select(ForwardQueueRow).where(
@@ -508,6 +521,10 @@ class ForwardQueueStore:
             )
             if blocked:
                 statement = statement.where(~ForwardQueueRow.rule_fingerprint.in_(blocked))
+            if excluded:
+                statement = statement.where(~ForwardQueueRow.id.in_(excluded))
+            if not allow_download:
+                statement = statement.where(ForwardQueueRow.needs_download.is_(False))
             statement = statement.order_by(
                 (ForwardQueueRow.rule_fingerprint == (deprioritize_rule or "")).asc(),
                 ForwardQueueRow.available_at,
@@ -699,7 +716,14 @@ class ForwardQueueStore:
 
 
 class ForwardQueue:
-    """Single FIFO consumer with durable queue-level backoff."""
+    """Single FIFO consumer with a bounded download/upload side pool.
+
+    Claiming stays serial and FIFO, but a job that must download before it can
+    be delivered is handed to a background task instead of being awaited by the
+    consumer.  Ordinary jobs therefore never queue behind a multi-gigabyte
+    download, while the download/upload jobs share one account-scoped
+    concurrency budget.
+    """
 
     def __init__(
         self,
@@ -711,6 +735,7 @@ class ForwardQueue:
         flood_wait_buffer: float = 1.0,
         poll_interval: float = 1.0,
         completed_retention_days: int = 7,
+        slow_concurrency: int = 3,
         on_outcome: Callable[[ForwardQueueItem, str, Optional[Exception]], None]
         | None = None,
     ):
@@ -721,12 +746,16 @@ class ForwardQueue:
         self.flood_wait_buffer = max(0.0, float(flood_wait_buffer))
         self.poll_interval = max(0.05, float(poll_interval))
         self.completed_retention_days = max(1, int(completed_retention_days))
+        self.slow_concurrency = max(1, int(slow_concurrency))
         self.on_outcome = on_outcome
         self._wake = asyncio.Event()
         self._stop = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
         self._rule_next_at: dict[str, float] = {}
         self._last_rule_fingerprint: Optional[str] = None
+        # Download/upload jobs run outside the consumer; their ids are withheld
+        # from claim_next while they are in flight.
+        self._slow_tasks: dict[int, asyncio.Task] = {}
 
     @property
     def running(self) -> bool:
@@ -771,17 +800,38 @@ class ForwardQueue:
             return
         self._stop.set()
         self._wake.set()
+        deadline = time.monotonic() + max(0.1, timeout)
         try:
-            await asyncio.wait_for(asyncio.shield(task), timeout=max(0.1, timeout))
+            await asyncio.wait_for(
+                asyncio.shield(task), timeout=max(0.1, deadline - time.monotonic())
+            )
         except asyncio.TimeoutError:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
                 pass
-            self.store.requeue_processing()
         finally:
             self._task = None
+            await self._drain_slow(deadline)
+            self._slow_tasks.clear()
+
+    async def _drain_slow(self, deadline: float) -> None:
+        """Give in-flight download/upload tasks a chance to finish, then cancel."""
+        if not self._slow_tasks:
+            return
+        pending = list(self._slow_tasks.values())
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            done, still_pending = await asyncio.wait(pending, timeout=remaining)
+            for slow_task in done:
+                with contextlib.suppress(Exception):
+                    slow_task.result()
+            pending = [slow_task for slow_task in still_pending]
+        if pending:
+            for slow_task in pending:
+                slow_task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def _wait(self, seconds: float) -> None:
         self._wake.clear()
@@ -838,15 +888,25 @@ class ForwardQueue:
             now,
             blocked_rule_fingerprints=blocked_rules,
             deprioritize_rule=self._last_rule_fingerprint,
+            exclude_ids=set(self._slow_tasks),
+            allow_download=len(self._slow_tasks) < self.slow_concurrency,
         )
         if item is None:
             next_at = self.store.next_available_at()
             rule_next_at = min(self._rule_next_at.values(), default=None)
             candidates = [value for value in (next_at, rule_next_at) if value is not None]
+            # A due row can still be unclaimable (download lane at capacity or a
+            # withheld id), so never busy-spin below this floor.
             delay = self.poll_interval if not candidates else max(
-                0.01, min(self.poll_interval, min(candidates) - now)
+                MIN_POLL_SECONDS, min(self.poll_interval, min(candidates) - now)
             )
             await self._wait(delay)
+            return
+
+        # A job that must download before delivering goes to the side pool.  The
+        # consumer keeps claiming, so plain forwards are never stuck behind it.
+        if item.needs_download:
+            self._start_slow(item)
             return
 
         try:
@@ -854,7 +914,44 @@ class ForwardQueue:
         except asyncio.CancelledError:
             self.store.requeue_processing()
             raise
-        except FloodWaitError as exc:
+        except Exception as exc:
+            self._handle_failure(item, exc)
+        else:
+            self._finish_success(item, post_delay)
+
+    def _start_slow(self, item: ForwardQueueItem) -> None:
+        self._slow_tasks[item.id] = asyncio.create_task(
+            self._run_slow(item), name=f"forward-slow-{item.id}"
+        )
+        logger.debug(
+            t("log.forward_queue.slow_started", active=len(self._slow_tasks), **self._log_fields(item))
+        )
+
+    async def _run_slow(self, item: ForwardQueueItem) -> None:
+        try:
+            post_delay = await self.processor(item)
+        except asyncio.CancelledError:
+            # Stop requests must not lose the job; it stays resumable.
+            self.store.reschedule(item.id, available_at=time.time(), error="cancelled")
+            raise
+        except Exception as exc:
+            self._handle_failure(item, exc)
+        else:
+            self._finish_success(item, post_delay)
+        finally:
+            self._slow_tasks.pop(item.id, None)
+            self._wake.set()
+
+    def _finish_success(self, item: ForwardQueueItem, post_delay: Optional[float]) -> None:
+        self.store.mark_completed(item.id)
+        self._notify_outcome(item, "completed")
+        self._last_rule_fingerprint = item.rule_fingerprint
+        if post_delay:
+            self._rule_next_at[item.rule_fingerprint] = time.time() + float(post_delay)
+
+    def _handle_failure(self, item: ForwardQueueItem, exc: Exception) -> None:
+        """Apply the shared retry/permanent/pause policy to a failed job."""
+        if isinstance(exc, FloodWaitError):
             if self.store.is_cancel_requested(item.id):
                 self.store.remove_item(item.id)
                 return
@@ -869,49 +966,44 @@ class ForwardQueue:
                 )
             )
             self._notify_outcome(item, "delayed", exc)
-        except QueueItemCancelled:
+            return
+        if isinstance(exc, QueueItemCancelled):
             self.store.remove_item(item.id)
-        except Exception as exc:
-            if self.store.is_cancel_requested(item.id):
-                self.store.remove_item(item.id)
-                return
-            failure_count = item.failure_count + 1
-            if failure_count >= self.max_retries or isinstance(exc, PERMANENT_ERRORS):
-                # Permanent failures (deleted source, lost access, bad config)
-                # never recover by retrying.
-                self.store.mark_failed(item.id, str(exc), increment_failure=True)
-                logger.error(
-                    t(
-                        "log.forward_queue.failed",
-                        attempts=failure_count,
-                        error=exc,
-                        **self._log_fields(item),
-                    )
+            return
+        if self.store.is_cancel_requested(item.id):
+            self.store.remove_item(item.id)
+            return
+        failure_count = item.failure_count + 1
+        if failure_count >= self.max_retries or isinstance(exc, PERMANENT_ERRORS):
+            # Permanent failures (deleted source, lost access, bad config)
+            # never recover by retrying.
+            self.store.mark_failed(item.id, str(exc), increment_failure=True)
+            logger.error(
+                t(
+                    "log.forward_queue.failed",
+                    attempts=failure_count,
+                    error=exc,
+                    **self._log_fields(item),
                 )
-                self._notify_outcome(item, "failed", exc)
-            else:
-                delay = min(
-                    3600.0,
-                    self.retry_base_seconds * (2 ** max(0, failure_count - 1)),
-                )
-                self.store.reschedule(
-                    item.id,
-                    available_at=time.time() + delay,
-                    error=str(exc),
-                    increment_failure=True,
-                )
-                logger.warning(
-                    t(
-                        "log.forward_queue.retry",
-                        seconds=delay,
-                        error=exc,
-                        **self._log_fields(item),
-                    )
-                )
-                self._notify_outcome(item, "retrying", exc)
+            )
+            self._notify_outcome(item, "failed", exc)
         else:
-            self.store.mark_completed(item.id)
-            self._notify_outcome(item, "completed")
-            self._last_rule_fingerprint = item.rule_fingerprint
-            if post_delay:
-                self._rule_next_at[item.rule_fingerprint] = time.time() + float(post_delay)
+            delay = min(
+                3600.0,
+                self.retry_base_seconds * (2 ** max(0, failure_count - 1)),
+            )
+            self.store.reschedule(
+                item.id,
+                available_at=time.time() + delay,
+                error=str(exc),
+                increment_failure=True,
+            )
+            logger.warning(
+                t(
+                    "log.forward_queue.retry",
+                    seconds=delay,
+                    error=exc,
+                    **self._log_fields(item),
+                )
+            )
+            self._notify_outcome(item, "retrying", exc)

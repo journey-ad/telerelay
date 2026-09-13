@@ -596,6 +596,7 @@
       "poll_interval": "Polling interval (seconds)",
       "media_group_settle_seconds": "Media group wait (seconds)",
       "completed_retention_days": "Completed record retention (days)",
+      "slow_concurrency": "Download-and-resend concurrency",
       "action_type": "Interaction type",
       "button_texts": "Button or link texts",
       "match_mode": "Match mode",
@@ -625,7 +626,8 @@
       "flood_wait_buffer": "Additional wait beyond Telegram's rate limit.",
       "poll_interval": "How frequently the queue checks for new work.",
       "media_group_settle_seconds": "Wait for messages in the same media group.",
-      "completed_retention_days": "Cleanup period for completed queue records."
+      "completed_retention_days": "Cleanup period for completed queue records.",
+      "slow_concurrency": "Concurrent download-and-resend jobs; plain forwards are never blocked by them."
     },
     "configOptions": {
       "whitelist": "Allow list",

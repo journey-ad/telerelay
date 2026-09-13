@@ -63,6 +63,7 @@ TRANSLATIONS = {
             "loop_error": "Persistent forward queue loop failed and will recover: {error}",
             "recovery_failed": "Failed to recover persistent forward queue processing state",
             "cleared": "Backlog queue cleared - account={account}, tasks={cleared}",
+            "slow_started": "Download-and-resend job moved to the concurrent lane - rule: {rule}, source: {chat_id}/{message_id}, active={active}",
         },
 
         "button_action": {

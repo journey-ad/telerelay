@@ -358,7 +358,17 @@ class Config:
         except (TypeError, ValueError):
             value = 7
         return max(1, min(value, 3650))
-    
+
+    @property
+    def forward_queue_slow_concurrency(self) -> int:
+        """Concurrent force-forward (download + upload) jobs per account."""
+        queue_config = self.config_data.get("forward_queue", {}) or {}
+        try:
+            value = int(queue_config.get("slow_concurrency", 3))
+        except (TypeError, ValueError):
+            value = 3
+        return max(1, min(value, 16))
+
     def get_forwarding_rules(self) -> List[ForwardingRule]:
         """Get forwarding rules list"""
         return load_rules_from_config(self.config_data)

@@ -63,6 +63,7 @@ TRANSLATIONS = {
             "loop_error": "持久转发队列循环异常，将自动恢复：{error}",
             "recovery_failed": "持久转发队列恢复 processing 状态失败",
             "cleared": "已清除积压队列 - 账号={account}, 影响任务={cleared}",
+            "slow_started": "下载重传任务转入并发通道 - 规则: {rule}, 来源: {chat_id}/{message_id}, 并发中={active}",
         },
 
         "button_action": {

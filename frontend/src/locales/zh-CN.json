@@ -596,6 +596,7 @@
       "poll_interval": "轮询间隔（秒）",
       "media_group_settle_seconds": "媒体组等待（秒）",
       "completed_retention_days": "已完成记录保留天数",
+      "slow_concurrency": "下载重传并发数",
       "action_type": "交互类型",
       "button_texts": "按钮或链接文本",
       "match_mode": "匹配方式",
@@ -625,7 +626,8 @@
       "flood_wait_buffer": "Telegram 限流时间外的额外等待",
       "poll_interval": "队列检查新任务的频率",
       "media_group_settle_seconds": "等待同一媒体组消息到齐",
-      "completed_retention_days": "清理已完成队列记录的周期"
+      "completed_retention_days": "清理已完成队列记录的周期",
+      "slow_concurrency": "同时进行的下载重传任务数，普通转发不受其影响"
     },
     "configOptions": {
       "whitelist": "白名单",

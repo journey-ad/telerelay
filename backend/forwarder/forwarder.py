@@ -3,11 +3,13 @@ Message forwarding core module
 """
 import asyncio
 import copy
+import hashlib
 import json
 from typing import Any, Callable, List, Optional
 
 from telethon import TelegramClient, utils
 from telethon.errors import ChatForwardsRestrictedError
+from telethon.tl import functions, types
 from telethon.tl.types import (
     Message,
     MessageEntityBlockquote,
@@ -36,8 +38,24 @@ from .media_group import MediaGroupHandler
 
 logger = get_logger()
 
-# Limit concurrent force-forward tasks (download + upload) to prevent tmp disk exhaustion
-_force_forward_semaphore = asyncio.Semaphore(3)
+# Telegram folds a repeated SendMedia/SendMessage request that carries the same
+# random_id into one message, which makes queue retries idempotent.  The id is
+# derived from the durable job identity instead of being persisted: a target
+# index only advances after a successful send, so a retry always derives the
+# same value for the same (job, target, file) triple.
+_RANDOM_ID_MASK = (1 << 63) - 1
+
+
+def _idempotent_random_id(idempotency_key: Optional[str], *parts: int) -> Optional[int]:
+    if not idempotency_key:
+        return None
+    seed = ":".join([str(idempotency_key), *(str(part) for part in parts)])
+    return int.from_bytes(hashlib.sha256(seed.encode("utf-8")).digest()[:8], "big") & _RANDOM_ID_MASK
+
+
+def _album_entities(entities: list) -> list:
+    """Wrap entities for SendMultiMediaRequest, which expects one list per file."""
+    return [entities] if entities else []
 
 
 class MessageForwarder:
@@ -91,6 +109,9 @@ class MessageForwarder:
         messages_override: Optional[List[Message]] = None,
         on_target_success: Optional[Callable[[int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        download_required: Optional[bool] = None,
+        idempotency_key: Optional[str] = None,
+        download_dir: Optional[str] = None,
     ) -> bool:
         """Forward a message, resuming from a durable target checkpoint.
 
@@ -98,6 +119,14 @@ class MessageForwarder:
         fetched by the queue consumer (bot sessions cannot page history, so
         the consumer aggregates member IDs at enqueue time).  When omitted,
         the media group handler falls back to history paging.
+
+        ``download_required`` is the queue's up-front decision to download
+        before delivering; it lets the consumer classify a job as slow without
+        reading the source chat first.  When omitted, the restriction is read
+        from the loaded message.
+
+        ``idempotency_key`` makes a retry of the same job fold into the
+        original message instead of creating a duplicate.
 
         FloodWait and target errors intentionally propagate to the persistent
         queue, which owns retry and global pause policy.
@@ -134,31 +163,24 @@ class MessageForwarder:
 
         # 2. Prepare
         is_noforwards = getattr(message.chat, 'noforwards', False) if message.chat else False
-        need_download = is_noforwards and self.rule.force_forward
+        need_download = (
+            bool(download_required)
+            if download_required is not None
+            else is_noforwards and self.rule.force_forward
+        )
 
-        if need_download:
-            async with _force_forward_semaphore:
-                await self._do_forward(
-                    messages,
-                    message,
-                    need_download,
-                    is_noforwards,
-                    start_target_index,
-                    on_target_success,
-                    target_labels,
-                    cancel_check,
-                )
-        else:
-            await self._do_forward(
-                messages,
-                message,
-                need_download,
-                is_noforwards,
-                start_target_index,
-                on_target_success,
-                target_labels,
-                cancel_check,
-            )
+        await self._do_forward(
+            messages,
+            message,
+            need_download,
+            is_noforwards,
+            start_target_index,
+            on_target_success,
+            target_labels,
+            cancel_check,
+            idempotency_key,
+            download_dir,
+        )
         return True
 
     async def _do_forward(
@@ -171,6 +193,8 @@ class MessageForwarder:
         on_target_success: Optional[Callable[[int], None]] = None,
         target_labels: Optional[List[str]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        idempotency_key: Optional[str] = None,
+        download_dir: Optional[str] = None,
     ) -> None:
         """Execute forwarding with optional download, cleanup guaranteed by try/finally"""
         targets = self.rule.target_chats
@@ -193,7 +217,7 @@ class MessageForwarder:
                 return
 
             if need_download:
-                downloaded_files, session_dir = await self.downloader.download(messages)
+                downloaded_files, session_dir = await self.downloader.download(messages, download_dir)
                 if not downloaded_files:
                     raise RuntimeError(t("log.forward.download_failed"))
 
@@ -214,7 +238,10 @@ class MessageForwarder:
                 try:
                     try:
                         if downloaded_files:
-                            await self._send_files(downloaded_files, messages, target, source_data, source_text)
+                            await self._send_files(
+                                downloaded_files, messages, target, source_data, source_text,
+                                idempotency_key, i,
+                            )
                         else:
                             await self._forward_normal(messages, target, source_data, source_text, is_noforwards)
 
@@ -230,10 +257,15 @@ class MessageForwarder:
                         # Forwarding restricted, fallback to download and resend
                         logger.debug(t("log.forward.restricted_fallback"))
                         if not downloaded_files:
-                            downloaded_files, session_dir = await self.downloader.download(messages)
+                            downloaded_files, session_dir = await self.downloader.download(
+                                messages, download_dir
+                            )
                         if not downloaded_files:
                             raise RuntimeError(t("log.forward.download_failed"))
-                        await self._send_files(downloaded_files, messages, target, source_data, source_text)
+                        await self._send_files(
+                            downloaded_files, messages, target, source_data, source_text,
+                            idempotency_key, i,
+                        )
 
                 except TARGET_ERRORS as exc:
                     # This chat will never accept the message (forbidden, banned,
@@ -263,7 +295,10 @@ class MessageForwarder:
                 if self.rule.delay > 0 and i < len(targets) - 1:
                     await asyncio.sleep(self.rule.delay)
         finally:
-            if session_dir:
+            # A job-owned download directory survives so a retry can reuse the
+            # bytes instead of downloading them again; the queue removes it once
+            # the job reaches a terminal state.
+            if session_dir and not (need_download and download_dir):
                 MediaDownloader.cleanup(session_dir)
 
         if skipped_count:
@@ -371,9 +406,23 @@ class MessageForwarder:
         logger.debug(t("log.forward.copy_success", target=target))
 
     async def _send_files(
-        self, file_paths: List[str], messages: List[Message], target, source_data: dict, source_text: str
+        self,
+        file_paths: List[str],
+        messages: List[Message],
+        target,
+        source_data: dict,
+        source_text: str,
+        idempotency_key: Optional[str] = None,
+        target_index: int = 0,
     ) -> None:
-        """Send to target using downloaded files"""
+        """Send to target using downloaded files.
+
+        ``idempotency_key`` identifies the durable job: requests are built
+        explicitly so a retried delivery to the same target reuses the same
+        ``random_id`` and is folded by Telegram into a single message.  The
+        caller always supplies one, because a downloaded job is only ever
+        delivered through a durable queue item.
+        """
         if not file_paths:
             # No media files, send text only (this should be rare here)
             text = messages[0].raw_text or ""
@@ -384,12 +433,8 @@ class MessageForwarder:
                 entities.extend(added_entities)
             elif source_text:
                 text, entities = self._prepend_source(text, source_text, entities)
-                
-            await self.client.send_message(
-                target, text,
-                formatting_entities=entities,
-                link_preview=False if source_data else None
-            )
+
+            await self._send_text(target, text, entities, idempotency_key, target_index)
             logger.debug(t("log.forward.text_sent", target=target))
             return
 
@@ -409,14 +454,78 @@ class MessageForwarder:
             text, entities = self._prepend_source(text, source_text, entities)
 
         logger.debug(t("log.forward.uploading", target=target))
-        await self.client.send_file(
-            target,
-            file=file_passed,
-            caption=text,
-            formatting_entities=entities,
-        )
+        await self._send_media(target, file_passed, text, entities, idempotency_key, target_index)
             
         logger.debug(t("log.forward.force_success", target=target))
+
+    async def _send_text(
+        self,
+        target,
+        text: str,
+        entities: list,
+        idempotency_key: str,
+        target_index: int,
+    ) -> None:
+        # send_media owns the preview behaviour for files; a rich preview must
+        # stay disabled here because the text carries a source link.
+        await self.client(functions.messages.SendMessageRequest(
+            peer=await self.client.get_input_entity(target),
+            message=text or "",
+            entities=entities or None,
+            no_webpage=True,
+            random_id=_idempotent_random_id(idempotency_key, target_index),
+        ))
+
+    async def _send_media(
+        self,
+        target,
+        files,
+        caption: str,
+        entities: list,
+        idempotency_key: Optional[str],
+        target_index: int,
+    ) -> None:
+        if idempotency_key is None:
+            await self.client.send_file(
+                target,
+                file=files,
+                caption=caption,
+                formatting_entities=entities,
+            )
+            return
+
+        peer = await self.client.get_input_entity(target)
+        paths = files if isinstance(files, list) else [files]
+        media_list = []
+        for file_index, path in enumerate(paths):
+            _, media, _ = await self.client._file_to_media(path)
+            if not media:
+                raise RuntimeError(t("log.forward.download_failed"))
+            # The caption is sent verbatim with its original entities; unlike
+            # the send_file path it is never re-parsed as Markdown.
+            media_list.append(
+                types.InputSingleMedia(
+                    media,
+                    message=caption if file_index == 0 else "",
+                    entities=_album_entities(entities) if file_index == 0 else None,
+                    random_id=_idempotent_random_id(idempotency_key, target_index, file_index),
+                )
+            )
+
+        if len(media_list) == 1:
+            request = functions.messages.SendMediaRequest(
+                peer,
+                media_list[0].media,
+                message=caption or "",
+                entities=entities or None,
+                random_id=media_list[0].random_id,
+            )
+        else:
+            request = functions.messages.SendMultiMediaRequest(
+                peer,
+                multi_media=media_list,
+            )
+        await self.client(request)
 
     async def _resolve_target_labels(self, targets: List[object]) -> List[str]:
         """Resolve readable target names once and share them across forwarders."""

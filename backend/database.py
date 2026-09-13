@@ -138,6 +138,7 @@ class ForwardQueueRow(Base):
     content_preview: Mapped[str] = mapped_column(Text, default="", nullable=False)
     media_files: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     media_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    needs_download: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class ForwardQueueState(Base):
