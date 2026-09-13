@@ -223,7 +223,7 @@ class ConfigForwardQueue(ConfigModel):
     poll_interval: float = Field(default=1, ge=0.05, le=60)
     media_group_settle_seconds: float = Field(default=1, ge=0.1, le=10)
     completed_retention_days: int = Field(default=7, ge=1, le=3650)
-    slow_concurrency: int = Field(default=3, ge=1, le=16)
+    slow_concurrency: int = Field(default=1, ge=1, le=16)
 
 
 class ConfigDocument(ConfigModel):

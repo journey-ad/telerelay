@@ -735,7 +735,7 @@ class ForwardQueue:
         flood_wait_buffer: float = 1.0,
         poll_interval: float = 1.0,
         completed_retention_days: int = 7,
-        slow_concurrency: int = 3,
+        slow_concurrency: int = 1,
         on_outcome: Callable[[ForwardQueueItem, str, Optional[Exception]], None]
         | None = None,
     ):

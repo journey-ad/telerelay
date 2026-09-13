@@ -361,12 +361,17 @@ class Config:
 
     @property
     def forward_queue_slow_concurrency(self) -> int:
-        """Concurrent force-forward (download + upload) jobs per account."""
+        """Concurrent force-forward (download + upload) jobs per account.
+
+        Defaults to serial delivery: concurrent uploads on one account hit the
+        Telegram flood limit more often, and a pause release would then restart
+        every in-flight upload at once.
+        """
         queue_config = self.config_data.get("forward_queue", {}) or {}
         try:
-            value = int(queue_config.get("slow_concurrency", 3))
+            value = int(queue_config.get("slow_concurrency", 1))
         except (TypeError, ValueError):
-            value = 3
+            value = 1
         return max(1, min(value, 16))
 
     def get_forwarding_rules(self) -> List[ForwardingRule]:
