@@ -72,6 +72,42 @@ class ExportPreviewTests(unittest.TestCase):
         self.assertIsNone(service.read_archive_file(self.zip_path, "../secret.txt"))
         self.assertIsNone(service.read_archive_file(self.zip_path, "/etc/passwd"))
 
+    def test_standalone_html_export_previews_directly(self):
+        page = self.exports / "groups" / "telegram_groups_1.html"
+        page.parent.mkdir()
+        page.write_text("<html>chat list</html>", encoding="utf-8")
+        service = make_service(self.root)
+
+        token = service.create_preview_token(page)
+        resolved = service.resolve_preview_token(token)
+        self.assertEqual(resolved, page.resolve())
+        self.assertEqual(
+            service.read_archive_file(resolved, page.name),
+            b"<html>chat list</html>",
+        )
+        # The console may also request the generic entry name.
+        self.assertEqual(
+            service.read_archive_file(resolved, "index.html"),
+            b"<html>chat list</html>",
+        )
+
+    def test_standalone_html_rejects_other_inner_names(self):
+        page = self.exports / "groups" / "telegram_groups_2.html"
+        page.parent.mkdir()
+        page.write_text("<html>x</html>", encoding="utf-8")
+        service = make_service(self.root)
+        resolved = service.resolve_preview_token(service.create_preview_token(page))
+
+        self.assertIsNone(service.read_archive_file(resolved, "other.html"))
+        self.assertIsNone(service.read_archive_file(resolved, "../secret.txt"))
+
+    def test_token_still_rejects_other_extensions(self):
+        plain = self.exports / "groups.csv"
+        plain.write_text("x")
+        service = make_service(self.root)
+        with self.assertRaises(ExportValidationError):
+            service.create_preview_token(plain)
+
 
 if __name__ == "__main__":
     unittest.main()

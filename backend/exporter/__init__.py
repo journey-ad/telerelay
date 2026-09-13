@@ -1,7 +1,6 @@
 """Telegram group and message export package."""
 
 from .models import (
-    AdministratorRecord,
     ChatRecord,
     ExportJobSnapshot,
     ExportTask,
@@ -10,7 +9,6 @@ from .models import (
 from .message_store import MessageArchiveStore
 
 __all__ = [
-    "AdministratorRecord",
     "ChatRecord",
     "ExportJobSnapshot",
     "ExportTask",

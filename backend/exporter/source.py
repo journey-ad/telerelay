@@ -10,14 +10,51 @@ from typing import Callable, Iterator, List, Optional
 
 from telethon import utils
 from telethon.tl import types
-from telethon.tl.functions.channels import GetFullChannelRequest
-from telethon.tl.functions.messages import GetFullChatRequest
+from telethon.tl.functions.channels import GetFullChannelRequest, GetParticipantRequest
+from telethon.tl.functions.messages import GetFullChatRequest, GetHistoryRequest
 
 from backend.i18n import t
+from backend.telegram_chats import _chat_validity
 
-from .models import AdministratorRecord, ChatRecord, MessageRecord
+from .models import ChatRecord, MessageRecord
 
 _STREAM_END = object()
+
+# Telegram stops reporting the group itself once the account is out; the
+# dialog then carries a "forbidden" entity instead of a regular one.
+_FORBIDDEN_ENTITIES = (types.ChannelForbidden, types.ChatForbidden)
+
+# Preview length stored for the last message of each chat.
+_LAST_MESSAGE_PREVIEW = 200
+
+
+def _chat_status(entity, validity: Optional[str]) -> str:
+    """Usability of a dialog, reusing the chat directory's own vocabulary."""
+    if isinstance(entity, _FORBIDDEN_ENTITIES):
+        return "blocked"
+    if validity:
+        return validity
+    # Announcement channels only know "no longer active" through deactivated.
+    if getattr(entity, "deactivated", False):
+        return "deactivated"
+    if getattr(entity, "left", False):
+        return "left"
+    rights = getattr(entity, "banned_rights", None)
+    if rights is not None:
+        if getattr(rights, "view_messages", False):
+            return "blocked"
+        if getattr(rights, "send_messages", False):
+            return "readonly"
+    return "ok"
+
+
+def _message_preview(message) -> Optional[str]:
+    if message is None:
+        return None
+    text = getattr(message, "message", None) or getattr(message, "text", None)
+    if not text:
+        return None
+    return str(text)[:_LAST_MESSAGE_PREVIEW]
 
 
 def _date_text(value: Optional[datetime]) -> Optional[str]:
@@ -55,25 +92,6 @@ def _chat_kind(entity) -> str:
     if isinstance(entity, types.Channel) and getattr(entity, "broadcast", False):
         return "channel"
     return "channel"
-
-
-def _admin_role(participant) -> str:
-    if isinstance(
-        participant,
-        (types.ChannelParticipantCreator, types.ChatParticipantCreator),
-    ):
-        return "creator"
-    return "administrator"
-
-
-def _admin_record(user, participant=None) -> AdministratorRecord:
-    return AdministratorRecord(
-        user_id=int(user.id),
-        name=_display_name(user),
-        username=getattr(user, "username", None),
-        role=_admin_role(participant),
-        is_bot=bool(getattr(user, "bot", False)),
-    )
 
 
 def _warning(label: str, error: Exception) -> str:
@@ -155,17 +173,84 @@ class TelegramExportSource:
         for index, dialog in enumerate(dialogs, start=1):
             if cancel_event and cancel_event.is_set():
                 break
-            records.append(await self._build_chat_record(client, dialog.entity))
+            try:
+                records.append(await self._build_chat_record(client, dialog))
+            except Exception as exc:
+                # Enrichment is a run of extra per-chat requests, so one chat
+                # hitting a rate limit must degrade that row, not the export.
+                records.append(self._fallback_chat_record(dialog, exc))
             if progress:
                 progress(index, total)
 
         return sorted(records, key=lambda item: (item.title.casefold(), item.chat_id))
 
-    async def _build_chat_record(self, client, entity) -> ChatRecord:
+    @staticmethod
+    def _fallback_chat_record(dialog, exc: Exception) -> ChatRecord:
+        entity = dialog.entity
+        username = getattr(entity, "username", None)
+        return ChatRecord(
+            chat_id=_peer_id(entity),
+            title=_display_name(entity) or str(_peer_id(entity)),
+            kind=_chat_kind(entity),
+            created_at=_date_text(getattr(entity, "date", None)),
+            username=username,
+            public_link=f"https://t.me/{username}" if username else None,
+            is_public=bool(username),
+            member_count=None,
+            description=None,
+            export_warning=_warning(t("export.warning.details"), exc),
+            status=_chat_status(entity, _chat_validity(entity)),
+            is_archived=bool(getattr(dialog, "archived", False)),
+            unread_count=getattr(dialog, "unread_count", None),
+            joined_at=None,
+            last_message_id=getattr(getattr(dialog, "message", None), "id", None),
+            last_message_at=_date_text(getattr(dialog, "date", None)),
+            last_message_text=_message_preview(getattr(dialog, "message", None)),
+            message_count=None,
+        )
+
+    async def _joined_at(self, client, entity, full_chat) -> Optional[str]:
+        """When this account joined, which Telegram only reports per participant."""
+        if isinstance(entity, types.Channel):
+            participant = getattr(full_chat, "participant", None)
+            if participant is not None:
+                return _date_text(getattr(participant, "date", None))
+            try:
+                response = await client(
+                    GetParticipantRequest(entity, types.InputPeerSelf())
+                )
+                return _date_text(getattr(response.participant, "date", None))
+            except Exception:
+                return None
+        try:
+            me = await client.get_me()
+        except Exception:
+            return None
+        me_id = getattr(me, "id", None)
+        participants = getattr(getattr(full_chat, "participants", None), "participants", None)
+        for participant in participants or []:
+            if getattr(participant, "user_id", None) == me_id:
+                return _date_text(getattr(participant, "date", None))
+        return None
+
+    @staticmethod
+    async def _message_count(client, entity) -> Optional[int]:
+        try:
+            history = await client(
+                GetHistoryRequest(peer=entity, offset_id=0, offset_date=None, add_offset=0,
+                                  limit=0, max_id=0, min_id=0, hash=0)
+            )
+        except Exception:
+            return None
+        count = getattr(history, "count", None)
+        return int(count) if count is not None else None
+
+    async def _build_chat_record(self, client, dialog) -> ChatRecord:
+        entity = dialog.entity
         warnings: List[str] = []
         description = None
         member_count = getattr(entity, "participants_count", None)
-        administrators: List[AdministratorRecord] = []
+        joined_at = None
 
         if isinstance(entity, types.Channel):
             try:
@@ -173,19 +258,9 @@ class TelegramExportSource:
                 full_chat = response.full_chat
                 description = getattr(full_chat, "about", None)
                 member_count = getattr(full_chat, "participants_count", member_count)
+                joined_at = await self._joined_at(client, entity, full_chat)
             except Exception as exc:
                 warnings.append(_warning(t("export.warning.details"), exc))
-
-            try:
-                async for user in client.iter_participants(
-                    entity,
-                    filter=types.ChannelParticipantsAdmins(),
-                ):
-                    administrators.append(
-                        _admin_record(user, getattr(user, "participant", None))
-                    )
-            except Exception as exc:
-                warnings.append(_warning(t("export.warning.administrators"), exc))
         else:
             try:
                 response = await client(GetFullChatRequest(entity.id))
@@ -193,21 +268,12 @@ class TelegramExportSource:
                 description = getattr(full_chat, "about", None)
                 participants = getattr(getattr(full_chat, "participants", None), "participants", [])
                 member_count = len(participants) if participants is not None else member_count
-                users = {user.id: user for user in getattr(response, "users", [])}
-                for participant in participants or []:
-                    if not isinstance(
-                        participant,
-                        (types.ChatParticipantAdmin, types.ChatParticipantCreator),
-                    ):
-                        continue
-                    user = users.get(participant.user_id)
-                    if user:
-                        administrators.append(_admin_record(user, participant))
+                joined_at = await self._joined_at(client, entity, full_chat)
             except Exception as exc:
-                warnings.append(_warning(t("export.warning.details_and_administrators"), exc))
+                warnings.append(_warning(t("export.warning.details"), exc))
 
+        message_count = await self._message_count(client, entity)
         username = getattr(entity, "username", None)
-        administrators.sort(key=lambda item: (item.role != "creator", item.name.casefold()))
         return ChatRecord(
             chat_id=int(utils.get_peer_id(entity)),
             title=_display_name(entity),
@@ -218,8 +284,15 @@ class TelegramExportSource:
             is_public=bool(username),
             member_count=int(member_count) if member_count is not None else None,
             description=description,
-            administrators=administrators,
             export_warning="; ".join(warnings) if warnings else None,
+            status=_chat_status(entity, _chat_validity(entity)),
+            is_archived=bool(getattr(dialog, "archived", False)),
+            unread_count=getattr(dialog, "unread_count", None),
+            joined_at=joined_at,
+            last_message_id=getattr(getattr(dialog, "message", None), "id", None),
+            last_message_at=_date_text(getattr(dialog, "date", None)),
+            last_message_text=_message_preview(getattr(dialog, "message", None)),
+            message_count=message_count,
         )
 
     def iter_message_records(

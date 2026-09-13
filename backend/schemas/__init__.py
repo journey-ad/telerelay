@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from backend.timezones import (
     TIMEZONE_NAME_SET,
@@ -352,7 +352,9 @@ class MessageExportRequest(StrictModel):
 
 class ExportTaskPayload(StrictModel):
     name: str = Field(min_length=1, max_length=100)
-    chat_id: int
+    kind: Literal["messages", "chats"] = "messages"
+    # Required for a message task; a chat-list task binds to no single chat.
+    chat_id: int | None = None
     initial_start_at: str | None = None
     formats: list[Literal["json", "csv", "html", "sqlite"]]
     subdirectory: str = "scheduled"
@@ -363,6 +365,12 @@ class ExportTaskPayload(StrictModel):
     timezone: str = "Asia/Shanghai"
     all_history: bool = False
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_chat_binding(self):
+        if self.kind == "messages" and self.chat_id is None:
+            raise ValueError("chat_id is required for a message export task")
+        return self
 
 
 class TogglePayload(StrictModel):

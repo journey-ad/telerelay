@@ -63,6 +63,10 @@ def _date_text(value: datetime) -> str:
 
 PREVIEW_TOKEN_TTL = 300.0
 
+# Task kinds and the sentinel chat id a chat-list task stores instead of a chat.
+TASK_KINDS: Tuple[str, ...] = ("messages", "chats")
+CHAT_LIST_TASK_CHAT_ID = 0
+
 # Per-chat archive stores kept open per account; each one holds a connection.
 MESSAGE_STORE_CACHE_LIMIT = 16
 
@@ -150,8 +154,8 @@ class ExportService:
         root = self.export_root.resolve()
         if not candidate.is_file() or not (candidate == root or root in candidate.parents):
             raise ExportValidationError("Export archive does not exist")
-        if not candidate.name.endswith(".html.zip"):
-            raise ExportValidationError("Only HTML archives support online preview")
+        if not candidate.name.endswith((".html.zip", ".html")):
+            raise ExportValidationError("Only HTML exports support online preview")
         token = secrets.token_urlsafe(24)
         self._preview_tokens[token] = (str(candidate), time.monotonic() + PREVIEW_TOKEN_TTL)
         return token
@@ -171,6 +175,15 @@ class ExportService:
         if normalized.is_absolute() or ".." in normalized.parts:
             return None
         name = normalized.as_posix()
+        # A chat-list export is one self-contained HTML file rather than an
+        # archive, so it is served straight from disk.
+        if zip_path.name.endswith(".html"):
+            if name in ("", "index.html", zip_path.name):
+                try:
+                    return zip_path.read_bytes()
+                except OSError:
+                    return None
+            return None
         try:
             with zipfile.ZipFile(zip_path) as archive:
                 if name in archive.namelist():
@@ -333,11 +346,12 @@ class ExportService:
         self,
         formats: Sequence[str],
         subdirectory: str = "groups",
+        task_id: Optional[int] = None,
     ) -> str:
         self._ensure_available()
         normalized_formats = self.normalize_formats(formats, GROUP_EXPORT_FORMATS)
         directory = self._validated_directory(subdirectory)
-        state = self._new_job("groups")
+        state = self._new_job("groups", task_id)
         logger.info(
             t(
                 "log.export.group_queued",
@@ -353,12 +367,21 @@ class ExportService:
             state.id,
             normalized_formats,
             directory,
+            task_id,
         )
         return state.id
 
-    def _run_group_export(self, job_id: str, formats, directory: Path) -> None:
+    def _run_group_export(
+        self, job_id: str, formats, directory: Path, task_id: Optional[int] = None
+    ) -> None:
         cancel_event = self._cancel_events[job_id]
-        run_id = self.store.start_run(task_id=None, run_type="groups")
+        scheduled = task_id is not None
+        # A chat-list run is not bound to a chat, and the console labels it from
+        # run_type instead of a stored (language-specific) title.
+        run_id = self.store.start_run(
+            task_id=task_id,
+            run_type="scheduled_chats" if scheduled else "groups",
+        )
         progress = _RunProgressWriter(self.store, run_id)
         self._update_job(
             job_id,
@@ -474,6 +497,10 @@ class ExportService:
                 error=str(exc),
                 finished_at=_date_text(_now_utc()),
             )
+        finally:
+            if scheduled:
+                with self._lock:
+                    self._active_task_ids.discard(task_id)
 
     def start_message_export(
         self,
@@ -885,7 +912,7 @@ class ExportService:
         *,
         task_id=None,
         name: str,
-        chat_id,
+        chat_id=None,
         chat_title: str,
         initial_start_at,
         formats: Sequence[str],
@@ -897,9 +924,20 @@ class ExportService:
         timezone_name: Optional[str] = None,
         all_history: bool = False,
         enabled: bool = True,
+        kind: str = "messages",
     ) -> ExportTask:
-        chat_id = self._validate_chat_id(chat_id)
-        chat_title = str(chat_title).strip() or str(chat_id)
+        if kind not in TASK_KINDS:
+            raise ExportValidationError(t("message.export.invalid_task_kind"))
+        if kind == "chats":
+            # A chat-list task archives the whole account, so it binds to no
+            # single chat and reuses the chat_id column with a sentinel value.
+            # It stores no title: the console labels it from the task kind, so
+            # the label follows the reader's language rather than the writer's.
+            chat_id = CHAT_LIST_TASK_CHAT_ID
+            chat_title = ""
+        else:
+            chat_id = self._validate_chat_id(chat_id)
+            chat_title = str(chat_title).strip() or str(chat_id)
         name = (name or "").strip()
         if not name:
             raise ExportValidationError(t("message.export.task_name_required"))
@@ -930,6 +968,7 @@ class ExportService:
 
         values = {
             "name": name[:100],
+            "kind": kind,
             "chat_id": chat_id,
             "chat_title": chat_title,
             "initial_start_at": _date_text(start),
@@ -946,6 +985,7 @@ class ExportService:
             existing = self.store.get_task(int(task_id))
             reset_cursor = (
                 existing.chat_id != chat_id
+                or existing.kind != kind
                 or existing.initial_start_at != values["initial_start_at"]
             )
             if reset_cursor:
@@ -973,6 +1013,8 @@ class ExportService:
     def start_task_export(self, task_id: int) -> Optional[str]:
         self._ensure_available()
         task = self.store.get_task(int(task_id))
+        if task.kind == "chats":
+            return self._start_chat_list_task(task)
         with self._lock:
             if task.id in self._active_task_ids:
                 return None
@@ -1027,6 +1069,31 @@ class ExportService:
                 min_message_id,
             )
             return state.id
+        except Exception:
+            with self._lock:
+                self._active_task_ids.discard(task.id)
+            raise
+
+    def _start_chat_list_task(self, task: ExportTask) -> Optional[str]:
+        """Run a chat-list task, which archives the account rather than one chat."""
+        with self._lock:
+            if task.id in self._active_task_ids:
+                return None
+            self._active_task_ids.add(task.id)
+        try:
+            job_id = self.start_group_export(
+                formats=task.formats,
+                subdirectory=task.subdirectory,
+                task_id=task.id,
+            )
+            logger.info(
+                t(
+                    "log.export.task_job_started",
+                    task_id=task.id,
+                    job_id=job_id,
+                )
+            )
+            return job_id
         except Exception:
             with self._lock:
                 self._active_task_ids.discard(task.id)
@@ -1090,14 +1157,34 @@ class ExportService:
             "kind",
             "created_at",
             "username",
+            "public_link",
             "member_count",
             "description",
-            "administrators",
-            "bot",
-            "none",
+            "status",
+            "joined_at",
+            "last_message_at",
+            "last_message_text",
+            "message_count",
+            "unread_count",
+            "is_archived",
+            "export_warning",
+            # Chat-list table chrome and status vocabulary.
+            "chats_search_placeholder",
+            "chats_sort_hint",
+            "chats_no_results",
+            "chats_total",
+            "chats_filtered_count",
+            "status_ok",
+            "status_left",
+            "status_readonly",
+            "status_blocked",
+            "status_deleted",
+            "status_deactivated",
+            "status_missing",
+            "yes",
+            "no",
             "reply_to",
             "search",
-            "search_placeholder",
             "date_from",
             "date_to",
             "apply_filters",
@@ -1113,7 +1200,6 @@ class ExportService:
             "archive_summary",
             "range",
             "loading",
-            "no_results",
             "unknown_sender",
             "edited",
             "open_reply",

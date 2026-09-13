@@ -51,6 +51,8 @@ import { cn } from '../utils/cn'
 import { messageFrom, shortDate } from '../utils/format'
 
 const formats = ['json', 'csv', 'html', 'sqlite'] as const
+// The chat-list export has no sqlite writer.
+const chatFormats = ['json', 'csv', 'html'] as const
 const formatIcons = {
   json: Braces,
   csv: Table2,
@@ -142,18 +144,23 @@ function ExportFilesRow({ files, accountId }: { files: string[]; accountId: stri
   const { t } = useTranslation()
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewError, setPreviewError] = useState('')
-  const previewFile = files.find((file) => file.endsWith('.html.zip'))
+  const previewFile =
+    files.find((file) => file.endsWith('.html.zip')) ?? files.find((file) => file.endsWith('.html'))
   async function openPreview(file: string) {
     setPreviewUrl('')
     setPreviewError('')
     try {
       const filename = file.split('/').pop() ?? file
-      const root = filename.replace(/\.html\.zip$/i, '')
       const { token } = await accountRequest<{ token: string }>(
         accountId,
         `/api/v1/exports/preview-token?path=${encodeURIComponent(file)}`,
       )
-      setPreviewUrl(`/api/v1/exports/preview/${token}/${encodeURIComponent(root)}/index.html`)
+      // An archive is navigated to its entry document; a chat-list export is
+      // that document.
+      const target = file.endsWith('.html.zip')
+        ? `${encodeURIComponent(filename.replace(/\.html\.zip$/i, ''))}/index.html`
+        : encodeURIComponent(filename)
+      setPreviewUrl(`/api/v1/exports/preview/${token}/${target}`)
     } catch (error) {
       setPreviewError(messageFrom(error))
     }
@@ -219,8 +226,13 @@ export function ExportsPage() {
     subdirectory: 'messages',
     all_history: false,
   })
+  const [chatForm, setChatForm] = useState({
+    formats: ['json', 'csv', 'html'],
+    subdirectory: 'groups',
+  })
   const [taskForm, setTaskForm] = useState({
     name: '',
+    kind: 'messages' as 'messages' | 'chats',
     chat_id: '',
     initial_start_at: '',
     formats: ['json', 'html', 'sqlite'],
@@ -289,10 +301,19 @@ export function ExportsPage() {
       ),
     onSuccess: (data) => setJobId(data.job_id),
   })
+  const startChatExport = useMutation({
+    mutationFn: () =>
+      accountRequest<{ job_id: string }>(
+        accountId,
+        '/api/v1/exports/jobs/groups',
+        json('POST', chatForm),
+      ),
+    onSuccess: (data) => setJobId(data.job_id),
+  })
   function taskPayload() {
     return {
       ...taskForm,
-      chat_id: Number(taskForm.chat_id),
+      chat_id: taskForm.kind === 'chats' ? null : Number(taskForm.chat_id),
       initial_start_at: taskForm.initial_start_at || null,
     }
   }
@@ -371,21 +392,12 @@ export function ExportsPage() {
       void client.invalidateQueries({ queryKey: ['export-runs'] })
     }
   }
-  function selectFormat(name: string, selected: boolean, target: 'message' | 'task') {
-    if (target === 'message')
-      setMessageForm((form) => ({
-        ...form,
-        formats: selected
-          ? [...form.formats, name]
-          : form.formats.filter((value) => value !== name),
-      }))
-    else
-      setTaskForm((form) => ({
-        ...form,
-        formats: selected
-          ? [...form.formats, name]
-          : form.formats.filter((value) => value !== name),
-      }))
+  function selectFormat(name: string, selected: boolean, target: 'message' | 'task' | 'chats') {
+    const apply = (formats: string[]) =>
+      selected ? [...formats, name] : formats.filter((value) => value !== name)
+    if (target === 'message') setMessageForm((form) => ({ ...form, formats: apply(form.formats) }))
+    else if (target === 'chats') setChatForm((form) => ({ ...form, formats: apply(form.formats) }))
+    else setTaskForm((form) => ({ ...form, formats: apply(form.formats) }))
   }
   function submitTask(event: FormEvent) {
     event.preventDefault()
@@ -395,6 +407,9 @@ export function ExportsPage() {
     setEditingTaskId(null)
     setTaskForm((form) => ({
       ...form,
+      kind: 'messages',
+      formats: [...formats],
+      subdirectory: 'scheduled',
       chat_id: form.chat_id || String(chats.data?.[0]?.id ?? ''),
     }))
     saveTask.reset()
@@ -405,6 +420,7 @@ export function ExportsPage() {
     setEditingTaskId(task.id)
     setTaskForm({
       name: task.name,
+      kind: task.kind ?? 'messages',
       chat_id: String(task.chat_id),
       // Kept as stored: the first-run cursor is derived from this value, so an
       // edit must not reset it.
@@ -632,6 +648,73 @@ export function ExportsPage() {
                 />
               )}
             </Panel>
+            <div className="grid gap-3">
+              <Panel
+                title={t('exports.createChatExport')}
+                meta={<span>{t('exports.chatExportMeta')}</span>}
+              >
+                <form
+                  className="grid gap-4"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    startChatExport.mutate()
+                  }}
+                >
+                  <div className={fieldClass}>
+                    <span>{t('exports.formats')}</span>
+                    <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
+                      {chatFormats.map((format) => {
+                        const FormatIcon = formatIcons[format]
+
+                        return (
+                          <label
+                            className={cn(
+                              formatOptionClass,
+                              chatForm.formats.includes(format)
+                                ? 'border-blue-200 bg-blue-50 text-blue-700'
+                                : 'border-slate-200 bg-slate-50 text-slate-500',
+                            )}
+                            key={format}
+                          >
+                            <input
+                              className="sr-only"
+                              type="checkbox"
+                              checked={chatForm.formats.includes(format)}
+                              onChange={(event) =>
+                                selectFormat(format, event.target.checked, 'chats')
+                              }
+                            />
+                            <FormatIcon className="shrink-0" size={17} />
+                            <strong className="inline-flex items-center leading-none">
+                              {format.toUpperCase()}
+                            </strong>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <label className={fieldClass}>
+                    <span>{t('exports.directory')}</span>
+                    <input
+                      value={chatForm.subdirectory}
+                      onChange={(event) =>
+                        setChatForm({ ...chatForm, subdirectory: event.target.value })
+                      }
+                    />
+                  </label>
+                  {startChatExport.error ? (
+                    <p className={errorClass}>{messageFrom(startChatExport.error)}</p>
+                  ) : null}
+                  <Button
+                    type="submit"
+                    icon={Download}
+                    disabled={startChatExport.isPending || !chatForm.formats.length}
+                  >
+                    {t(startChatExport.isPending ? 'exports.creating' : 'exports.startChatExport')}
+                  </Button>
+                </form>
+              </Panel>
+            </div>
           </div>
         </TabsContent>
         <TabsContent value="scheduled" className="outline-none">
@@ -666,8 +749,16 @@ export function ExportsPage() {
                         <strong className="block text-slate-700">{task.name}</strong>
                       </td>
                       <td>
-                        {task.chat_title || task.chat_id}
-                        <small className="mt-1 block text-xs text-slate-400">{task.chat_id}</small>
+                        {task.kind === 'chats' ? (
+                          t('exports.targetChats')
+                        ) : (
+                          <>
+                            {task.chat_title || task.chat_id}
+                            <small className="mt-1 block text-xs text-slate-400">
+                              {task.chat_id}
+                            </small>
+                          </>
+                        )}
                       </td>
                       <td>
                         {t(`exports.${task.schedule_type}`, { defaultValue: task.schedule_type })}
@@ -800,12 +891,33 @@ export function ExportsPage() {
               />
             </label>
             <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
-              <span>{t('exports.chat')}</span>
-              <ChatSelect
-                value={taskForm.chat_id}
-                onValueChange={(chat_id) => setTaskForm({ ...taskForm, chat_id })}
+              <span>{t('exports.exportTarget')}</span>
+              <Select
+                value={taskForm.kind}
+                onValueChange={(kind) =>
+                  setTaskForm((form) => ({
+                    ...form,
+                    kind: kind as 'messages' | 'chats',
+                    // The chat-list export has no sqlite writer.
+                    formats: kind === 'chats' ? [...chatFormats] : [...formats],
+                    subdirectory: kind === 'chats' ? 'groups' : form.subdirectory,
+                  }))
+                }
+                options={[
+                  { value: 'messages', label: t('exports.targetMessages') },
+                  { value: 'chats', label: t('exports.targetChats') },
+                ]}
               />
             </label>
+            {taskForm.kind === 'messages' ? (
+              <label className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
+                <span>{t('exports.chat')}</span>
+                <ChatSelect
+                  value={taskForm.chat_id}
+                  onValueChange={(chat_id) => setTaskForm({ ...taskForm, chat_id })}
+                />
+              </label>
+            ) : null}
             <label className={fieldClass}>
               <span>{t('exports.frequency')}</span>
               <Select
@@ -857,7 +969,7 @@ export function ExportsPage() {
             <div className={cn(fieldClass, 'col-span-2 max-md:col-span-1')}>
               <span>{t('exports.formats')}</span>
               <div className="grid grid-cols-4 gap-2 max-sm:grid-cols-2">
-                {formats.map((format) => {
+                {(taskForm.kind === 'chats' ? chatFormats : formats).map((format) => {
                   const FormatIcon = formatIcons[format]
 
                   return (
@@ -897,7 +1009,7 @@ export function ExportsPage() {
               onCheckedChange={(enabled) => setTaskForm({ ...taskForm, enabled })}
               label={t('exports.enableTask')}
             />
-            {editingTaskId === null ? (
+            {editingTaskId === null && taskForm.kind === 'messages' ? (
               <Switch
                 checked={taskForm.all_history}
                 onCheckedChange={(all_history) => setTaskForm({ ...taskForm, all_history })}

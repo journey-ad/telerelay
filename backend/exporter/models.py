@@ -17,18 +17,6 @@ def datetime_to_text(value: Optional[datetime]) -> Optional[str]:
 
 
 @dataclass(frozen=True)
-class AdministratorRecord:
-    user_id: int
-    name: str
-    username: Optional[str] = None
-    role: str = "administrator"
-    is_bot: bool = False
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
 class ChatRecord:
     chat_id: int
     title: str
@@ -39,13 +27,20 @@ class ChatRecord:
     is_public: bool
     member_count: Optional[int]
     description: Optional[str]
-    administrators: List[AdministratorRecord] = field(default_factory=list)
     export_warning: Optional[str] = None
+    # Usability as Telegram reports it right now: "ok" for a usable chat, and
+    # otherwise one of CHAT_INVALID_REASONS (blocked, deleted, ...).
+    status: Optional[str] = None
+    is_archived: Optional[bool] = None
+    unread_count: Optional[int] = None
+    joined_at: Optional[str] = None
+    last_message_id: Optional[int] = None
+    last_message_at: Optional[str] = None
+    last_message_text: Optional[str] = None
+    message_count: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        data = asdict(self)
-        data["administrators"] = [admin.to_dict() for admin in self.administrators]
-        return data
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -131,6 +126,8 @@ class ExportTask:
     next_run_at: Optional[str]
     created_at: str
     updated_at: str
+    # "messages" for one chat, "chats" for the account's chat list.
+    kind: str = "messages"
 
 
 @dataclass(frozen=True)

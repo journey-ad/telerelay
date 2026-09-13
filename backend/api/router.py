@@ -1137,14 +1137,19 @@ async def _save_task(
     context: ApplicationContext, payload: ExportTaskPayload, task_id=None
 ):
     account_id = _selected_account_id(context)
-    chat = await asyncio.to_thread(
-        _telegram_chats(context).get_chat, account_id, payload.chat_id
-    )
+    # A chat-list task archives the whole account, so there is no chat to resolve.
+    chat_title = None
+    if payload.kind == "messages":
+        chat = await asyncio.to_thread(
+            _telegram_chats(context).get_chat, account_id, payload.chat_id
+        )
+        chat_title = chat.title
     return _active_exports(context).save_task(
         task_id=task_id,
         name=payload.name,
+        kind=payload.kind,
         chat_id=payload.chat_id,
-        chat_title=chat.title,
+        chat_title=chat_title,
         initial_start_at=payload.initial_start_at,
         formats=payload.formats,
         subdirectory=payload.subdirectory,

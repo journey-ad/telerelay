@@ -211,10 +211,19 @@ class FakeExports:
     def __init__(self):
         self.message_export = None
         self.task_calls = []
+        self.group_export = None
 
     def start_message_export(self, **values):
         self.message_export = values
         return "job-1"
+
+    def start_group_export(self, formats, subdirectory="groups", task_id=None):
+        self.group_export = {
+            "formats": list(formats),
+            "subdirectory": subdirectory,
+            "task_id": task_id,
+        }
+        return "job-groups"
 
     def create_preview_token(self, zip_path):
         return "preview-token-123"
@@ -478,6 +487,44 @@ class ApiContractTests(unittest.TestCase):
             body = self.client.get("/api/v1/update-check").json()
         self.assertFalse(body["update_available"])
         self.assertEqual(body["error"], "HTTP 403")
+
+    def test_chat_list_export_task_needs_no_chat(self):
+        payload = {
+            "name": "Chat list",
+            "kind": "chats",
+            "formats": ["json", "csv"],
+            "subdirectory": "groups",
+            "schedule_type": "daily",
+            "timezone": "Asia/Shanghai",
+        }
+
+        created = self.client.post("/api/v1/exports/tasks", json=payload)
+
+        self.assertEqual(created.status_code, 201, created.text)
+        call = self.exports.task_calls[-1]
+        self.assertEqual(call["kind"], "chats")
+        # No chat is resolved for an account-wide task.
+        self.assertIsNone(call["chat_id"])
+        self.assertIsNone(call["chat_title"])
+
+    def test_message_task_still_requires_a_chat(self):
+        payload = {
+            "name": "No chat",
+            "kind": "messages",
+            "formats": ["json"],
+            "subdirectory": "scheduled",
+        }
+
+        response = self.client.post("/api/v1/exports/tasks", json=payload)
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_group_export_contract(self):
+        response = self.client.post(
+            "/api/v1/exports/jobs/groups",
+            json={"formats": ["json", "csv"], "subdirectory": "groups"},
+        )
+        self.assertIn(response.status_code, (200, 202), response.text)
 
     def test_export_task_create_and_update_contract(self):
         payload = {

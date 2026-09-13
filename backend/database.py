@@ -171,6 +171,9 @@ class ExportTaskRow(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    # "messages" archives one chat; "chats" archives the account's chat list and
+    # leaves chat_id at 0, because no single chat owns that task.
+    kind: Mapped[str] = mapped_column(String, default="messages", nullable=False)
     chat_id: Mapped[int] = mapped_column(Integer, nullable=False)
     chat_title: Mapped[str] = mapped_column(String, nullable=False)
     initial_start_at: Mapped[str] = mapped_column(String, nullable=False)

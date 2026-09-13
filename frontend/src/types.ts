@@ -337,6 +337,7 @@ export interface TelegramChat {
 export interface ExportTask {
   id: number
   name: string
+  kind: 'messages' | 'chats'
   chat_id: number
   chat_title?: string
   initial_start_at?: string | null

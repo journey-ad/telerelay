@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, inspect, select, update
 
 from backend.database import (
     Base,
@@ -68,11 +68,20 @@ class ExportStore:
             Base.metadata.create_all(
                 self.engine, tables=[ExportTaskRow.__table__, ExportRunRow.__table__]
             )
+            inspector = inspect(self.engine)
+            columns = {column["name"] for column in inspector.get_columns("export_tasks")}
+            with self.engine.begin() as connection:
+                if "kind" not in columns:
+                    connection.exec_driver_sql(
+                        "ALTER TABLE export_tasks ADD COLUMN kind"
+                        " VARCHAR NOT NULL DEFAULT 'messages'"
+                    )
 
     @staticmethod
     def _task_from_row(row: ExportTaskRow) -> ExportTask:
         return ExportTask(
             id=row.id, name=row.name, chat_id=row.chat_id, chat_title=row.chat_title,
+            kind=getattr(row, "kind", None) or "messages",
             initial_start_at=row.initial_start_at, formats=tuple(json.loads(row.formats)),
             subdirectory=row.subdirectory, schedule_type=row.schedule_type,
             minute=row.minute, hour=row.hour, weekday=row.weekday, timezone=row.timezone,
@@ -104,12 +113,13 @@ class ExportStore:
         hour: int,
         weekday: int,
         timezone_name: str,
+        kind: str = "messages",
         enabled: bool = True,
     ) -> ExportTask:
         now = _utc_now_text()
         with self._lock, self._session() as session:
             task = ExportTaskRow(
-                name=name, chat_id=chat_id, chat_title=chat_title,
+                name=name, kind=kind, chat_id=chat_id, chat_title=chat_title,
                 initial_start_at=initial_start_at, formats=json.dumps(list(formats)),
                 subdirectory=subdirectory, schedule_type=schedule_type,
                 minute=minute, hour=hour, weekday=weekday, timezone=timezone_name,
@@ -122,6 +132,7 @@ class ExportStore:
     def update_task(self, task_id: int, **values) -> ExportTask:
         allowed = {
             "name",
+            "kind",
             "chat_id",
             "chat_title",
             "initial_start_at",
